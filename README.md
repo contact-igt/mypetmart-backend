@@ -1,4 +1,4 @@
-# MyPetMart Backend
+﻿# MyPetMart Backend
 
 MyPetMart backend is the standalone Node.js and Express API for the customer storefront and admin panel.
 
@@ -9,48 +9,46 @@ MyPetMart backend is the standalone Node.js and Express API for the customer sto
 - Language: TypeScript
 - Module system: ES modules
 - Database target: MySQL 8.4
-- ORM target: Sequelize with migrations and seeders
+- ORM target: Sequelize with Umzug-backed migrations and later Sequelize seeders
 - Image storage target: Cloudflare R2
 - API base path: `/api/v1`
 
-## Stage 4 Capabilities
+## Stage 5 Capabilities
 
-- Express application foundation
-- Versioned `/api/v1` routing
+- Express application foundation with versioned `/api/v1` routing
 - Liveness and readiness health endpoints
 - Typed environment validation with Zod
 - CORS allowlist for storefront and admin origins
 - One central Sequelize/MySQL connection
-- Central Sequelize model initialization
-- Central Sequelize association initialization
-- Eighteen registered Sequelize model classes
-- Explicit table names, snake_case columns, timestamp policy, paranoid policy, enum constants, validation metadata, and index metadata
-- Sensitive model serialization protection for password/session/cart token hashes
-- Server startup initializes model metadata, authenticates MySQL, then listens
-- No automatic schema synchronization
-- No migrations or seeders yet
-- No CRUD/business APIs yet
+- Eighteen registered Sequelize model classes and associations
+- Explicit Umzug migration runner using SequelizeStorage table `SequelizeMeta`
+- Eighteen initial MySQL migrations for the approved business tables
+- Read-only schema verifier for tables, columns, indexes, FKs, checks, generated helper columns, and pending migrations
+- MySQL advisory migration lock: `mypetmart_schema_migrations`
+- Local rollback drill command with production block and required confirmation flag
+- No automatic schema synchronization or startup migrations
+- No seed data, auth, business APIs, R2, payment, shipping, or Swagger/OpenAPI yet
 
-## Registered Models
+## Registered Tables
 
-1. User
-2. AuthSession
-3. Address
-4. Category
-5. Product
-6. ProductVariant
-7. ProductImage
-8. Cart
-9. CartItem
-10. Order
-11. OrderItem
-12. OrderNote
-13. Payment
-14. Shipment
-15. ReturnRequest
-16. ReturnNote
-17. ContactEnquiry
-18. StoreSetting
+1. users
+2. auth_sessions
+3. addresses
+4. categories
+5. products
+6. product_variants
+7. product_images
+8. carts
+9. cart_items
+10. orders
+11. order_items
+12. order_notes
+13. payments
+14. shipments
+15. return_requests
+16. return_notes
+17. contact_enquiries
+18. store_settings
 
 ## Requirements
 
@@ -62,7 +60,7 @@ MyPetMart backend is the standalone Node.js and Express API for the customer sto
 
 Use `.env.example` as the template. The local `.env` file is intentionally ignored by Git.
 
-Required Stage 4 values:
+Required Stage 5 values:
 
 ```bash
 NODE_ENV=development
@@ -95,7 +93,51 @@ npm run build
 npm run start
 npm run verify
 npm run db:check
+npm run db:migrate:status
+npm run db:migrate
+npm run db:schema:verify
+npm run test:migrations
 ```
+
+Rollback commands for a local/disposable database only:
+
+```bash
+npm run db:migrate:down
+npm run db:migrate:down:all -- --confirm-local-schema-reset
+npm run db:schema:verify -- --expect-empty
+```
+
+`db:migrate:down:all` is blocked when `NODE_ENV=production`, requires the confirmation flag, verifies the connected database name, rejects unexpected tables, and drops `SequelizeMeta` after all Stage 5 tables are reverted.
+
+## Migration Operations
+
+Migrations are explicit operator commands. Backend startup authenticates the database but does not call `sequelize.sync()`, does not call Umzug, and does not mutate schema.
+
+The migration runner uses:
+
+- `umzug`
+- Sequelize query interface context
+- `SequelizeStorage` with metadata table `SequelizeMeta`
+- MySQL advisory lock `mypetmart_schema_migrations`
+
+Production migration checklist:
+
+1. Confirm the target database and release version.
+2. Take a database backup or snapshot.
+3. Run `npm run db:migrate:status`.
+4. Run `npm run db:migrate` during the approved deployment window.
+5. Run `npm run db:schema:verify`.
+6. Keep rollback SQL/down-migration plan and backup restore procedure ready before applying changes.
+
+## Stage 5 Schema Decisions
+
+Migration-owned generated helper columns are internal physical constraints, not public API fields:
+
+- `addresses.default_user_id`: enforces one default address per user while allowing multiple non-default addresses.
+- `product_images.primary_product_id`: enforces one primary image per product while allowing multiple non-primary images.
+- `cart_items.variant_identity`: normalizes nullable variants for exact cart-line uniqueness.
+
+Historical order item references use `ON DELETE SET NULL` for optional `product_id` and `product_variant_id` so immutable purchase snapshots survive catalog hard deletes. Audit/history tables use restrictive delete behavior. Cart items cascade only with their cart lifecycle.
 
 ## Health Endpoints
 
@@ -106,59 +148,20 @@ GET /api/v1/health/ready
 
 Readiness authenticates the configured MySQL connection and reports the configured database name without exposing credentials.
 
-## Database Model Directory Structure
+## Database Directory Structure
 
 ```text
 src/database/
   index.ts
   associations.ts
+  commands/
+  migrations/
   tables/
-    index.ts
-    UserTable/
-    AuthSessionTable/
-    AddressTable/
-    CategoryTable/
-    ProductTable/
-    ProductVariantTable/
-    ProductImageTable/
-    CartTable/
-    CartItemTable/
-    OrderTable/
-    OrderItemTable/
-    OrderNoteTable/
-    PaymentTable/
-    ShipmentTable/
-    ReturnRequestTable/
-    ReturnNoteTable/
-    ContactEnquiryTable/
-    StoreSettingTable/
-```
-
-## Model Definitions vs Migrations
-
-Stage 4 model definitions describe the application-side Sequelize metadata: attributes, validation, indexes, table names, timestamps, paranoid behavior, and associations.
-
-They do not create MySQL tables or indexes. Physical schema changes belong to Stage 5 migrations. Backend startup must never call `sequelize.sync()`.
-
-The local database remains connected and schema-empty unless it already contained unrelated tables.
-
-## Startup Flow
-
-```text
-load .env if present
-  -> validate typed environment
-  -> create one Sequelize instance
-  -> initialize model metadata
-  -> initialize associations
-  -> authenticate MySQL connection
-  -> start HTTP listener
-  -> shutdown closes HTTP server and Sequelize
 ```
 
 ## Current Limitations
 
-- No database tables have been created by the backend.
-- No migrations or seeders are implemented yet.
+- No seeders or seed data are implemented yet.
 - Authentication is not implemented yet.
 - Cloudflare R2 is not implemented yet.
 - Payment and shipping providers are not implemented yet.
@@ -167,4 +170,4 @@ load .env if present
 
 ## Next Stage
 
-Stage 5, Initial Sequelize migrations.
+Stage 6, Seeders.

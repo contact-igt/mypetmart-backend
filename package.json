@@ -12,11 +12,17 @@
     "start": "node dist/server.js",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --pool=threads",
+    "test": "vitest run --pool=threads --exclude tests/database/migrations/**",
     "test:watch": "vitest --pool=threads",
     "clean": "node -e \"const fs=require('node:fs'); for (const path of ['dist','coverage']) fs.rmSync(path,{recursive:true,force:true});\"",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
-    "db:check": "tsx src/scripts/db-check.ts"
+    "db:check": "tsx src/scripts/db-check.ts",
+    "db:migrate": "tsx src/database/commands/migrate.ts",
+    "db:migrate:status": "tsx src/database/commands/migrate-status.ts",
+    "db:migrate:down": "tsx src/database/commands/migrate-down.ts",
+    "db:migrate:down:all": "tsx src/database/commands/migrate-down-all.ts",
+    "db:schema:verify": "tsx src/database/commands/verify-schema.ts",
+    "test:migrations": "vitest run tests/database/migrations/migration.integration.test.ts --pool=threads --sequence.concurrent=false"
   },
   "dependencies": {
     "compression": "^1.8.1",
@@ -27,6 +33,7 @@
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "sequelize": "^6.37.8",
+    "umzug": "^3.8.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
