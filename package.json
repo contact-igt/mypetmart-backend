@@ -15,18 +15,24 @@
     "test": "vitest run --pool=threads",
     "test:watch": "vitest --pool=threads",
     "clean": "node -e \"const fs=require('node:fs'); for (const path of ['dist','coverage']) fs.rmSync(path,{recursive:true,force:true});\"",
-    "verify": "npm run lint && npm run typecheck && npm run test && npm run build"
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "db:check": "tsx src/scripts/db-check.ts"
   },
   "dependencies": {
     "compression": "^1.8.1",
+    "cors": "^2.8.6",
     "express": "^5.2.1",
     "helmet": "^8.3.0",
+    "mysql2": "^3.23.2",
     "pino": "^10.3.1",
-    "pino-http": "^11.0.0"
+    "pino-http": "^11.0.0",
+    "sequelize": "^6.37.8",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/compression": "^1.8.1",
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^26.1.2",
     "@types/supertest": "^7.2.1",

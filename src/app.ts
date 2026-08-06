@@ -1,8 +1,10 @@
 import compression from "compression";
+import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 
-import { APPLICATION_CONSTANTS } from "./constants/application.constants.js";
+import { corsOptions } from "./config/cors.config.js";
+import { serverConfig } from "./config/server.config.js";
 import { errorHandlerMiddleware } from "./middlewares/error/error-handler.middleware.js";
 import { notFoundMiddleware } from "./middlewares/error/not-found.middleware.js";
 import { requestIdMiddleware } from "./middlewares/request/request-id.middleware.js";
@@ -17,10 +19,11 @@ app.use(helmet());
 app.use(compression());
 app.use(requestIdMiddleware);
 app.use(httpLogger);
-app.use(express.json({ limit: APPLICATION_CONSTANTS.requestBodyLimit }));
-app.use(express.urlencoded({ extended: false, limit: APPLICATION_CONSTANTS.requestBodyLimit }));
+app.use(cors(corsOptions));
+app.use(express.json({ limit: serverConfig.requestBodyLimit }));
+app.use(express.urlencoded({ extended: false, limit: serverConfig.requestBodyLimit }));
 
-app.use(APPLICATION_CONSTANTS.apiBasePath, v1Router);
+app.use(serverConfig.apiBasePath, v1Router);
 
 app.use(notFoundMiddleware);
 app.use(errorHandlerMiddleware);

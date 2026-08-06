@@ -1,12 +1,12 @@
 import pino from "pino";
 import { pinoHttp } from "pino-http";
 
-import { APPLICATION_CONSTANTS } from "../constants/application.constants.js";
+import { serverConfig } from "../config/server.config.js";
 
 export const logger = pino({
-  level: process.env.LOG_LEVEL ?? "info",
+  level: serverConfig.logLevel,
   base: {
-    service: APPLICATION_CONSTANTS.serviceName
+    service: serverConfig.serviceName
   },
   redact: {
     paths: [
@@ -17,7 +17,9 @@ export const logger = pino({
       "password",
       "*.password",
       "*.token",
-      "*.secret"
+      "*.secret",
+      "*.accessKey",
+      "*.secretKey"
     ],
     censor: "[redacted]"
   }
