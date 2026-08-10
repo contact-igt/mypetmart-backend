@@ -193,6 +193,63 @@ describe("Stage 13 — Products Backend Integration Tests", () => {
     expect(activeRes.body.data.status).toBe("active");
   });
 
+  it("should reject activation of a zero-price simple product", async () => {
+    const createRes = await request(app)
+      .post("/api/v1/admin/products")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        categoryId,
+        name: "Zero Price Toy",
+        sku: "TOY-ZERO-PRICE",
+        description: "Not a free product",
+        price: "0.00",
+        weightGrams: 200,
+        lengthCm: "10.00",
+        widthCm: "10.00",
+        heightCm: "5.00"
+      });
+
+    const activeRes = await request(app)
+      .patch(`/api/v1/admin/products/${createRes.body.data.id}/status`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ status: "active" });
+
+    expect(activeRes.status).toBe(422);
+    expect(activeRes.body.error.code).toBe("PRODUCT_NOT_SELLABLE");
+  });
+
+  it("should roll back a zero-price edit on an active simple product", async () => {
+    const createRes = await request(app)
+      .post("/api/v1/admin/products")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        categoryId,
+        name: "Active Price Guard Toy",
+        sku: "TOY-ACTIVE-PRICE-GUARD",
+        description: "Price cannot be cleared while active",
+        price: "149.00",
+        weightGrams: 200,
+        lengthCm: "10.00",
+        widthCm: "10.00",
+        heightCm: "5.00"
+      });
+    const productId = createRes.body.data.id;
+
+    await request(app)
+      .patch(`/api/v1/admin/products/${productId}/status`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ status: "active" });
+
+    const updateRes = await request(app)
+      .patch(`/api/v1/admin/products/${productId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ price: "0.00" });
+
+    expect(updateRes.status).toBe(422);
+    expect(updateRes.body.error.code).toBe("PRODUCT_NOT_SELLABLE");
+    expect((await Product.findByPk(productId))?.price).toBe("149.00");
+  });
+
   it("should validate category and product pet type compatibility", async () => {
     // Category is 'dog'
     const res = await request(app)

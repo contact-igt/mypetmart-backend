@@ -15,6 +15,7 @@ import {
   LastActiveVariantError,
   ProductCategoryInvalidError,
   ProductNotFoundError,
+  ProductNotSellableError,
   ProductShippingDataInvalidError,
   ProductSkuConflictError,
   ProductSlugConflictError
@@ -112,6 +113,10 @@ export async function validateShippingReadiness(product: Product, transaction?: 
       }
     }
   } else {
+    if (parseFloat(product.price) <= 0) {
+      throw new ProductNotSellableError("A simple product must have a positive selling price before activation.");
+    }
+
     const weight = product.weight_grams;
     const length = product.length_cm;
     const width = product.width_cm;

@@ -238,6 +238,97 @@ describe("Stage 13 — Product Variants Integration Tests", () => {
     expect(reorderRes.body.data[1].id).toBe(v1Id);
   });
 
+  it("should roll back an unshippable active Variant created under an active Product", async () => {
+    await request(app)
+      .patch(`/api/v1/admin/products/${productId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ weightGrams: null, lengthCm: null, widthCm: null, heightCm: null });
+
+    await request(app)
+      .post(`/api/v1/admin/products/${productId}/variants`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        name: "Shipping-ready Variant",
+        sku: "WAND-READY",
+        price: "199.00",
+        weightGrams: 50,
+        lengthCm: "30.00",
+        widthCm: "5.00",
+        heightCm: "5.00"
+      });
+
+    await request(app)
+      .patch(`/api/v1/admin/products/${productId}/status`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ status: "active" });
+
+    const createRes = await request(app)
+      .post(`/api/v1/admin/products/${productId}/variants`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ name: "Unshippable Variant", sku: "WAND-UNSHIPPABLE", price: "149.00" });
+
+    expect(createRes.status).toBe(422);
+    expect(createRes.body.error.code).toBe("PRODUCT_NOT_SHIPPING_READY");
+    expect(await ProductVariant.count({ where: { product_id: productId, sku: "WAND-UNSHIPPABLE" } })).toBe(0);
+  });
+
+  it("should roll back clearing a required shipping override on an active Variant", async () => {
+    await request(app)
+      .patch(`/api/v1/admin/products/${productId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ weightGrams: null, lengthCm: null, widthCm: null, heightCm: null });
+
+    const variantRes = await request(app)
+      .post(`/api/v1/admin/products/${productId}/variants`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        name: "Override Variant",
+        sku: "WAND-OVERRIDE",
+        price: "199.00",
+        weightGrams: 50,
+        lengthCm: "30.00",
+        widthCm: "5.00",
+        heightCm: "5.00"
+      });
+    const variantId = variantRes.body.data.id;
+
+    await request(app)
+      .patch(`/api/v1/admin/products/${productId}/status`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ status: "active" });
+
+    const updateRes = await request(app)
+      .patch(`/api/v1/admin/products/${productId}/variants/${variantId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ weightGrams: null });
+
+    expect(updateRes.status).toBe(422);
+    expect(updateRes.body.error.code).toBe("PRODUCT_NOT_SHIPPING_READY");
+    expect((await ProductVariant.findByPk(variantId))?.weight_grams).toBe(50);
+  });
+
+  it("should roll back Product default edits required by active Variants", async () => {
+    const variantRes = await request(app)
+      .post(`/api/v1/admin/products/${productId}/variants`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ name: "Inherited Variant", sku: "WAND-INHERITED", price: "199.00" });
+    expect(variantRes.status).toBe(201);
+
+    await request(app)
+      .patch(`/api/v1/admin/products/${productId}/status`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ status: "active" });
+
+    const updateRes = await request(app)
+      .patch(`/api/v1/admin/products/${productId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ weightGrams: null });
+
+    expect(updateRes.status).toBe(422);
+    expect(updateRes.body.error.code).toBe("PRODUCT_NOT_SHIPPING_READY");
+    expect((await Product.findByPk(productId))?.weight_grams).toBe(50);
+  });
+
   it("should maintain 0.00 price cache for draft product with zero active variants and block activation", async () => {
     // Create draft variant product
     const draftProd = await request(app)

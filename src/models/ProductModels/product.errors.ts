@@ -68,6 +68,13 @@ export class ProductShippingDataInvalidError extends ProductError {
   }
 }
 
+export class ProductNotSellableError extends ProductError {
+  public constructor(reason: string) {
+    super("PRODUCT_NOT_SELLABLE", reason, 422);
+    this.name = "ProductNotSellableError";
+  }
+}
+
 export class ProductVariantNotFoundError extends ProductError {
   public constructor(variantId: number) {
     super("PRODUCT_VARIANT_NOT_FOUND", `Product variant '${variantId}' was not found.`, 404);

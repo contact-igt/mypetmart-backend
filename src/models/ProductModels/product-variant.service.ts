@@ -13,7 +13,7 @@ import {
   ProductNotFoundError,
   ProductVariantNotFoundError
 } from "./product.errors.js";
-import { refreshVariantProductAggregates } from "./product.service.js";
+import { refreshVariantProductAggregates, validateShippingReadiness } from "./product.service.js";
 import type { CreateVariantInput, ProductVariantJSON, UpdateVariantInput } from "./product.types.js";
 
 export class ProductVariantService {
@@ -55,6 +55,9 @@ export class ProductVariantService {
       );
 
       await refreshVariantProductAggregates(productId, t);
+      if (product.status === "active") {
+        await validateShippingReadiness(product, t);
+      }
 
       return {
         id: variant.id,
@@ -126,6 +129,9 @@ export class ProductVariantService {
       await variant.update(updates, { transaction: t });
 
       await refreshVariantProductAggregates(productId, t);
+      if (product.status === "active") {
+        await validateShippingReadiness(product, t);
+      }
 
       return {
         id: variant.id,

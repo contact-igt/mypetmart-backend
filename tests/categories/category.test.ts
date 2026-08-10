@@ -429,6 +429,20 @@ describe("Stage 12: Categories Backend Integration Tests", () => {
     });
 
     it("should reorder categories transactionally", async () => {
+      const productId = await sequelize.transaction((transaction) =>
+        IdSequenceService.allocateNextId(DATABASE_TABLE_NAMES.products, transaction)
+      );
+      await Product.create({
+        id: productId,
+        category_id: createdCat1Id,
+        name: "Reorder Count Product",
+        slug: "reorder-count-product",
+        sku: "REORDER-COUNT-PRODUCT",
+        description: "Verifies derived response data",
+        price: "10.00",
+        stock: 1
+      });
+
       const reorderPayload = {
         items: [
           { categoryId: createdCat2Id, displayOrder: 1 },
@@ -444,6 +458,9 @@ describe("Stage 12: Categories Backend Integration Tests", () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(Array.isArray(res.body.data)).toBe(true);
+      const counts = new Map(res.body.data.map((category: { id: number; productCount: number }) => [category.id, category.productCount]));
+      expect(counts.get(createdCat1Id)).toBe(1);
+      expect(counts.get(createdCat2Id)).toBe(0);
     });
 
     it("should reject reorder request with duplicate category IDs (400)", async () => {

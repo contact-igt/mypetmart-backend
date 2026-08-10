@@ -21,6 +21,20 @@ import type {
 import { slugify } from "./category.validation.js";
 
 export class CategoryService {
+  private static async getProductCountMap(categoryIds: number[], transaction?: Transaction): Promise<Map<number, number>> {
+    if (categoryIds.length === 0) return new Map();
+
+    const rows = (await Product.findAll({
+      attributes: ["category_id", [sequelize.fn("COUNT", sequelize.col("id")), "count"]],
+      where: { category_id: categoryIds },
+      group: ["category_id"],
+      raw: true,
+      ...(transaction ? { transaction } : {})
+    })) as unknown as Array<{ category_id: number; count: string | number }>;
+
+    return new Map(rows.map((row) => [Number(row.category_id), Number(row.count ?? 0)]));
+  }
+
   public static toStorefrontSummary(category: Category): StorefrontCategorySummary {
     return {
       id: category.id,
@@ -135,17 +149,7 @@ export class CategoryService {
 
     const categoryIds = categories.map((c) => c.id);
 
-    const productCountsRaw = (await Product.findAll({
-      attributes: ["category_id", [sequelize.fn("COUNT", sequelize.col("id")), "count"]],
-      where: { category_id: categoryIds },
-      group: ["category_id"],
-      raw: true
-    })) as unknown as Array<{ category_id: number; count: string | number }>;
-
-    const countMap = new Map<number, number>();
-    for (const row of productCountsRaw) {
-      countMap.set(Number(row.category_id), Number(row.count ?? 0));
-    }
+    const countMap = await this.getProductCountMap(categoryIds);
 
     return categories.map((cat) => this.toAdminItem(cat, countMap.get(cat.id) ?? 0));
   }
@@ -302,7 +306,9 @@ export class CategoryService {
         transaction: t
       });
 
-      return updatedCategories.map((cat) => this.toAdminItem(cat, 0));
+      const countMap = await this.getProductCountMap(categoryIds, t);
+
+      return updatedCategories.map((cat) => this.toAdminItem(cat, countMap.get(cat.id) ?? 0));
     });
   }
 
