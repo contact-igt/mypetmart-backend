@@ -11,6 +11,7 @@ import { ProductImage } from "../../src/database/tables/ProductImageTable/index.
 import { Product } from "../../src/database/tables/ProductTable/index.js";
 import { ProductVariant } from "../../src/database/tables/ProductVariantTable/index.js";
 import { User } from "../../src/database/tables/UserTable/index.js";
+import { ProductImageService } from "../../src/models/ProductModels/product-image.service.js";
 import { PasswordService } from "../../src/services/auth/password.service.js";
 import { SessionService } from "../../src/services/auth/session.service.js";
 import { TokenService } from "../../src/services/auth/token.service.js";
@@ -255,20 +256,17 @@ describe("Catalog rebaseline contract closure", () => {
   it("returns a structured non-leaking error when image reorder includes another product's image", async () => {
     const first = await createProduct();
     const second = await createProduct();
-    const image = await request(app)
-      .post(`/api/v1/admin/products/${second.body.data.id}/images`)
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send({
-        r2Key: `products/${second.body.data.id}/ownership.jpg`,
-        url: `https://cdn.mypetmart.com/products/${second.body.data.id}/ownership.jpg`,
-        alt: "Ownership fixture",
-        contentType: "image/jpeg"
-      });
+    const image = await ProductImageService.attachImage(second.body.data.id, {
+      r2Key: `products/${second.body.data.id}/ownership.jpg`,
+      url: `https://cdn.mypetmart.com/products/${second.body.data.id}/ownership.jpg`,
+      alt: "Ownership fixture",
+      contentType: "image/jpeg"
+    });
 
     const response = await request(app)
       .patch(`/api/v1/admin/products/${first.body.data.id}/images/reorder`)
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ orderedIds: [image.body.data.id] });
+      .send({ orderedIds: [image.id] });
 
     expect(response.status).toBe(400);
     expect(response.body.error.code).toBe("INVALID_PRODUCT_DATA");

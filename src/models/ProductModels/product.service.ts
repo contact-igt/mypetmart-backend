@@ -5,9 +5,11 @@ import { DATABASE_TABLE_NAMES } from "../../constants/database.constants.js";
 import { sequelize } from "../../database/index.js";
 import { Category } from "../../database/tables/CategoryTable/index.js";
 import { ProductImage } from "../../database/tables/ProductImageTable/index.js";
+import { objectStorageService } from "../../services/object-storage/object-storage.service.js";
 import { Product } from "../../database/tables/ProductTable/index.js";
 import { ProductVariant } from "../../database/tables/ProductVariantTable/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
+import { logger } from "../../utils/logger.js";
 import { formatMoney, isCompareAtPriceValid } from "../../utils/product-money.js";
 import { generateDuplicateSku, generateDuplicateSlug, normalizeAndValidateSku, reserveSku } from "./catalog-sku.service.js";
 import {
@@ -34,6 +36,22 @@ import type {
   UpdateProductInput
 } from "./product.types.js";
 import { slugify } from "./product.validation.js";
+
+async function deleteProductImageObjects(images: ProductImage[]): Promise<void> {
+  let firstFailure: Error | undefined;
+  for (const image of images) {
+    try {
+      await objectStorageService.deleteProductImageObject(image.product_id, image.r2_key);
+    } catch (error) {
+      firstFailure ??= error instanceof Error ? error : new Error("Cloudflare R2 image cleanup failed.");
+      logger.error(
+        { err: error, productId: image.product_id, imageId: image.id, objectKey: image.r2_key, cleanupPending: true },
+        "Product deletion committed but R2 image object cleanup remains pending"
+      );
+    }
+  }
+  if (firstFailure) throw firstFailure;
+}
 
 // Helper: Refresh cached aggregates (price, compare_at_price, stock) on a Variant Product
 export async function refreshVariantProductAggregates(productId: number, transaction?: Transaction): Promise<void> {
@@ -133,7 +151,7 @@ export function formatImageDTO(img: ProductImage, includeR2Key = false): Product
   return {
     id: img.id,
     ...(includeR2Key ? { r2Key: img.r2_key } : {}),
-    url: img.url,
+    url: objectStorageService.getPublicUrl(img.r2_key) ?? img.url,
     alt: img.alt,
     contentType: img.content_type,
     sizeBytes: img.size_bytes,
@@ -708,11 +726,16 @@ export class ProductService {
       throw new ProductNotFoundError(id);
     }
 
+    const productImages = await ProductImage.findAll({ where: { product_id: id } });
+    if (productImages.length > 0) objectStorageService.ensureConfigured();
+
     await sequelize.transaction(async (t) => {
       await ProductVariant.destroy({ where: { product_id: id }, transaction: t });
       await ProductImage.destroy({ where: { product_id: id }, transaction: t });
       await product.destroy({ transaction: t });
     });
+
+    await deleteProductImageObjects(productImages);
   }
 
   // Duplicate Product
@@ -826,11 +849,15 @@ export class ProductService {
       throw new InvalidProductDataError("One or more Product IDs in bulk delete payload do not exist.");
     }
 
-    return await sequelize.transaction(async (t) => {
+    const productImages = await ProductImage.findAll({ where: { product_id: uniqueIds } });
+    if (productImages.length > 0) objectStorageService.ensureConfigured();
+
+    const affected = await sequelize.transaction(async (t) => {
       await ProductVariant.destroy({ where: { product_id: uniqueIds }, transaction: t });
       await ProductImage.destroy({ where: { product_id: uniqueIds }, transaction: t });
-      const affected = await Product.destroy({ where: { id: uniqueIds }, transaction: t });
-      return affected;
+      return await Product.destroy({ where: { id: uniqueIds }, transaction: t });
     });
+    await deleteProductImageObjects(productImages);
+    return affected;
   }
 }

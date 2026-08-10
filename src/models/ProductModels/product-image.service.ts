@@ -5,11 +5,59 @@ import { sequelize } from "../../database/index.js";
 import { ProductImage } from "../../database/tables/ProductImageTable/index.js";
 import { Product } from "../../database/tables/ProductTable/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
+import { objectStorageService, type ObjectStorageService } from "../../services/object-storage/object-storage.service.js";
+import { logger } from "../../utils/logger.js";
 import { InvalidProductDataError, ProductImageNotFoundError, ProductNotFoundError } from "./product.errors.js";
 import { formatImageDTO } from "./product.service.js";
-import type { AttachImageInput, ProductImageJSON, UpdateImageInput } from "./product.types.js";
+import type {
+  AttachImageInput,
+  CompleteProductImageUploadInput,
+  PresignProductImageInput,
+  ProductImageJSON,
+  UpdateImageInput
+} from "./product.types.js";
 
 export class ProductImageService {
+  static async authorizeUpload(
+    productId: number,
+    input: PresignProductImageInput,
+    storage: ObjectStorageService = objectStorageService
+  ) {
+    const product = await Product.findByPk(productId);
+    if (!product) throw new ProductNotFoundError(productId);
+    return await storage.presignProductImageUpload(productId, input);
+  }
+
+  static async completeUpload(
+    productId: number,
+    input: CompleteProductImageUploadInput,
+    storage: ObjectStorageService = objectStorageService
+  ): Promise<ProductImageJSON> {
+    const product = await Product.findByPk(productId);
+    if (!product) throw new ProductNotFoundError(productId);
+
+    const verified = await storage.verifyProductImageUpload(productId, input.uploadToken);
+    const existing = await ProductImage.findOne({ where: { r2_key: verified.r2Key } });
+    if (existing) {
+      if (existing.product_id !== productId) {
+        throw new InvalidProductDataError("The verified image object is already attached to another product.");
+      }
+      return formatImageDTO(existing, true);
+    }
+
+    return await ProductImageService.attachImage(productId, {
+      r2Key: verified.r2Key,
+      url: verified.publicUrl,
+      alt: input.alt,
+      contentType: verified.contentType,
+      sizeBytes: verified.sizeBytes,
+      ...(input.width !== undefined ? { width: input.width } : {}),
+      ...(input.height !== undefined ? { height: input.height } : {}),
+      ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+      ...(input.isPrimary !== undefined ? { isPrimary: input.isPrimary } : {})
+    });
+  }
+
   // Attach Image Metadata to Product
   static async attachImage(productId: number, input: AttachImageInput): Promise<ProductImageJSON> {
     const product = await Product.findByPk(productId);
@@ -89,7 +137,11 @@ export class ProductImageService {
   }
 
   // Delete Image Metadata (Soft Delete & Auto-promote next image if primary)
-  static async deleteImage(productId: number, imageId: number): Promise<void> {
+  static async deleteImage(
+    productId: number,
+    imageId: number,
+    storage: ObjectStorageService = objectStorageService
+  ): Promise<void> {
     const product = await Product.findByPk(productId);
     if (!product) {
       throw new ProductNotFoundError(productId);
@@ -102,6 +154,9 @@ export class ProductImageService {
     if (!image) {
       throw new ProductImageNotFoundError(imageId);
     }
+
+    storage.ensureConfigured();
+    const objectKey = image.r2_key;
 
     await sequelize.transaction(async (t) => {
       await Product.findByPk(productId, { transaction: t, lock: true });
@@ -131,6 +186,16 @@ export class ProductImageService {
         }
       }
     });
+
+    try {
+      await storage.deleteProductImageObject(productId, objectKey);
+    } catch (error) {
+      logger.error(
+        { err: error, productId, imageId, objectKey, cleanupPending: true },
+        "Product image metadata was deleted but R2 object cleanup remains pending"
+      );
+      throw error;
+    }
   }
 
   // Reorder Product Images

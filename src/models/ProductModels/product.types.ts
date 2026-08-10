@@ -179,6 +179,21 @@ export type AttachImageInput = {
   isPrimary?: boolean;
 };
 
+export type PresignProductImageInput = {
+  originalFilename: string;
+  contentType: string;
+  sizeBytes: number;
+};
+
+export type CompleteProductImageUploadInput = {
+  uploadToken: string;
+  alt: string;
+  width?: number | null;
+  height?: number | null;
+  sortOrder?: number;
+  isPrimary?: boolean;
+};
+
 export type UpdateImageInput = {
   alt?: string;
   sortOrder?: number;

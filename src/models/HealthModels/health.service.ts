@@ -1,6 +1,7 @@
 import { databaseConfig } from "../../config/database.config.js";
 import { serverConfig } from "../../config/server.config.js";
 import { checkDatabaseConnection } from "../../database/index.js";
+import { objectStorageService } from "../../services/object-storage/object-storage.service.js";
 
 export type HealthStatus = {
   status: "ok";
@@ -15,6 +16,10 @@ export type ReadinessStatus = {
   database: {
     status: "connected";
     name: string;
+  };
+  objectStorage: {
+    provider: "cloudflare_r2";
+    status: "configured" | "not_configured";
   };
   timestamp: string;
 };
@@ -42,6 +47,7 @@ export async function getReadinessStatus(): Promise<ReadinessStatus | undefined>
       status: "connected",
       name: databaseConfig.database
     },
+    objectStorage: objectStorageService.getReadiness(),
     timestamp: new Date().toISOString()
   };
 }

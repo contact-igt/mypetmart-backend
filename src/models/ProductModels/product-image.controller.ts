@@ -2,14 +2,32 @@ import type { NextFunction, Request, Response } from "express";
 
 import { sendSuccess } from "../../utils/api-response.js";
 import { ProductImageService } from "./product-image.service.js";
-import type { AttachImageInput, UpdateImageInput } from "./product.types.js";
-import { attachImageSchema, parseImageId, parseProductId, reorderSchema, updateImageSchema } from "./product.validation.js";
+import type { CompleteProductImageUploadInput, UpdateImageInput } from "./product.types.js";
+import {
+  completeProductImageUploadSchema,
+  parseImageId,
+  parseProductId,
+  presignProductImageSchema,
+  reorderSchema,
+  updateImageSchema
+} from "./product.validation.js";
 
-export async function handleAdminAttachImage(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function handleAdminPresignImageUpload(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const productId = parseProductId(req.params.productId);
-    const validated = attachImageSchema.parse(req.body) as AttachImageInput;
-    const image = await ProductImageService.attachImage(productId, validated);
+    const validated = presignProductImageSchema.parse(req.body);
+    const authorization = await ProductImageService.authorizeUpload(productId, validated);
+    sendSuccess(res, 200, authorization);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleAdminCompleteImageUpload(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const productId = parseProductId(req.params.productId);
+    const validated = completeProductImageUploadSchema.parse(req.body) as CompleteProductImageUploadInput;
+    const image = await ProductImageService.completeUpload(productId, validated);
     sendSuccess(res, 201, image);
   } catch (error) {
     next(error);
@@ -33,7 +51,7 @@ export async function handleAdminDeleteImage(req: Request, res: Response, next: 
     const productId = parseProductId(req.params.productId);
     const imageId = parseImageId(req.params.imageId);
     await ProductImageService.deleteImage(productId, imageId);
-    sendSuccess(res, 200, { message: "Image metadata soft-deleted successfully" });
+    sendSuccess(res, 200, { message: "Image metadata and its R2 object were deleted successfully" });
   } catch (error) {
     next(error);
   }

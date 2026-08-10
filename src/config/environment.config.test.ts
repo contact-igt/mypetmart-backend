@@ -62,7 +62,7 @@ describe("environment configuration", () => {
     expect(config.DB_LOGGING).toBe(true);
   });
 
-  it("allows future R2/payment/shipping integration settings to remain optional", () => {
+  it("allows R2 to remain explicitly not configured", () => {
     const config = parseEnvironmentConfig(
       createValidEnvironment({
         R2_SECRET_ACCESS_KEY: "",
@@ -72,6 +72,47 @@ describe("environment configuration", () => {
     );
 
     expect(config.R2_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(config.R2_UPLOAD_URL_EXPIRY_SECONDS).toBe(300);
+    expect(config.R2_MAX_IMAGE_SIZE_BYTES).toBe(10 * 1024 * 1024);
+  });
+
+  it("requires a complete coherent R2 configuration when any R2 credential is present", () => {
+    expect(() => parseEnvironmentConfig(createValidEnvironment({ R2_ACCOUNT_ID: "account-only" }))).toThrow(EnvironmentValidationError);
+  });
+
+  it("accepts a complete R2 configuration and bounded upload policy", () => {
+    const config = parseEnvironmentConfig(
+      createValidEnvironment({
+        R2_ACCOUNT_ID: "account-id",
+        R2_ACCESS_KEY_ID: "access-key-id",
+        R2_SECRET_ACCESS_KEY: "secret-access-key",
+        R2_BUCKET: "mypetmart-images",
+        R2_PUBLIC_BASE_URL: "https://images.mypetmart.test",
+        R2_UPLOAD_INTENT_SECRET: "r2_intent_secret_that_is_at_least_thirty_two_chars",
+        R2_UPLOAD_URL_EXPIRY_SECONDS: "120",
+        R2_MAX_IMAGE_SIZE_BYTES: "5000000"
+      })
+    );
+    expect(config.R2_UPLOAD_URL_EXPIRY_SECONDS).toBe(120);
+    expect(config.R2_MAX_IMAGE_SIZE_BYTES).toBe(5_000_000);
+  });
+
+  it("rejects production R2 placeholder secrets without echoing their values", () => {
+    const environment = createValidEnvironment({
+      NODE_ENV: "production",
+      R2_ACCOUNT_ID: "account-id",
+      R2_ACCESS_KEY_ID: "replace_with_r2_access_key_id",
+      R2_SECRET_ACCESS_KEY: "replace_with_r2_secret_access_key",
+      R2_BUCKET: "mypetmart-images",
+      R2_PUBLIC_BASE_URL: "https://images.mypetmart.test",
+      R2_UPLOAD_INTENT_SECRET: "replace_with_a_long_random_r2_upload_intent_secret"
+    });
+    expect(() => parseEnvironmentConfig(environment)).toThrow(EnvironmentValidationError);
+    try {
+      parseEnvironmentConfig(environment);
+    } catch (error) {
+      expect(String(error)).not.toContain("replace_with_r2_secret_access_key");
+    }
   });
 
   it("rejects identical JWT secrets", () => {

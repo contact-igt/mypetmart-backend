@@ -258,6 +258,29 @@ export const attachImageSchema = z.object({
   isPrimary: z.boolean().optional().default(false)
 });
 
+export const presignProductImageSchema = z.object({
+  originalFilename: z
+    .string()
+    .trim()
+    .min(1, "Original filename is required")
+    .max(255)
+    .refine(
+      (value) => !Array.from(value).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127),
+      "Original filename contains invalid control characters"
+    ),
+  contentType: z.string().trim().toLowerCase().min(1).max(100),
+  sizeBytes: z.number().int().positive()
+});
+
+export const completeProductImageUploadSchema = z.object({
+  uploadToken: z.string().trim().min(32).max(4096),
+  alt: z.string().trim().min(1, "Image alt text is required").max(255),
+  width: z.number().int().min(1).max(20_000).nullable().optional(),
+  height: z.number().int().min(1).max(20_000).nullable().optional(),
+  sortOrder: z.number().int().min(0).optional(),
+  isPrimary: z.boolean().optional()
+});
+
 export const updateImageSchema = z.object({
   alt: z.string().trim().min(1).max(255).optional(),
   sortOrder: z.number().int().min(0).optional(),

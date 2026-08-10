@@ -9,6 +9,7 @@ const SECRET_FIELD_NAMES = [
   "AUTH_OTP_HMAC_SECRET",
   "SMTP_PASS",
   "R2_SECRET_ACCESS_KEY",
+  "R2_UPLOAD_INTENT_SECRET",
   "PAYMENT_KEY_SECRET",
   "PAYMENT_WEBHOOK_SECRET",
   "SHIPPING_API_KEY",
@@ -18,8 +19,20 @@ const SECRET_FIELD_NAMES = [
 
 const PLACEHOLDER_VALUES = new Set([
   "replace_with_a_long_random_secret",
-  "replace_with_a_different_long_random_secret"
+  "replace_with_a_different_long_random_secret",
+  "replace_with_r2_access_key_id",
+  "replace_with_r2_secret_access_key",
+  "replace_with_a_long_random_r2_upload_intent_secret"
 ]);
+
+const R2_REQUIRED_FIELDS = [
+  "R2_ACCOUNT_ID",
+  "R2_ACCESS_KEY_ID",
+  "R2_SECRET_ACCESS_KEY",
+  "R2_BUCKET",
+  "R2_PUBLIC_BASE_URL",
+  "R2_UPLOAD_INTENT_SECRET"
+] as const;
 
 function loadLocalEnvironmentFile(): void {
   if (existsSync(".env")) {
@@ -154,7 +167,14 @@ const environmentSchema = z
     R2_ACCESS_KEY_ID: optionalTrimmedStringSchema,
     R2_SECRET_ACCESS_KEY: optionalTrimmedStringSchema,
     R2_BUCKET: optionalTrimmedStringSchema,
-    R2_PUBLIC_BASE_URL: optionalTrimmedStringSchema,
+    R2_PUBLIC_BASE_URL: z.preprocess(optionalString, z.url("R2_PUBLIC_BASE_URL must be a valid URL.").optional()),
+    R2_UPLOAD_INTENT_SECRET: z.preprocess(
+      optionalString,
+      z.string().min(32, "R2_UPLOAD_INTENT_SECRET must be at least 32 characters.").optional()
+    ),
+    R2_UPLOAD_URL_EXPIRY_SECONDS: integerFromString("R2_UPLOAD_URL_EXPIRY_SECONDS", 60, 900).default(300),
+    R2_MAX_IMAGE_SIZE_BYTES: integerFromString("R2_MAX_IMAGE_SIZE_BYTES", 1, 25 * 1024 * 1024).default(10 * 1024 * 1024),
+    R2_ORPHAN_GRACE_HOURS: integerFromString("R2_ORPHAN_GRACE_HOURS", 1, 168).default(24),
 
     PAYMENT_PROVIDER: optionalTrimmedStringSchema,
     PAYMENT_KEY_ID: optionalTrimmedStringSchema,
@@ -180,6 +200,19 @@ const environmentSchema = z
         path: ["JWT_REFRESH_SECRET"],
         message: "JWT_REFRESH_SECRET must be different from JWT_ACCESS_SECRET."
       });
+    }
+
+    const configuredR2Fields = R2_REQUIRED_FIELDS.filter((fieldName) => value[fieldName] !== undefined);
+    if (configuredR2Fields.length > 0 && configuredR2Fields.length < R2_REQUIRED_FIELDS.length) {
+      for (const fieldName of R2_REQUIRED_FIELDS) {
+        if (value[fieldName] === undefined) {
+          context.addIssue({
+            code: "custom",
+            path: [fieldName],
+            message: `${fieldName} is required when Cloudflare R2 is configured.`
+          });
+        }
+      }
     }
 
     if (value.NODE_ENV === "production") {
