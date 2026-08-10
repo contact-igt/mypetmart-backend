@@ -1,13 +1,13 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
 import { DATABASE_TABLE_NAMES, MONEY_PRECISION, MONEY_SCALE } from "../../../constants/database.constants.js";
-import { isModelInitialized, timestampModelOptions, uuidPrimaryKeyAttribute } from "../table-helpers.js";
+import { isModelInitialized, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { Cart } from "../CartTable/index.js";
 import type { Product } from "../ProductTable/index.js";
 import type { ProductVariant } from "../ProductVariantTable/index.js";
 
 export class CartItem extends Model<InferAttributes<CartItem>, InferCreationAttributes<CartItem>> {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
   declare cart_id: ForeignKey<Cart["id"]>;
   declare product_id: ForeignKey<Product["id"]>;
   declare product_variant_id: ForeignKey<ProductVariant["id"]> | null;
@@ -28,10 +28,10 @@ export function initializeCartItemTable(sequelize: Sequelize): typeof CartItem {
 
   CartItem.init(
     {
-      id: uuidPrimaryKeyAttribute(),
-      cart_id: { type: DataTypes.UUID, allowNull: false },
-      product_id: { type: DataTypes.UUID, allowNull: false },
-      product_variant_id: { type: DataTypes.UUID, allowNull: true },
+      id: numericPrimaryKeyAttribute(),
+      cart_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+      product_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+      product_variant_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
       quantity: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1, validate: { min: 1 } },
       unit_price_snapshot: { type: DataTypes.DECIMAL(MONEY_PRECISION, MONEY_SCALE), allowNull: true },
       created_at: DataTypes.DATE,

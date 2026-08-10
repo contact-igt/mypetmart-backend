@@ -1,10 +1,10 @@
 import { DataTypes, Model, type CreationOptional, type InferAttributes, type InferCreationAttributes, type Sequelize } from "sequelize";
 
 import { DATABASE_TABLE_NAMES } from "../../../constants/database.constants.js";
-import { isModelInitialized, timestampModelOptions, uuidPrimaryKeyAttribute } from "../table-helpers.js";
+import { isModelInitialized, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 
 export class StoreSetting extends Model<InferAttributes<StoreSetting>, InferCreationAttributes<StoreSetting>> {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
   declare setting_key: string;
   declare setting_value: unknown;
   declare is_public: CreationOptional<boolean>;
@@ -19,7 +19,7 @@ export function initializeStoreSettingTable(sequelize: Sequelize): typeof StoreS
 
   StoreSetting.init(
     {
-      id: uuidPrimaryKeyAttribute(),
+      id: numericPrimaryKeyAttribute(),
       setting_key: { type: DataTypes.STRING(120), allowNull: false, unique: true, validate: { notEmpty: true, len: [1, 120] } },
       setting_value: { type: DataTypes.JSON, allowNull: false },
       is_public: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },

@@ -1,11 +1,11 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
 import { DATABASE_TABLE_NAMES, DEFAULT_COUNTRY_CODE } from "../../../constants/database.constants.js";
-import { isModelInitialized, timestampModelOptions, uuidPrimaryKeyAttribute } from "../table-helpers.js";
+import { isModelInitialized, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { User } from "../UserTable/index.js";
 
 export class Address extends Model<InferAttributes<Address>, InferCreationAttributes<Address>> {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
   declare user_id: ForeignKey<User["id"]>;
   declare label: string | null;
   declare recipient_name: string;
@@ -31,8 +31,8 @@ export function initializeAddressTable(sequelize: Sequelize): typeof Address {
 
   Address.init(
     {
-      id: uuidPrimaryKeyAttribute(),
-      user_id: { type: DataTypes.UUID, allowNull: false },
+      id: numericPrimaryKeyAttribute(),
+      user_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
       label: { type: DataTypes.STRING(80), allowNull: true, validate: { len: [0, 80] } },
       recipient_name: { type: DataTypes.STRING(160), allowNull: false, validate: { notEmpty: true, len: [1, 160] } },
       phone: { type: DataTypes.STRING(32), allowNull: false, validate: { notEmpty: true, len: [1, 32] } },

@@ -6,6 +6,8 @@ import { z } from "zod";
 const SECRET_FIELD_NAMES = [
   "JWT_ACCESS_SECRET",
   "JWT_REFRESH_SECRET",
+  "AUTH_OTP_HMAC_SECRET",
+  "SMTP_PASS",
   "R2_SECRET_ACCESS_KEY",
   "PAYMENT_KEY_SECRET",
   "PAYMENT_WEBHOOK_SECRET",
@@ -40,6 +42,13 @@ function requiredString(name: string) {
   return z.preprocess(
     (value) => (typeof value === "string" ? value.trim() : value),
     z.string({ error: `${name} is required.` }).min(1, `${name} is required.`)
+  );
+}
+
+function requiredStringWithMinLength(name: string, minLength: number) {
+  return z.preprocess(
+    (value) => (typeof value === "string" ? value.trim() : value),
+    z.string({ error: `${name} is required.` }).min(minLength, `${name} must be at least ${minLength} characters.`)
   );
 }
 
@@ -113,10 +122,33 @@ const environmentSchema = z
     DB_POOL_ACQUIRE_MS: integerFromString("DB_POOL_ACQUIRE_MS", 1000, 120000).default(30000),
     DB_POOL_IDLE_MS: integerFromString("DB_POOL_IDLE_MS", 1000, 120000).default(10000),
 
-    JWT_ACCESS_SECRET: optionalTrimmedStringSchema,
-    JWT_REFRESH_SECRET: optionalTrimmedStringSchema,
-    JWT_ACCESS_EXPIRES_IN: optionalTrimmedStringSchema.default("15m"),
-    JWT_REFRESH_EXPIRES_IN: optionalTrimmedStringSchema.default("30d"),
+    JWT_ACCESS_SECRET: requiredStringWithMinLength("JWT_ACCESS_SECRET", 32),
+    JWT_REFRESH_SECRET: requiredStringWithMinLength("JWT_REFRESH_SECRET", 32),
+    JWT_ACCESS_EXPIRES_IN: requiredString("JWT_ACCESS_EXPIRES_IN").default("15m"),
+    JWT_REFRESH_EXPIRES_IN: requiredString("JWT_REFRESH_EXPIRES_IN").default("30d"),
+    JWT_ISSUER: requiredString("JWT_ISSUER").default("mypetmart-backend"),
+    JWT_CUSTOMER_AUDIENCE: requiredString("JWT_CUSTOMER_AUDIENCE").default("mypetmart-storefront"),
+    JWT_ADMIN_AUDIENCE: requiredString("JWT_ADMIN_AUDIENCE").default("mypetmart-admin"),
+    CUSTOMER_REFRESH_COOKIE_NAME: requiredString("CUSTOMER_REFRESH_COOKIE_NAME").default("mypetmart_customer_refresh"),
+    ADMIN_REFRESH_COOKIE_NAME: requiredString("ADMIN_REFRESH_COOKIE_NAME").default("mypetmart_admin_refresh"),
+    AUTH_RATE_LIMIT_WINDOW_MS: integerFromString("AUTH_RATE_LIMIT_WINDOW_MS", 1, 24 * 60 * 60 * 1000).default(900000),
+    AUTH_RATE_LIMIT_MAX: integerFromString("AUTH_RATE_LIMIT_MAX", 1, 10000).default(20),
+
+    AUTH_OTP_HMAC_SECRET: requiredStringWithMinLength("AUTH_OTP_HMAC_SECRET", 32).default("c4d9a6e1f3b2a8d5c7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3"),
+    AUTH_OTP_TTL_SECONDS: integerFromString("AUTH_OTP_TTL_SECONDS", 60, 86400).default(600),
+    AUTH_OTP_MAX_ATTEMPTS: integerFromString("AUTH_OTP_MAX_ATTEMPTS", 1, 50).default(5),
+    AUTH_OTP_RESEND_COOLDOWN_SECONDS: integerFromString("AUTH_OTP_RESEND_COOLDOWN_SECONDS", 0, 3600).default(60),
+
+    PASSWORD_RESET_TOKEN_TTL_SECONDS: integerFromString("PASSWORD_RESET_TOKEN_TTL_SECONDS", 60, 86400).default(900),
+    PASSWORD_RESET_COOKIE_NAME: requiredString("PASSWORD_RESET_COOKIE_NAME").default("mypetmart_password_reset"),
+
+    SMTP_HOST: optionalTrimmedStringSchema,
+    SMTP_PORT: integerFromString("SMTP_PORT", 1, 65535).default(587),
+    SMTP_SECURE: booleanFromString("SMTP_SECURE").default(false),
+    SMTP_USER: optionalTrimmedStringSchema,
+    SMTP_PASS: optionalTrimmedStringSchema,
+    MAIL_FROM_NAME: requiredString("MAIL_FROM_NAME").default("MyPetMart"),
+    MAIL_FROM_EMAIL: requiredString("MAIL_FROM_EMAIL").default("noreply@mypetmart.com"),
 
     R2_ACCOUNT_ID: optionalTrimmedStringSchema,
     R2_ACCESS_KEY_ID: optionalTrimmedStringSchema,
@@ -139,6 +171,14 @@ const environmentSchema = z
         code: "custom",
         path: ["DB_POOL_MIN"],
         message: "DB_POOL_MIN must be less than or equal to DB_POOL_MAX."
+      });
+    }
+
+    if (value.JWT_ACCESS_SECRET === value.JWT_REFRESH_SECRET) {
+      context.addIssue({
+        code: "custom",
+        path: ["JWT_REFRESH_SECRET"],
+        message: "JWT_REFRESH_SECRET must be different from JWT_ACCESS_SECRET."
       });
     }
 

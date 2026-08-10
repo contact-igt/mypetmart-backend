@@ -1,11 +1,11 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
 import { DATABASE_TABLE_NAMES } from "../../../constants/database.constants.js";
-import { isModelInitialized, timestampModelOptions, uuidPrimaryKeyAttribute } from "../table-helpers.js";
+import { isModelInitialized, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { Product } from "../ProductTable/index.js";
 
 export class ProductImage extends Model<InferAttributes<ProductImage>, InferCreationAttributes<ProductImage>> {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
   declare product_id: ForeignKey<Product["id"]>;
   declare r2_key: string;
   declare url: string;
@@ -30,8 +30,8 @@ export function initializeProductImageTable(sequelize: Sequelize): typeof Produc
 
   ProductImage.init(
     {
-      id: uuidPrimaryKeyAttribute(),
-      product_id: { type: DataTypes.UUID, allowNull: false },
+      id: numericPrimaryKeyAttribute(),
+      product_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
       r2_key: { type: DataTypes.STRING(512), allowNull: false, unique: true, validate: { notEmpty: true, len: [1, 512] } },
       url: { type: DataTypes.STRING(1000), allowNull: false, validate: { notEmpty: true, len: [1, 1000], isUrl: true } },
       alt: { type: DataTypes.STRING(255), allowNull: false, validate: { notEmpty: true, len: [1, 255] } },

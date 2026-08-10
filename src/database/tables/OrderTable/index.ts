@@ -1,7 +1,7 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
 import { DATABASE_TABLE_NAMES, DEFAULT_COUNTRY_CODE, DEFAULT_CURRENCY_CODE, FULFILMENT_STATUS_VALUES, MONEY_PRECISION, MONEY_SCALE, ORDER_STATUS_VALUES, PAYMENT_STATUS_VALUES, type FulfilmentStatus, type OrderStatus, type PaymentStatus } from "../../../constants/database.constants.js";
-import { isModelInitialized, isNonNegativeDecimal, timestampModelOptions, uuidPrimaryKeyAttribute } from "../table-helpers.js";
+import { isModelInitialized, isNonNegativeDecimal, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { OrderItem } from "../OrderItemTable/index.js";
 import type { OrderNote } from "../OrderNoteTable/index.js";
 import type { Payment } from "../PaymentTable/index.js";
@@ -10,8 +10,8 @@ import type { Shipment } from "../ShipmentTable/index.js";
 import type { User } from "../UserTable/index.js";
 
 export class Order extends Model<InferAttributes<Order>, InferCreationAttributes<Order>> {
-  declare id: CreationOptional<string>;
-  declare order_number: string;
+  declare id: CreationOptional<number>;
+  declare order_number: CreationOptional<string>;
   declare user_id: ForeignKey<User["id"]>;
   declare status: CreationOptional<OrderStatus>;
   declare payment_status: CreationOptional<PaymentStatus>;
@@ -56,9 +56,9 @@ export function initializeOrderTable(sequelize: Sequelize): typeof Order {
 
   Order.init(
     {
-      id: uuidPrimaryKeyAttribute(),
-      order_number: { type: DataTypes.STRING(50), allowNull: false, unique: true, validate: { notEmpty: true, len: [1, 50] } },
-      user_id: { type: DataTypes.UUID, allowNull: false },
+      id: numericPrimaryKeyAttribute(),
+      order_number: { type: DataTypes.STRING(50), allowNull: false, unique: true },
+      user_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
       status: { type: DataTypes.ENUM(...ORDER_STATUS_VALUES), allowNull: false, defaultValue: "pending" },
       payment_status: { type: DataTypes.ENUM(...PAYMENT_STATUS_VALUES), allowNull: false, defaultValue: "pending" },
       fulfilment_status: { type: DataTypes.ENUM(...FULFILMENT_STATUS_VALUES), allowNull: false, defaultValue: "unfulfilled" },
@@ -92,6 +92,8 @@ export function initializeOrderTable(sequelize: Sequelize): typeof Order {
       ]
     }
   );
+
+
 
   return Order;
 }

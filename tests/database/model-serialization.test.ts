@@ -20,7 +20,7 @@ describe("sensitive model serialization", () => {
 
   it("excludes AuthSession.token_hash from ordinary JSON serialization", () => {
     const session = databaseModels.AuthSession.build({
-      user_id: "11111111-1111-4111-8111-111111111111",
+      user_id: 1,
       session_type: "customer",
       token_hash: "stored-token-hash",
       user_agent: null,

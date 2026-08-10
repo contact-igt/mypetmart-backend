@@ -50,7 +50,7 @@ describe("GET /api/v1/health/ready", () => {
         service: "mypetmart-backend",
         database: {
           status: "connected",
-          name: "mypetmart"
+          name: sequelize.config.database || "mypetmart"
         }
       },
       meta: {

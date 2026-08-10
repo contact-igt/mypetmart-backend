@@ -2,11 +2,11 @@ import { DataTypes, type Model, type ModelAttributes, type ModelStatic } from "s
 
 export type SerializedModel = Record<string, unknown>;
 
-export function uuidPrimaryKeyAttribute() {
+export function numericPrimaryKeyAttribute() {
   return {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER.UNSIGNED,
     allowNull: false,
+    autoIncrement: false,
     primaryKey: true,
     unique: true
   };

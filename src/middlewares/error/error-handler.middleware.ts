@@ -1,8 +1,11 @@
 import type { ErrorRequestHandler } from "express";
+import { ZodError } from "zod";
 
 import { ApplicationError } from "../../utils/application-error.js";
 import { sendError } from "../../utils/api-response.js";
 import { logger } from "../../utils/logger.js";
+
+import { ValidationError } from "../../models/AuthModels/auth.errors.js";
 
 const INTERNAL_ERROR_MESSAGE = "An unexpected error occurred.";
 const PAYLOAD_TOO_LARGE_MESSAGE = "The request body is too large.";
@@ -21,6 +24,16 @@ function isBodyParserError(error: unknown): error is BodyParserError {
 function toApplicationError(error: unknown): ApplicationError {
   if (error instanceof ApplicationError) {
     return error;
+  }
+
+  if (error instanceof ZodError) {
+    const formatted: Record<string, string[]> = {};
+    for (const issue of error.issues) {
+      const field = issue.path.join(".") || "body";
+      if (!formatted[field]) formatted[field] = [];
+      formatted[field].push(issue.message);
+    }
+    return new ValidationError(formatted);
   }
 
   if (isBodyParserError(error)) {
@@ -65,5 +78,6 @@ export const errorHandlerMiddleware: ErrorRequestHandler = (error, request, resp
     );
   }
 
-  sendError(response, applicationError.statusCode, applicationError.code, applicationError.publicMessage);
+  const errors = applicationError instanceof ValidationError ? applicationError.errors : undefined;
+  sendError(response, applicationError.statusCode, applicationError.code, applicationError.publicMessage, errors);
 };

@@ -7,7 +7,7 @@ export const corsConfig = Object.freeze({
   allowedOrigins: Object.freeze([environmentConfig.STOREFRONT_ORIGIN, environmentConfig.ADMIN_ORIGIN]),
   allowedMethods: Object.freeze(["GET", "POST", "PATCH", "DELETE", "OPTIONS"]),
   allowedHeaders: Object.freeze(["Content-Type", "Authorization", "X-Request-Id"]),
-  credentials: false
+  credentials: true
 });
 
 function isAllowedOrigin(origin: string): boolean {

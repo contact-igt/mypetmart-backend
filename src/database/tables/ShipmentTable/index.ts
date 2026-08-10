@@ -1,11 +1,11 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
 import { DATABASE_TABLE_NAMES, SHIPMENT_STATUS_VALUES, SHIPPING_METHOD_VALUES, type ShipmentStatus, type ShippingMethod } from "../../../constants/database.constants.js";
-import { isModelInitialized, timestampModelOptions, uuidPrimaryKeyAttribute } from "../table-helpers.js";
+import { isModelInitialized, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { Order } from "../OrderTable/index.js";
 
 export class Shipment extends Model<InferAttributes<Shipment>, InferCreationAttributes<Shipment>> {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
   declare order_id: ForeignKey<Order["id"]>;
   declare method: CreationOptional<ShippingMethod>;
   declare carrier: string | null;
@@ -28,8 +28,8 @@ export function initializeShipmentTable(sequelize: Sequelize): typeof Shipment {
 
   Shipment.init(
     {
-      id: uuidPrimaryKeyAttribute(),
-      order_id: { type: DataTypes.UUID, allowNull: false },
+      id: numericPrimaryKeyAttribute(),
+      order_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
       method: { type: DataTypes.ENUM(...SHIPPING_METHOD_VALUES), allowNull: false, defaultValue: "standard" },
       carrier: { type: DataTypes.STRING(120), allowNull: true, validate: { len: [0, 120] } },
       tracking_number: { type: DataTypes.STRING(120), allowNull: true, validate: { len: [0, 120] } },

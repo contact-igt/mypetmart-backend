@@ -6,3 +6,9 @@ coverage/
 !.env.example
 *.log
 .DS_Store
+
+# local database audits and backups
+/audit-db*.mjs
+/update-schema-def*.cjs
+/mypetmart_backup.*
+/user_baseline.json

@@ -1,11 +1,11 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
 import { DATABASE_TABLE_NAMES, DEFAULT_CURRENCY_CODE, MONEY_PRECISION, MONEY_SCALE, PAYMENT_STATUS_VALUES, type PaymentStatus } from "../../../constants/database.constants.js";
-import { isModelInitialized, isNonNegativeDecimal, timestampModelOptions, uuidPrimaryKeyAttribute } from "../table-helpers.js";
+import { isModelInitialized, isNonNegativeDecimal, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { Order } from "../OrderTable/index.js";
 
 export class Payment extends Model<InferAttributes<Payment>, InferCreationAttributes<Payment>> {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
   declare order_id: ForeignKey<Order["id"]>;
   declare provider: string;
   declare provider_order_id: string | null;
@@ -31,8 +31,8 @@ export function initializePaymentTable(sequelize: Sequelize): typeof Payment {
 
   Payment.init(
     {
-      id: uuidPrimaryKeyAttribute(),
-      order_id: { type: DataTypes.UUID, allowNull: false },
+      id: numericPrimaryKeyAttribute(),
+      order_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
       provider: { type: DataTypes.STRING(80), allowNull: false, validate: { notEmpty: true, len: [1, 80] } },
       provider_order_id: { type: DataTypes.STRING(190), allowNull: true, unique: true, validate: { len: [0, 190] } },
       provider_payment_id: { type: DataTypes.STRING(190), allowNull: true, unique: true, validate: { len: [0, 190] } },

@@ -9,6 +9,7 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
 
   const {
     Address,
+    AuthChallenge,
     AuthSession,
     Cart,
     CartItem,
@@ -16,6 +17,7 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
     Order,
     OrderItem,
     OrderNote,
+    PasswordResetToken,
     Payment,
     Product,
     ProductImage,
@@ -25,6 +27,12 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
     Shipment,
     User
   } = models;
+
+  User.hasMany(AuthChallenge, { foreignKey: "user_id", as: "authChallenges" });
+  AuthChallenge.belongsTo(User, { foreignKey: "user_id", as: "user" });
+
+  User.hasMany(PasswordResetToken, { foreignKey: "user_id", as: "passwordResetTokens" });
+  PasswordResetToken.belongsTo(User, { foreignKey: "user_id", as: "user" });
 
   User.hasMany(AuthSession, { foreignKey: "user_id", as: "authSessions" });
   AuthSession.belongsTo(User, { foreignKey: "user_id", as: "user" });

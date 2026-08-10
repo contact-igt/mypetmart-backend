@@ -1,4 +1,4 @@
-﻿import { readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 
 import type { Sequelize } from "sequelize";
 import { describe, expect, it, vi } from "vitest";
@@ -13,10 +13,11 @@ import {
   withMigrationLock
 } from "../../src/database/migrations/migrator.js";
 import { INITIAL_SCHEMA_TABLES } from "../../src/database/migrations/schema-definition.js";
+import { databaseConfig } from "../../src/config/database.config.js";
 
 describe("Stage 5 migration runner", () => {
   it("discovers the initial schema migrations in numeric order", () => {
-    expect(INITIAL_SCHEMA_TABLES).toHaveLength(18);
+    expect(INITIAL_SCHEMA_TABLES).toHaveLength(20);
     expect(expectedBusinessTableNames()).toEqual([
       "users",
       "auth_sessions",
@@ -35,7 +36,9 @@ describe("Stage 5 migration runner", () => {
       "return_requests",
       "return_notes",
       "contact_enquiries",
-      "store_settings"
+      "store_settings",
+      "auth_challenges",
+      "password_reset_tokens"
     ]);
     expect(MIGRATION_FILE_NAMES).toEqual([...MIGRATION_FILE_NAMES].sort());
   });
@@ -45,10 +48,10 @@ describe("Stage 5 migration runner", () => {
   });
 
   it("blocks down-all in production and without local confirmation", () => {
-    expect(() => assertDownAllAllowed({ environment: "production", databaseName: "mypetmart", confirmed: true })).toThrow(UnsafeMigrationResetError);
-    expect(() => assertDownAllAllowed({ environment: "development", databaseName: "mypetmart", confirmed: false })).toThrow(UnsafeMigrationResetError);
+    expect(() => assertDownAllAllowed({ environment: "production", databaseName: databaseConfig.database, confirmed: true })).toThrow(UnsafeMigrationResetError);
+    expect(() => assertDownAllAllowed({ environment: "development", databaseName: databaseConfig.database, confirmed: false })).toThrow(UnsafeMigrationResetError);
     expect(() => assertDownAllAllowed({ environment: "development", databaseName: "not_mypetmart", confirmed: true })).toThrow(UnsafeMigrationResetError);
-    expect(() => assertDownAllAllowed({ environment: "development", databaseName: "mypetmart", confirmed: true })).not.toThrow();
+    expect(() => assertDownAllAllowed({ environment: "development", databaseName: databaseConfig.database, confirmed: true })).not.toThrow();
   });
 
   it("fails when the advisory lock cannot be acquired", async () => {

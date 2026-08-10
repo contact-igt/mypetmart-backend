@@ -22,6 +22,8 @@ function createValidEnvironment(overrides: TestEnvironment = {}): TestEnvironmen
     DB_POOL_MIN: "0",
     DB_POOL_ACQUIRE_MS: "30000",
     DB_POOL_IDLE_MS: "10000",
+    JWT_ACCESS_SECRET: "access_secret_should_be_at_least_32_characters_long",
+    JWT_REFRESH_SECRET: "refresh_secret_should_be_at_least_32_characters_long",
     ...overrides
   };
 }
@@ -60,23 +62,31 @@ describe("environment configuration", () => {
     expect(config.DB_LOGGING).toBe(true);
   });
 
-  it("allows future integration settings to remain optional", () => {
+  it("allows future R2/payment/shipping integration settings to remain optional", () => {
     const config = parseEnvironmentConfig(
       createValidEnvironment({
-        JWT_ACCESS_SECRET: "",
-        JWT_REFRESH_SECRET: "",
         R2_SECRET_ACCESS_KEY: "",
         PAYMENT_KEY_SECRET: "",
         SHIPPING_API_KEY: ""
       })
     );
 
-    expect(config.JWT_ACCESS_SECRET).toBeUndefined();
     expect(config.R2_SECRET_ACCESS_KEY).toBeUndefined();
   });
 
+  it("rejects identical JWT secrets", () => {
+    expect(() =>
+      parseEnvironmentConfig(
+        createValidEnvironment({
+          JWT_ACCESS_SECRET: "identical_secret_of_sufficient_length_here_123",
+          JWT_REFRESH_SECRET: "identical_secret_of_sufficient_length_here_123"
+        })
+      )
+    ).toThrow(EnvironmentValidationError);
+  });
+
   it("does not include secret values in validation error output", () => {
-    const secretValue = "this_secret_must_not_be_echoed";
+    const secretValue = "this_secret_must_not_be_echoed_at_all_123456789";
 
     expect(() => parseEnvironmentConfig(createValidEnvironment({ PORT: "invalid", JWT_ACCESS_SECRET: secretValue }))).toThrow(
       EnvironmentValidationError

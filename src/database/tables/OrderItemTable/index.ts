@@ -1,14 +1,14 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
 import { DATABASE_TABLE_NAMES, MONEY_PRECISION, MONEY_SCALE } from "../../../constants/database.constants.js";
-import { isModelInitialized, isNonNegativeDecimal, timestampModelOptions, uuidPrimaryKeyAttribute } from "../table-helpers.js";
+import { isModelInitialized, isNonNegativeDecimal, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { Order } from "../OrderTable/index.js";
 import type { Product } from "../ProductTable/index.js";
 import type { ProductVariant } from "../ProductVariantTable/index.js";
 import type { ReturnRequest } from "../ReturnRequestTable/index.js";
 
 export class OrderItem extends Model<InferAttributes<OrderItem>, InferCreationAttributes<OrderItem>> {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
   declare order_id: ForeignKey<Order["id"]>;
   declare product_id: ForeignKey<Product["id"]> | null;
   declare product_variant_id: ForeignKey<ProductVariant["id"]> | null;
@@ -44,10 +44,10 @@ export function initializeOrderItemTable(sequelize: Sequelize): typeof OrderItem
 
   OrderItem.init(
     {
-      id: uuidPrimaryKeyAttribute(),
-      order_id: { type: DataTypes.UUID, allowNull: false },
-      product_id: { type: DataTypes.UUID, allowNull: true },
-      product_variant_id: { type: DataTypes.UUID, allowNull: true },
+      id: numericPrimaryKeyAttribute(),
+      order_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+      product_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+      product_variant_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
       product_name: { type: DataTypes.STRING(190), allowNull: false, validate: { notEmpty: true, len: [1, 190] } },
       product_sku: { type: DataTypes.STRING(100), allowNull: false, validate: { notEmpty: true, len: [1, 100] } },
       variant_name: { type: DataTypes.STRING(160), allowNull: true, validate: { len: [0, 160] } },

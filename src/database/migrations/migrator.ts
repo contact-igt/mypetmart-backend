@@ -1,4 +1,4 @@
-﻿import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
 import { QueryTypes, type Sequelize } from "sequelize";
@@ -11,7 +11,20 @@ import { EXPECTED_BUSINESS_TABLE_NAMES, INITIAL_SCHEMA_TABLES } from "./schema-d
 
 export const MIGRATION_LOCK_NAME = "mypetmart_schema_migrations";
 export const MIGRATION_LOCK_TIMEOUT_SECONDS = 10;
-export const MIGRATION_FILE_NAMES = INITIAL_SCHEMA_TABLES.map((table) => `${table.migrationName}.ts`);
+// Alter migrations run after all CREATE TABLE migrations and are not tied to a specific table.
+const SCHEMA_ALTER_MIGRATION_NAMES = [
+  "019-add-super-admin-role.ts",
+  "022-create-id-sequences.ts",
+  "023-remove-auto-increment.ts",
+  "024-add-shipping-dimensions-to-products.ts",
+  "025-create-catalog-sku-reservations.ts",
+  "026-allow-zero-product-price-cache.ts"
+] as const;
+export const MIGRATION_FILE_NAMES = [
+  ...INITIAL_SCHEMA_TABLES.map((table) => `${table.migrationName}.ts`),
+  ...SCHEMA_ALTER_MIGRATION_NAMES
+].sort((left, right) => left.localeCompare(right));
+export const EXPECTED_MIGRATION_COUNT = MIGRATION_FILE_NAMES.length;
 
 type LockRow = { lock_acquired: number | null };
 type ReleaseRow = { lock_released: number | null };
@@ -61,8 +74,7 @@ export function migrationSourceDirectory(): string {
 
 export function createMigrator(database: Sequelize = sequelize): Umzug<MigrationContext> {
   assertUniqueMigrationNames(MIGRATION_FILE_NAMES);
-  const extension = path.extname(fileURLToPath(import.meta.url)) === ".ts" ? "ts" : "js";
-  const glob = `${migrationSourceDirectory()}/[0-9][0-9][0-9]-*.${extension}`;
+  const glob = `${migrationSourceDirectory()}/[0-9][0-9][0-9]-*.{ts,js}`;
 
   return new Umzug<MigrationContext>({
     migrations: {
@@ -136,13 +148,9 @@ export async function getMigrationStatus(database: Sequelize = sequelize): Promi
 }
 
 export function expectedMigrationNames(): string[] {
-  return INITIAL_SCHEMA_TABLES.map((table) => `${table.migrationName}.${path.extname(fileURLToPath(import.meta.url)) === ".ts" ? "ts" : "js"}`);
+  return [...MIGRATION_FILE_NAMES];
 }
 
 export function expectedBusinessTableNames(): string[] {
   return [...EXPECTED_BUSINESS_TABLE_NAMES];
 }
-
-
-
-

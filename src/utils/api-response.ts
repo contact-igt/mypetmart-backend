@@ -17,6 +17,7 @@ type ErrorResponse = {
   error: {
     code: string;
     message: string;
+    errors?: Record<string, string[]>;
   };
   meta: ResponseMeta;
 };
@@ -37,12 +38,19 @@ export function sendSuccess<TData>(response: Response, statusCode: number, data:
   response.status(statusCode).json(body);
 }
 
-export function sendError(response: Response, statusCode: number, code: string, message: string): void {
+export function sendError(
+  response: Response,
+  statusCode: number,
+  code: string,
+  message: string,
+  errors?: Record<string, string[]>
+): void {
   const body: ErrorResponse = {
     success: false,
     error: {
       code,
-      message
+      message,
+      ...(errors ? { errors } : {})
     },
     meta: {
       requestId: getResponseRequestId(response)

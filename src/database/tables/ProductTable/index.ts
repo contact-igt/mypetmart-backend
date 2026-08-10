@@ -1,7 +1,7 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
 import { DATABASE_TABLE_NAMES, MONEY_PRECISION, MONEY_SCALE, PET_TYPE_VALUES, PRODUCT_STATUS_VALUES, type PetType, type ProductStatus } from "../../../constants/database.constants.js";
-import { assertNullableCompareAtPrice, isModelInitialized, isPositiveDecimal, timestampModelOptions, uuidPrimaryKeyAttribute } from "../table-helpers.js";
+import { assertNullableCompareAtPrice, isModelInitialized, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { CartItem } from "../CartItemTable/index.js";
 import type { Category } from "../CategoryTable/index.js";
 import type { OrderItem } from "../OrderItemTable/index.js";
@@ -9,7 +9,7 @@ import type { ProductImage } from "../ProductImageTable/index.js";
 import type { ProductVariant } from "../ProductVariantTable/index.js";
 
 export class Product extends Model<InferAttributes<Product>, InferCreationAttributes<Product>> {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
   declare category_id: ForeignKey<Category["id"]>;
   declare name: string;
   declare slug: string;
@@ -25,6 +25,10 @@ export class Product extends Model<InferAttributes<Product>, InferCreationAttrib
   declare tags: unknown[] | null;
   declare meta_title: string | null;
   declare meta_description: string | null;
+  declare weight_grams: number | null;
+  declare length_cm: string | null;
+  declare width_cm: string | null;
+  declare height_cm: string | null;
   declare created_at: CreationOptional<Date>;
   declare updated_at: CreationOptional<Date>;
   declare deleted_at: CreationOptional<Date | null>;
@@ -43,8 +47,8 @@ export function initializeProductTable(sequelize: Sequelize): typeof Product {
 
   Product.init(
     {
-      id: uuidPrimaryKeyAttribute(),
-      category_id: { type: DataTypes.UUID, allowNull: false },
+      id: numericPrimaryKeyAttribute(),
+      category_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
       name: { type: DataTypes.STRING(190), allowNull: false, validate: { notEmpty: true, len: [1, 190] } },
       slug: { type: DataTypes.STRING(190), allowNull: false, unique: true, validate: { notEmpty: true, len: [1, 190] } },
       sku: { type: DataTypes.STRING(100), allowNull: false, unique: true, validate: { notEmpty: true, len: [1, 100] } },
@@ -55,9 +59,10 @@ export function initializeProductTable(sequelize: Sequelize): typeof Product {
         type: DataTypes.DECIMAL(MONEY_PRECISION, MONEY_SCALE),
         allowNull: false,
         validate: {
-          isPositive(value: string) {
-            if (!isPositiveDecimal(value)) {
-              throw new Error("Product price must be positive.");
+          isNonNegative(value: string) {
+            const num = parseFloat(value);
+            if (isNaN(num) || num < 0) {
+              throw new Error("Product price must be non-negative.");
             }
           }
         }
@@ -69,6 +74,10 @@ export function initializeProductTable(sequelize: Sequelize): typeof Product {
       tags: { type: DataTypes.JSON, allowNull: true },
       meta_title: { type: DataTypes.STRING(190), allowNull: true, validate: { len: [0, 190] } },
       meta_description: { type: DataTypes.STRING(255), allowNull: true, validate: { len: [0, 255] } },
+      weight_grams: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true, validate: { min: 1 } },
+      length_cm: { type: DataTypes.DECIMAL(8, 2), allowNull: true, validate: { min: 0.01 } },
+      width_cm: { type: DataTypes.DECIMAL(8, 2), allowNull: true, validate: { min: 0.01 } },
+      height_cm: { type: DataTypes.DECIMAL(8, 2), allowNull: true, validate: { min: 0.01 } },
       created_at: DataTypes.DATE,
       updated_at: DataTypes.DATE,
       deleted_at: DataTypes.DATE

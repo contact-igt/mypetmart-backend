@@ -1,12 +1,12 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
 import { CART_STATUS_VALUES, DATABASE_TABLE_NAMES, type CartStatus } from "../../../constants/database.constants.js";
-import { isModelInitialized, removeSensitiveFields, timestampModelOptions, uuidPrimaryKeyAttribute, type SerializedModel } from "../table-helpers.js";
+import { isModelInitialized, removeSensitiveFields, timestampModelOptions, numericPrimaryKeyAttribute, type SerializedModel } from "../table-helpers.js";
 import type { CartItem } from "../CartItemTable/index.js";
 import type { User } from "../UserTable/index.js";
 
 export class Cart extends Model<InferAttributes<Cart>, InferCreationAttributes<Cart>> {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
   declare user_id: ForeignKey<User["id"]> | null;
   declare guest_token_hash: string | null;
   declare status: CreationOptional<CartStatus>;
@@ -29,8 +29,8 @@ export function initializeCartTable(sequelize: Sequelize): typeof Cart {
 
   Cart.init(
     {
-      id: uuidPrimaryKeyAttribute(),
-      user_id: { type: DataTypes.UUID, allowNull: true },
+      id: numericPrimaryKeyAttribute(),
+      user_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
       guest_token_hash: { type: DataTypes.STRING(255), allowNull: true, unique: true, validate: { len: [0, 255] } },
       status: { type: DataTypes.ENUM(...CART_STATUS_VALUES), allowNull: false, defaultValue: "active" },
       expires_at: { type: DataTypes.DATE, allowNull: true },

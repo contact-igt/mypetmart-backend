@@ -16,10 +16,15 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   returnRequests: "return_requests",
   returnNotes: "return_notes",
   contactEnquiries: "contact_enquiries",
-  storeSettings: "store_settings"
+  storeSettings: "store_settings",
+  authChallenges: "auth_challenges",
+  passwordResetTokens: "password_reset_tokens"
 });
 
-export const USER_ROLE_VALUES = ["customer", "admin"] as const;
+export const AUTH_CHALLENGE_PURPOSE_VALUES = ["email_verification", "password_reset"] as const;
+export type AuthChallengePurpose = (typeof AUTH_CHALLENGE_PURPOSE_VALUES)[number];
+
+export const USER_ROLE_VALUES = ["customer", "admin", "super_admin"] as const;
 export type UserRole = (typeof USER_ROLE_VALUES)[number];
 
 export const USER_STATUS_VALUES = ["active", "disabled"] as const;

@@ -1,9 +1,11 @@
-﻿import { QueryTypes, type Sequelize } from "sequelize";
+import { QueryTypes, type Sequelize } from "sequelize";
 
 import { sequelize } from "../index.js";
+import { SEEDER_METADATA_TABLE_NAME } from "../seeders/seeder.constants.js";
 import { createMigrator } from "./migrator.js";
 import {
   EXPECTED_BUSINESS_TABLE_NAMES,
+  EXPECTED_INFRASTRUCTURE_TABLE_NAMES,
   EXPECTED_METADATA_TABLE_NAME,
   expectedChecksFor,
   expectedColumnsFor,
@@ -43,7 +45,7 @@ async function getActualTables(database: Sequelize): Promise<string[]> {
 
 export async function assertOnlyExpectedSchemaTables(database: Sequelize = sequelize): Promise<void> {
   const actualTables = await getActualTables(database);
-  const expected = new Set([...EXPECTED_BUSINESS_TABLE_NAMES, EXPECTED_METADATA_TABLE_NAME].map((table) => table.toLowerCase()));
+  const expected = new Set([...EXPECTED_BUSINESS_TABLE_NAMES, ...EXPECTED_INFRASTRUCTURE_TABLE_NAMES, EXPECTED_METADATA_TABLE_NAME, SEEDER_METADATA_TABLE_NAME].map((table) => table.toLowerCase()));
   const unexpected = actualTables.filter((table) => !expected.has(table.toLowerCase()));
   if (unexpected.length > 0) {
     throw new Error(`Unexpected tables found in schema: ${unexpected.join(", ")}`);
@@ -60,10 +62,13 @@ export async function verifySchema(options: { database?: Sequelize; expectEmpty?
     return { ok: failures.length === 0, failures };
   }
 
-  const expectedTables = normalizeList([...EXPECTED_BUSINESS_TABLE_NAMES, EXPECTED_METADATA_TABLE_NAME].map((table) => table.toLowerCase()));
+  const requiredTables = normalizeList([...EXPECTED_BUSINESS_TABLE_NAMES, ...EXPECTED_INFRASTRUCTURE_TABLE_NAMES, EXPECTED_METADATA_TABLE_NAME].map((table) => table.toLowerCase()));
+  const allowedTables = new Set([...requiredTables, SEEDER_METADATA_TABLE_NAME.toLowerCase()]);
   const actualSortedTables = normalizeList(actualTables.map((table) => table.toLowerCase()));
-  if (actualSortedTables.join("|") !== expectedTables.join("|")) {
-    failures.push(`Table mismatch. Expected ${expectedTables.join(", ")}; found ${actualSortedTables.join(", ")}`);
+  const missingTables = requiredTables.filter((table) => !actualSortedTables.includes(table));
+  const unexpectedTables = actualSortedTables.filter((table) => !allowedTables.has(table));
+  if (missingTables.length > 0 || unexpectedTables.length > 0) {
+    failures.push(`Table mismatch. Missing ${missingTables.join(", ") || "none"}; unexpected ${unexpectedTables.join(", ") || "none"}; found ${actualSortedTables.join(", ")}`);
   }
 
   const pending = await createMigrator(database).pending();
@@ -111,6 +116,9 @@ export async function verifySchema(options: { database?: Sequelize; expectEmpty?
       if (expectedColumn.generated && !actual.extra.toLowerCase().includes("generated")) {
         failures.push(`Column ${table.tableName}.${expectedColumn.name} should be generated, found extra '${actual.extra}'`);
       }
+      if (expectedColumn.autoIncrement !== actual.extra.toLowerCase().includes("auto_increment")) {
+        failures.push(`Column ${table.tableName}.${expectedColumn.name} autoIncrement mismatch: expected ${expectedColumn.autoIncrement}, found '${actual.extra}'`);
+      }
     }
 
     for (const expectedIndex of expectedIndexesFor(table)) {
@@ -148,7 +156,80 @@ export async function verifySchema(options: { database?: Sequelize; expectEmpty?
     }
   }
 
+  // Extra verification checks for ordered ID architecture (Numeric PK/FK, id_sequences)
+  for (const table of INITIAL_SCHEMA_TABLES) {
+    const pkColumnName = "id";
+    const actualPk = actualColumnMap.get(`${table.tableName}.${pkColumnName}`);
+    if (!actualPk) {
+      failures.push(`Table ${table.tableName} is missing its primary key column 'id'`);
+    } else {
+      if (actualPk.dataType.toLowerCase() !== "int") {
+        failures.push(`Primary key ${table.tableName}.id type expected int, found ${actualPk.dataType}`);
+      }
+    }
+
+    for (const expectedForeignKey of expectedForeignKeysFor(table)) {
+      const actualFk = actualColumnMap.get(`${table.tableName}.${expectedForeignKey.column}`);
+      if (actualFk && actualFk.dataType.toLowerCase() !== "int") {
+        failures.push(`Foreign key ${table.tableName}.${expectedForeignKey.column} type expected int, found ${actualFk.dataType}`);
+      }
+    }
+  }
+
+  for (const row of columns) {
+    const isPk = row.columnName === "id";
+    const isFk = row.columnName.endsWith("_id");
+    if ((isPk || isFk) && row.dataType.toLowerCase() === "char") {
+      failures.push(`Column ${row.tableName}.${row.columnName} has forbidden UUID type (char)`);
+    }
+  }
+
+  // Verify id_sequences table exists and has entries for all business tables
+  const idSeqRows = await database.query<{ sequence_name: string; next_value: number }>(
+    "SELECT sequence_name, next_value FROM id_sequences ORDER BY sequence_name",
+    { type: QueryTypes.SELECT }
+  ).catch(() => [] as { sequence_name: string; next_value: number }[]);
+
+  for (const table of INITIAL_SCHEMA_TABLES) {
+    const seqRow = idSeqRows.find((r) => r.sequence_name === table.tableName);
+    if (!seqRow) {
+      failures.push(`Missing id_sequences entry for table '${table.tableName}'`);
+    }
+  }
+
+  // Verify catalog_sku_reservations consistency
+  const skuReservations = await database.query<{ sku: string; entity_type: string; entity_id: number }>(
+    "SELECT sku, entity_type, entity_id FROM catalog_sku_reservations",
+    { type: QueryTypes.SELECT }
+  ).catch(() => [] as { sku: string; entity_type: string; entity_id: number }[]);
+
+  const productSkus = await database.query<{ id: number; sku: string }>(
+    "SELECT id, sku FROM products",
+    { type: QueryTypes.SELECT }
+  ).catch(() => [] as { id: number; sku: string }[]);
+
+  for (const p of productSkus) {
+    if (!p.sku) continue;
+    const normalized = p.sku.trim().toUpperCase();
+    const match = skuReservations.find((r) => r.sku === normalized && r.entity_type === "product" && r.entity_id === p.id);
+    if (!match) {
+      failures.push(`Missing catalog_sku_reservations entry for Product id=${p.id} sku='${normalized}'`);
+    }
+  }
+
+  const variantSkus = await database.query<{ id: number; sku: string }>(
+    "SELECT id, sku FROM product_variants",
+    { type: QueryTypes.SELECT }
+  ).catch(() => [] as { id: number; sku: string }[]);
+
+  for (const v of variantSkus) {
+    if (!v.sku) continue;
+    const normalized = v.sku.trim().toUpperCase();
+    const match = skuReservations.find((r) => r.sku === normalized && r.entity_type === "variant" && r.entity_id === v.id);
+    if (!match) {
+      failures.push(`Missing catalog_sku_reservations entry for ProductVariant id=${v.id} sku='${normalized}'`);
+    }
+  }
+
   return { ok: failures.length === 0, failures };
 }
-
-

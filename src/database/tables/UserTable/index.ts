@@ -1,7 +1,7 @@
 import { DataTypes, Model, type CreationOptional, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
 import { DATABASE_TABLE_NAMES, USER_ROLE_VALUES, USER_STATUS_VALUES, type UserRole, type UserStatus } from "../../../constants/database.constants.js";
-import { isModelInitialized, removeSensitiveFields, timestampModelOptions, uuidPrimaryKeyAttribute, type SerializedModel } from "../table-helpers.js";
+import { isModelInitialized, removeSensitiveFields, timestampModelOptions, numericPrimaryKeyAttribute, type SerializedModel } from "../table-helpers.js";
 import type { Address } from "../AddressTable/index.js";
 import type { AuthSession } from "../AuthSessionTable/index.js";
 import type { Cart } from "../CartTable/index.js";
@@ -11,7 +11,8 @@ import type { ReturnNote } from "../ReturnNoteTable/index.js";
 import type { ReturnRequest } from "../ReturnRequestTable/index.js";
 
 export class User extends Model<InferAttributes<User>, InferCreationAttributes<User>> {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
+  declare reference_code: CreationOptional<string>;
   declare role: CreationOptional<UserRole>;
   declare status: CreationOptional<UserStatus>;
   declare name: string;
@@ -44,7 +45,12 @@ export function initializeUserTable(sequelize: Sequelize): typeof User {
 
   User.init(
     {
-      id: uuidPrimaryKeyAttribute(),
+      id: numericPrimaryKeyAttribute(),
+      reference_code: {
+        type: DataTypes.STRING(50),
+        allowNull: false,
+        unique: true
+      },
       role: {
         type: DataTypes.ENUM(...USER_ROLE_VALUES),
         allowNull: false,
@@ -96,6 +102,7 @@ export function initializeUserTable(sequelize: Sequelize): typeof User {
       ...timestampModelOptions(DATABASE_TABLE_NAMES.users, "User", true),
       indexes: [
         { unique: true, fields: ["email"], name: "users_email_unique" },
+        { unique: true, fields: ["reference_code"], name: "users_reference_code_unique" },
         { fields: ["role"], name: "users_role_idx" },
         { fields: ["status"], name: "users_status_idx" },
         { fields: ["phone"], name: "users_phone_idx" },
@@ -104,6 +111,8 @@ export function initializeUserTable(sequelize: Sequelize): typeof User {
       ]
     }
   );
+
+
 
   return User;
 }
