@@ -106,6 +106,16 @@ export async function handleAdminDeleteProduct(req: Request, res: Response, next
   }
 }
 
+export async function handleAdminRestoreProduct(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const id = parseProductId(req.params.productId);
+    const product = await ProductService.restoreProduct(id);
+    sendSuccess(res, 200, product);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function handleAdminDuplicateProduct(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const id = parseProductId(req.params.productId);

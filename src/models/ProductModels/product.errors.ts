@@ -54,6 +54,45 @@ export class ProductSkuConflictError extends ProductError {
   }
 }
 
+export class ProductNotDeletedError extends ProductError {
+  public constructor(productId: number) {
+    super("PRODUCT_NOT_DELETED", `Product '${productId}' is not deleted.`, 409);
+    this.name = "ProductNotDeletedError";
+  }
+}
+
+export class ProductLegacyTrashNotRestorableError extends ProductError {
+  public constructor(productId: number) {
+    super(
+      "PRODUCT_LEGACY_TRASH_NOT_RESTORABLE",
+      `Product '${productId}' was deleted using the previous deletion workflow and cannot be restored safely because its Variants, images, or R2 objects may no longer be recoverable.`,
+      409
+    );
+    this.name = "ProductLegacyTrashNotRestorableError";
+  }
+}
+
+export class ProductRestoreSkuConflictError extends ProductError {
+  public constructor(sku: string) {
+    super("PRODUCT_RESTORE_SKU_CONFLICT", `Historical SKU reservation ownership for '${sku}' is invalid.`, 409);
+    this.name = "ProductRestoreSkuConflictError";
+  }
+}
+
+export class ProductRestoreSlugConflictError extends ProductError {
+  public constructor(slug: string) {
+    super("PRODUCT_RESTORE_SLUG_CONFLICT", `Historical Product slug '${slug}' conflicts with another Product.`, 409);
+    this.name = "ProductRestoreSlugConflictError";
+  }
+}
+
+export class ProductRestoreConflictError extends ProductError {
+  public constructor(reason: string) {
+    super("PRODUCT_RESTORE_CONFLICT", reason, 409);
+    this.name = "ProductRestoreConflictError";
+  }
+}
+
 export class ProductCategoryInvalidError extends ProductError {
   public constructor(reason: string) {
     super("PRODUCT_CATEGORY_INVALID", reason, 422);

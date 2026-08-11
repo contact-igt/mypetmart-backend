@@ -218,6 +218,23 @@ describe("Catalog rebaseline contract closure", () => {
     expect(response.body.data.items).toHaveLength(1);
   });
 
+  it("uses a numeric ID tie-breaker for stable server-side pagination", async () => {
+    const created = await Promise.all([createProduct({ stock: 7 }), createProduct({ stock: 7 }), createProduct({ stock: 7 })]);
+    const expectedIds = created.map((response) => response.body.data.id).sort((left, right) => left - right);
+    const actualIds: number[] = [];
+
+    for (let page = 1; page <= 3; page += 1) {
+      const response = await request(app)
+        .get(`/api/v1/admin/products?page=${page}&pageSize=1&sort=stock&order=ASC`)
+        .set("Authorization", `Bearer ${adminToken}`);
+      expect(response.status).toBe(200);
+      actualIds.push(response.body.data.items[0].id);
+    }
+
+    expect(actualIds).toEqual(expectedIds);
+    expect(new Set(actualIds).size).toBe(3);
+  });
+
   it.each(["page=0", "pageSize=101", "categoryId=0", "status=published", "petType=bird", "stockLevel=empty", "sort=id", "order=sideways"])(
     "rejects invalid admin product query input: %s",
     async (query) => {

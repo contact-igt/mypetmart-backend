@@ -1,11 +1,9 @@
-import { Op } from "sequelize";
-
 import { DATABASE_TABLE_NAMES } from "../../constants/database.constants.js";
 import { sequelize } from "../../database/index.js";
 import { Product } from "../../database/tables/ProductTable/index.js";
 import { ProductVariant } from "../../database/tables/ProductVariantTable/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
-import { formatMoney } from "../../utils/product-money.js";
+import { formatMoney, isCompareAtPriceValid } from "../../utils/product-money.js";
 import { normalizeAndValidateSku, reserveSku } from "./catalog-sku.service.js";
 import {
   InvalidProductDataError,
@@ -92,6 +90,12 @@ export class ProductVariantService {
 
     if (!variant) {
       throw new ProductVariantNotFoundError(variantId);
+    }
+
+    const targetPrice = input.price ?? variant.price;
+    const targetCompareAtPrice = input.compareAtPrice !== undefined ? input.compareAtPrice : variant.compare_at_price;
+    if (!isCompareAtPriceValid(targetPrice, targetCompareAtPrice)) {
+      throw new InvalidProductDataError("compareAtPrice must be greater than or equal to price for a Variant.");
     }
 
     // Final active variant protection
@@ -192,12 +196,11 @@ export class ProductVariantService {
     }
 
     const uniqueIds = Array.from(new Set(orderedIds));
-    const variants = await ProductVariant.findAll({
-      where: { product_id: productId, id: { [Op.in]: uniqueIds } }
-    });
+    const variants = await ProductVariant.findAll({ where: { product_id: productId } });
+    const requestedIds = new Set(uniqueIds);
 
-    if (variants.length !== uniqueIds.length) {
-      throw new InvalidProductDataError("One or more Variant IDs do not belong to this product.");
+    if (variants.length !== uniqueIds.length || variants.some((variant) => !requestedIds.has(variant.id))) {
+      throw new InvalidProductDataError("Variant reorder must include every active record belonging to this Product exactly once.");
     }
 
     return await sequelize.transaction(async (t) => {

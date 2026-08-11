@@ -214,6 +214,123 @@ describe("Stage 13 — Product Variants Integration Tests", () => {
     expect(updateRes.status).toBe(404);
   });
 
+  it("should persist every editable Variant field and preserve untouched fields on partial updates", async () => {
+    const created = await request(app)
+      .post(`/api/v1/admin/products/${productId}/variants`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        name: "Small",
+        sku: "TEST-COLLAR-S",
+        price: "299.00",
+        compareAtPrice: "349.00",
+        stock: 5,
+        active: true,
+        weightGrams: 60,
+        lengthCm: "12.00",
+        widthCm: "3.00",
+        heightCm: "2.00"
+      });
+    expect(created.status).toBe(201);
+    const variantId = created.body.data.id;
+
+    const updated = await request(app)
+      .patch(`/api/v1/admin/products/${productId}/variants/${variantId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        name: "Small / Red",
+        sku: "TEST-COLLAR-SMALL-01",
+        price: "329.00",
+        compareAtPrice: "399.00",
+        stock: 10,
+        active: false,
+        weightGrams: 75,
+        lengthCm: "13.50",
+        widthCm: "3.50",
+        heightCm: "2.50"
+      });
+
+    expect(updated.status).toBe(200);
+    expect(updated.body.data).toMatchObject({
+      id: variantId,
+      productId,
+      name: "Small / Red",
+      sku: "TEST-COLLAR-SMALL-01",
+      price: "329.00",
+      compareAtPrice: "399.00",
+      stock: 10,
+      active: false,
+      weightGrams: 75,
+      lengthCm: "13.50",
+      widthCm: "3.50",
+      heightCm: "2.50"
+    });
+
+    const persisted = await ProductVariant.findByPk(variantId);
+    expect(persisted).toMatchObject({
+      name: "Small / Red",
+      sku: "TEST-COLLAR-SMALL-01",
+      price: "329.00",
+      compare_at_price: "399.00",
+      stock: 10,
+      active: false,
+      weight_grams: 75,
+      length_cm: "13.50",
+      width_cm: "3.50",
+      height_cm: "2.50"
+    });
+
+    const cleared = await request(app)
+      .patch(`/api/v1/admin/products/${productId}/variants/${variantId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ stock: 0, weightGrams: null, lengthCm: null, widthCm: null, heightCm: null });
+
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.data).toMatchObject({
+      name: "Small / Red",
+      sku: "TEST-COLLAR-SMALL-01",
+      price: "329.00",
+      compareAtPrice: "399.00",
+      stock: 0,
+      active: false,
+      weightGrams: null,
+      lengthCm: null,
+      widthCm: null,
+      heightCm: null
+    });
+
+    const detail = await request(app)
+      .get(`/api/v1/admin/products/${productId}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.data.variants).toContainEqual(expect.objectContaining({
+      id: variantId,
+      name: "Small / Red",
+      sku: "TEST-COLLAR-SMALL-01",
+      price: "329.00",
+      compareAtPrice: "399.00",
+      stock: 0,
+      active: false,
+      weightGrams: null,
+      lengthCm: null,
+      widthCm: null,
+      heightCm: null
+    }));
+
+    const conflict = await request(app)
+      .post(`/api/v1/admin/products/${productId}/variants`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ name: "Medium", sku: "TEST-COLLAR-M", price: "349.00", stock: 8 });
+    expect(conflict.status).toBe(201);
+
+    const duplicateSku = await request(app)
+      .patch(`/api/v1/admin/products/${productId}/variants/${variantId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ sku: "TEST-COLLAR-M" });
+    expect(duplicateSku.status).toBe(409);
+    expect(duplicateSku.body.error.code).toBe("PRODUCT_VARIANT_SKU_CONFLICT");
+    expect((await ProductVariant.findByPk(variantId))?.sku).toBe("TEST-COLLAR-SMALL-01");
+  });
+
   it("should reorder variants deterministically", async () => {
     const v1 = await request(app)
       .post(`/api/v1/admin/products/${productId}/variants`)
@@ -236,6 +353,52 @@ describe("Stage 13 — Product Variants Integration Tests", () => {
     expect(reorderRes.status).toBe(200);
     expect(reorderRes.body.data[0].id).toBe(v2Id);
     expect(reorderRes.body.data[1].id).toBe(v1Id);
+
+    const partial = await request(app)
+      .patch(`/api/v1/admin/products/${productId}/variants/reorder`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ orderedIds: [v1Id] });
+    expect(partial.status).toBe(400);
+    expect(partial.body.error.code).toBe("INVALID_PRODUCT_DATA");
+  });
+
+  it("should reject a zero Variant price with a structured error and preserve the existing price", async () => {
+    const created = await request(app)
+      .post(`/api/v1/admin/products/${productId}/variants`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ name: "Positive Price", sku: "WAND-POSITIVE", price: "199.00", stock: 5 });
+    expect(created.status).toBe(201);
+
+    const rejectedCreate = await request(app)
+      .post(`/api/v1/admin/products/${productId}/variants`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ name: "Zero Price", sku: "WAND-ZERO", price: "0.00", stock: 5 });
+    expect(rejectedCreate.status).toBe(400);
+    expect(rejectedCreate.body.error.code).toBe("AUTH_VALIDATION_FAILED");
+
+    const rejectedEdit = await request(app)
+      .patch(`/api/v1/admin/products/${productId}/variants/${created.body.data.id}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ price: "0.00" });
+    expect(rejectedEdit.status).toBe(400);
+    expect(rejectedEdit.body.error.code).toBe("AUTH_VALIDATION_FAILED");
+    expect((await ProductVariant.findByPk(created.body.data.id))?.price).toBe("199.00");
+  });
+
+  it("should validate Variant compare price against the persisted effective price", async () => {
+    const created = await request(app)
+      .post(`/api/v1/admin/products/${productId}/variants`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ name: "Compared", sku: "WAND-COMPARED", price: "100.00", compareAtPrice: "150.00" });
+
+    const response = await request(app)
+      .patch(`/api/v1/admin/products/${productId}/variants/${created.body.data.id}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ price: "200.00" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe("INVALID_PRODUCT_DATA");
+    expect((await ProductVariant.findByPk(created.body.data.id))?.price).toBe("100.00");
   });
 
   it("should roll back an unshippable active Variant created under an active Product", async () => {

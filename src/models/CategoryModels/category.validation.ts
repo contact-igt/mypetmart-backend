@@ -37,7 +37,7 @@ export const ListStorefrontCategoriesQuerySchema = z.object({
 export const ListAdminCategoriesQuerySchema = z.object({
   search: z.string().trim().max(100).optional(),
   petType: z.enum(PET_TYPE_VALUES).optional(),
-  status: z.enum(["active", "inactive", "all"]).optional().default("all"),
+  status: z.enum(["active", "inactive", "deleted", "all"]).optional().default("all"),
   sort: z.enum(["displayOrder", "name", "createdAt", "id"]).optional().default("displayOrder"),
   order: z.enum(["ASC", "DESC"]).optional().default("ASC")
 });

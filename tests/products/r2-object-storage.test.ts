@@ -48,15 +48,19 @@ function configuredRuntime(overrides: Partial<ObjectStorageRuntimeConfig> = {}):
 }
 
 describe("Cloudflare R2 object storage lifecycle", () => {
-  it("creates a short-lived, Product-scoped presign contract without exposing secrets", async () => {
+  it.each([
+    ["image/jpeg", "jpg"],
+    ["image/png", "png"],
+    ["image/webp", "webp"]
+  ])("creates a short-lived, Product-scoped %s presign contract without exposing secrets", async (contentType, extension) => {
     const provider = new FakeObjectStorageProvider();
     const service = new ObjectStorageService(configuredRuntime(), provider);
 
-    const result = await service.presignProductImageUpload(42, { contentType: "image/jpeg", sizeBytes: 2048 });
+    const result = await service.presignProductImageUpload(42, { contentType, sizeBytes: 2048 });
 
     expect(result.method).toBe("PUT");
-    expect(result.requiredHeaders).toEqual({ "Content-Type": "image/jpeg" });
-    expect(result.r2Key).toMatch(/^products\/42\/uploads\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f-]{36}\.jpg$/);
+    expect(result.requiredHeaders).toEqual({ "Content-Type": contentType });
+    expect(result.r2Key).toMatch(new RegExp(`^products/42/uploads/\\d{4}/\\d{2}/\\d{2}/[0-9a-f-]{36}\\.${extension}$`));
     expect(result.publicUrl).toBe(`https://images.mypetmart.test/${result.r2Key}`);
     expect(provider.presignedRequest?.expiresInSeconds).toBe(300);
     expect(JSON.stringify(result)).not.toContain(TEST_INTENT_SECRET);

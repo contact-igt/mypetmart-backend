@@ -37,6 +37,26 @@ export class CategoryDeleteBlockedError extends CategoryError {
   }
 }
 
+export class CategoryNotDeletedError extends CategoryError {
+  public constructor() {
+    super("CATEGORY_NOT_DELETED", "Category is not deleted.", 409);
+    this.name = "CategoryNotDeletedError";
+  }
+}
+
+export class CategoryRestoreConflictError extends CategoryError {
+  public constructor(slug?: string) {
+    super(
+      "CATEGORY_RESTORE_CONFLICT",
+      slug
+        ? `Category slug '${slug}' conflicts with another category and cannot be restored.`
+        : "Category cannot be restored because its slug conflicts with another category.",
+      409
+    );
+    this.name = "CategoryRestoreConflictError";
+  }
+}
+
 export class InvalidCategoryIdError extends CategoryError {
   public constructor() {
     super("INVALID_CATEGORY_ID", "Category ID must be a positive integer.", 400);

@@ -52,6 +52,24 @@ export async function isSkuAvailable(sku: string, transaction?: Transaction): Pr
   return rows.length === 0;
 }
 
+export async function isSkuReservedBy(
+  sku: string,
+  entityType: "product" | "variant",
+  entityId: number,
+  transaction?: Transaction
+): Promise<boolean> {
+  const normalized = normalizeAndValidateSku(sku);
+  const rows = await sequelize.query<{ entity_type: string; entity_id: number }>(
+    "SELECT `entity_type`, `entity_id` FROM `catalog_sku_reservations` WHERE `sku` = ? LIMIT 1",
+    {
+      replacements: [normalized],
+      type: QueryTypes.SELECT,
+      ...(transaction ? { transaction } : {})
+    }
+  );
+  return rows[0]?.entity_type === entityType && Number(rows[0].entity_id) === entityId;
+}
+
 export async function reserveSku(
   sku: string,
   entityType: "product" | "variant",

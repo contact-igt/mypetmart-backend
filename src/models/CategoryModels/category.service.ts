@@ -6,6 +6,8 @@ import { IdSequenceService } from "../../database/sequences/id-sequence.service.
 import {
   CategoryDeleteBlockedError,
   CategoryNotFoundError,
+  CategoryNotDeletedError,
+  CategoryRestoreConflictError,
   CategorySlugConflictError,
   InvalidCategoryDataError
 } from "./category.errors.js";
@@ -63,7 +65,8 @@ export class CategoryService {
       imageAlt: category.image_alt,
       productCount,
       createdAt: category.created_at ? category.created_at.toISOString() : new Date().toISOString(),
-      updatedAt: category.updated_at ? category.updated_at.toISOString() : new Date().toISOString()
+      updatedAt: category.updated_at ? category.updated_at.toISOString() : new Date().toISOString(),
+      deletedAt: category.deleted_at ? category.deleted_at.toISOString() : null
     };
   }
 
@@ -107,7 +110,9 @@ export class CategoryService {
   public static async listAdminCategories(query: ListAdminCategoriesQuery): Promise<AdminCategoryItem[]> {
     const where: Record<string, unknown> = {};
 
-    if (query.status === "active") {
+    if (query.status === "deleted") {
+      where.deleted_at = { [Op.ne]: null };
+    } else if (query.status === "active") {
       where.active = true;
     } else if (query.status === "inactive") {
       where.active = false;
@@ -137,6 +142,7 @@ export class CategoryService {
 
     const categories = await Category.findAll({
       where,
+      ...(query.status === "deleted" ? { paranoid: false } : {}),
       order: [
         [sortField, sortOrder],
         ["id", "ASC"]
@@ -328,5 +334,43 @@ export class CategoryService {
     }
 
     await category.destroy();
+  }
+
+  public static async restoreCategory(id: number): Promise<AdminCategoryItem> {
+    return await sequelize.transaction(async (transaction: Transaction) => {
+      const category = await Category.findByPk(id, {
+        paranoid: false,
+        transaction,
+        lock: transaction.LOCK.UPDATE
+      });
+
+      if (!category) {
+        throw new CategoryNotFoundError();
+      }
+
+      if (!category.deleted_at) {
+        throw new CategoryNotDeletedError();
+      }
+
+      const conflictingCategory = await Category.findOne({
+        where: {
+          slug: category.slug,
+          id: { [Op.ne]: category.id }
+        },
+        paranoid: false,
+        transaction
+      });
+
+      if (conflictingCategory) {
+        throw new CategoryRestoreConflictError(category.slug);
+      }
+
+      await category.restore({ transaction });
+      category.active = false;
+      await category.save({ transaction });
+
+      const productCount = (await this.getProductCountMap([category.id], transaction)).get(category.id) ?? 0;
+      return this.toAdminItem(category, productCount);
+    });
   }
 }

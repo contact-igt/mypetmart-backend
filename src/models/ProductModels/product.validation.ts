@@ -65,27 +65,18 @@ const skuSchema = z.preprocess(
 );
 
 const moneySchema = z
-  .union([z.string(), z.number()])
-  .transform((val) => formatMoney(val))
-  .refine((val) => parseFloat(val) >= 0, "Price must be non-negative");
-
-const optionalMoneySchema = z
-  .union([z.string(), z.number(), z.null()])
-  .transform((val) => (val === null || val === "" ? null : formatMoney(val)))
-  .nullable()
-  .optional();
-
-const strictMoneyInputSchema = z
   .union([z.string().trim(), z.number()])
   .refine((value) => {
     if (typeof value === "number") {
-      return Number.isFinite(value) && value >= 0 && Math.abs(value * 100 - Math.round(value * 100)) < Number.EPSILON * 100;
+      return Number.isFinite(value) && value >= 0 && value < 100_000_000 && Math.abs(value * 100 - Math.round(value * 100)) < Number.EPSILON * 100;
     }
     return /^\d{1,8}(?:\.\d{1,2})?$/.test(value);
   }, "Price must be non-negative, fit DECIMAL(10,2), and have at most 2 decimal places")
   .transform((value) => formatMoney(value));
 
-const optionalStrictMoneyInputSchema = z
+const variantMoneySchema = moneySchema.refine((value) => Number(value) > 0, "Variant price must be positive");
+
+const optionalMoneySchema = z
   .union([z.string().trim(), z.number(), z.null()])
   .refine((value) => {
     if (value === null || value === "") return true;
@@ -98,21 +89,22 @@ const optionalStrictMoneyInputSchema = z
   .optional();
 
 const shippingMeasurementSchema = z
-  .union([z.number(), z.string(), z.null()])
-  .transform((val) => {
-    if (val === null || val === "") return null;
-    const num = typeof val === "number" ? val : parseFloat(val);
-    if (isNaN(num) || num <= 0) return null;
-    return typeof val === "number" ? val : num;
-  })
-  .nullable()
+  .union([z.number(), z.string().trim(), z.null()])
+  .refine((value) => {
+    if (value === null || value === "") return true;
+    if (typeof value === "number") {
+      return Number.isFinite(value) && value > 0 && value < 1_000_000 && Math.abs(value * 100 - Math.round(value * 100)) < Number.EPSILON * 100;
+    }
+    return /^\d{1,6}(?:\.\d{1,2})?$/.test(value) && Number(value) > 0;
+  }, "Shipping measurement must be positive, fit DECIMAL(8,2), and have at most 2 decimal places")
+  .transform((value) => (value === null || value === "" ? null : Number(value)))
   .optional();
 
 export const createVariantSchema = z
   .object({
     name: z.string().trim().min(1, "Variant name is required").max(160, "Variant name max 160 characters"),
     sku: skuSchema,
-    price: moneySchema,
+    price: variantMoneySchema,
     compareAtPrice: optionalMoneySchema,
     stock: z.number().int().min(0, "Stock cannot be negative").optional().default(0),
     active: z.boolean().optional().default(true),
@@ -131,7 +123,7 @@ export const updateVariantSchema = z
   .object({
     name: z.string().trim().min(1).max(160).optional(),
     sku: skuSchema.optional(),
-    price: moneySchema.optional(),
+    price: variantMoneySchema.optional(),
     compareAtPrice: optionalMoneySchema,
     stock: z.number().int().min(0).optional(),
     active: z.boolean().optional(),
@@ -158,7 +150,7 @@ export const createProductSchema = z
   .object({
     categoryId: z.number().int().positive("Category ID must be positive"),
     name: z.string().trim().min(1, "Product name is required").max(190, "Product name max 190 characters"),
-    slug: z.string().trim().min(1).max(190).optional(),
+    slug: z.never({ message: "Product slug is system-controlled and generated from the Product name" }).optional(),
     sku: skuSchema,
     description: z.string().trim().min(1, "Product description is required"),
     petType: z.enum(PET_TYPE_VALUES).optional().default("all"),
@@ -193,12 +185,12 @@ export const createProductSchema = z
 export const updateProductSchema = z.object({
   categoryId: z.number().int().positive().optional(),
   name: z.string().trim().min(1).max(190).optional(),
-  slug: z.string().trim().min(1).max(190).optional(),
+  slug: z.never({ message: "Product slug is system-controlled and cannot be changed" }).optional(),
   sku: skuSchema.optional(),
   description: z.string().trim().min(1).optional(),
   petType: z.enum(PET_TYPE_VALUES).optional(),
-  price: strictMoneyInputSchema.optional(),
-  compareAtPrice: optionalStrictMoneyInputSchema,
+  price: moneySchema.optional(),
+  compareAtPrice: optionalMoneySchema,
   stock: z.number().int().min(0, "Stock cannot be negative").optional(),
   hasVariants: z.never({ message: "hasVariants is immutable after product creation" }).optional(),
   featured: z.boolean().optional(),
@@ -235,7 +227,7 @@ export const adminProductListQuerySchema = z.object({
   pageSize: queryPageSize.optional(),
   search: z.string().trim().max(190).optional(),
   categoryId: positiveQueryInteger.optional(),
-  status: z.enum(PRODUCT_STATUS_VALUES).optional(),
+  status: z.enum([...PRODUCT_STATUS_VALUES, "deleted"]).optional(),
   petType: z.enum(PET_TYPE_VALUES).optional(),
   stockLevel: z.enum(["in_stock", "out_of_stock", "low_stock"]).optional(),
   sort: z.enum(["created_at", "price", "name", "stock"]).optional(),

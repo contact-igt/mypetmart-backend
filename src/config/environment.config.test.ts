@@ -73,7 +73,7 @@ describe("environment configuration", () => {
 
     expect(config.R2_SECRET_ACCESS_KEY).toBeUndefined();
     expect(config.R2_UPLOAD_URL_EXPIRY_SECONDS).toBe(300);
-    expect(config.R2_MAX_IMAGE_SIZE_BYTES).toBe(10 * 1024 * 1024);
+    expect(config.R2_MAX_IMAGE_SIZE_BYTES).toBe(5 * 1024 * 1024);
   });
 
   it("requires a complete coherent R2 configuration when any R2 credential is present", () => {
@@ -95,6 +95,23 @@ describe("environment configuration", () => {
     );
     expect(config.R2_UPLOAD_URL_EXPIRY_SECONDS).toBe(120);
     expect(config.R2_MAX_IMAGE_SIZE_BYTES).toBe(5_000_000);
+  });
+
+  it("rejects a Product image policy above the 5 MiB Admin contract", () => {
+    expect(() => parseEnvironmentConfig(createValidEnvironment({ R2_MAX_IMAGE_SIZE_BYTES: String(5 * 1024 * 1024 + 1) }))).toThrow(
+      EnvironmentValidationError
+    );
+  });
+
+  it("requires an explicit safe Product trash rollout cutoff in production", () => {
+    expect(() => parseEnvironmentConfig(createValidEnvironment({ NODE_ENV: "production" }))).toThrow(EnvironmentValidationError);
+  });
+
+  it("accepts and preserves an ISO Product trash rollout cutoff", () => {
+    const cutoff = "2026-08-11T14:00:00.000Z";
+    const config = parseEnvironmentConfig(createValidEnvironment({ NODE_ENV: "production", PRODUCT_SAFE_TRASH_CUTOFF: cutoff }));
+
+    expect(config.PRODUCT_SAFE_TRASH_CUTOFF).toBe(cutoff);
   });
 
   it("rejects production R2 placeholder secrets without echoing their values", () => {

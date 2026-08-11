@@ -134,6 +134,10 @@ const environmentSchema = z
     DB_POOL_MIN: integerFromString("DB_POOL_MIN", 0, 100).default(0),
     DB_POOL_ACQUIRE_MS: integerFromString("DB_POOL_ACQUIRE_MS", 1000, 120000).default(30000),
     DB_POOL_IDLE_MS: integerFromString("DB_POOL_IDLE_MS", 1000, 120000).default(10000),
+    PRODUCT_SAFE_TRASH_CUTOFF: z.preprocess(
+      optionalString,
+      z.iso.datetime({ offset: true, message: "PRODUCT_SAFE_TRASH_CUTOFF must be an ISO-8601 timestamp." }).optional()
+    ),
 
     JWT_ACCESS_SECRET: requiredStringWithMinLength("JWT_ACCESS_SECRET", 32),
     JWT_REFRESH_SECRET: requiredStringWithMinLength("JWT_REFRESH_SECRET", 32),
@@ -155,6 +159,8 @@ const environmentSchema = z
     PASSWORD_RESET_TOKEN_TTL_SECONDS: integerFromString("PASSWORD_RESET_TOKEN_TTL_SECONDS", 60, 86400).default(900),
     PASSWORD_RESET_COOKIE_NAME: requiredString("PASSWORD_RESET_COOKIE_NAME").default("mypetmart_password_reset"),
 
+    CART_GUEST_COOKIE_NAME: requiredString("CART_GUEST_COOKIE_NAME").default("mypetmart_guest_cart"),
+
     SMTP_HOST: optionalTrimmedStringSchema,
     SMTP_PORT: integerFromString("SMTP_PORT", 1, 65535).default(587),
     SMTP_SECURE: booleanFromString("SMTP_SECURE").default(false),
@@ -173,7 +179,7 @@ const environmentSchema = z
       z.string().min(32, "R2_UPLOAD_INTENT_SECRET must be at least 32 characters.").optional()
     ),
     R2_UPLOAD_URL_EXPIRY_SECONDS: integerFromString("R2_UPLOAD_URL_EXPIRY_SECONDS", 60, 900).default(300),
-    R2_MAX_IMAGE_SIZE_BYTES: integerFromString("R2_MAX_IMAGE_SIZE_BYTES", 1, 25 * 1024 * 1024).default(10 * 1024 * 1024),
+    R2_MAX_IMAGE_SIZE_BYTES: integerFromString("R2_MAX_IMAGE_SIZE_BYTES", 1, 5 * 1024 * 1024).default(5 * 1024 * 1024),
     R2_ORPHAN_GRACE_HOURS: integerFromString("R2_ORPHAN_GRACE_HOURS", 1, 168).default(24),
 
     PAYMENT_PROVIDER: optionalTrimmedStringSchema,
@@ -186,6 +192,13 @@ const environmentSchema = z
     SHIPPING_WEBHOOK_SECRET: optionalTrimmedStringSchema
   })
   .superRefine((value, context) => {
+    if (value.NODE_ENV === "production" && !value.PRODUCT_SAFE_TRASH_CUTOFF) {
+      context.addIssue({
+        code: "custom",
+        path: ["PRODUCT_SAFE_TRASH_CUTOFF"],
+        message: "PRODUCT_SAFE_TRASH_CUTOFF is required in production. Set it to the safe parent-only trash rollout timestamp."
+      });
+    }
     if (value.DB_POOL_MIN > value.DB_POOL_MAX) {
       context.addIssue({
         code: "custom",

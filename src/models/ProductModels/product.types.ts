@@ -89,6 +89,9 @@ export type AdminProductListItemJSON = {
   primaryImage: ProductImageJSON | null;
   createdAt: string;
   updatedAt: string;
+  deletedAt: string | null;
+  restorable: boolean;
+  restoreBlockedReason: string | null;
 };
 
 export type AdminProductDetailJSON = AdminProductListItemJSON & {
@@ -119,7 +122,6 @@ export type UpdateVariantInput = Partial<CreateVariantInput>;
 export type CreateProductInput = {
   categoryId: number;
   name: string;
-  slug?: string;
   sku: string;
   description: string;
   petType?: PetType;
@@ -142,7 +144,6 @@ export type CreateProductInput = {
 export type UpdateProductInput = {
   categoryId?: number;
   name?: string;
-  slug?: string;
   sku?: string;
   description?: string;
   petType?: PetType;
@@ -214,7 +215,7 @@ export type AdminProductListQuery = {
   pageSize?: number;
   search?: string;
   categoryId?: number;
-  status?: ProductStatus;
+  status?: ProductStatus | "deleted";
   petType?: PetType;
   stockLevel?: "in_stock" | "out_of_stock" | "low_stock";
   sort?: "created_at" | "price" | "name" | "stock";

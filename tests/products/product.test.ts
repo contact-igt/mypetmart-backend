@@ -113,6 +113,128 @@ describe("Stage 13 — Products Backend Integration Tests", () => {
     });
   });
 
+  it("should generate the canonical slug from the manual Product name and keep it stable during Edit", async () => {
+    const createRes = await request(app)
+      .post("/api/v1/admin/products")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        categoryId,
+        name: "Manual Test Chicken Dog Food",
+        sku: "TEST-SIMPLE-001",
+        description: "Manual Product identification workflow",
+        price: "499.00"
+      });
+
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.data.slug).toBe("manual-test-chicken-dog-food");
+    const productId = createRes.body.data.id;
+
+    const updateRes = await request(app)
+      .patch(`/api/v1/admin/products/${productId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ name: "Manual Test Premium Chicken Dog Food" });
+
+    expect(updateRes.status).toBe(200);
+    expect(updateRes.body.data.name).toBe("Manual Test Premium Chicken Dog Food");
+    expect(updateRes.body.data.slug).toBe("manual-test-chicken-dog-food");
+
+    const refreshRes = await request(app)
+      .get(`/api/v1/admin/products/${productId}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    expect(refreshRes.status).toBe(200);
+    expect(refreshRes.body.data.slug).toBe("manual-test-chicken-dog-food");
+  });
+
+  it.each(["create", "edit"])("should reject a manually supplied Product slug during %s", async (operation) => {
+    if (operation === "create") {
+      const response = await request(app)
+        .post("/api/v1/admin/products")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({
+          categoryId,
+          name: "System Slug Product",
+          slug: "manual-slug-not-allowed",
+          sku: "SYSTEM-SLUG-001",
+          description: "Slug must be system controlled",
+          price: "100.00"
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error.errors.slug).toBeDefined();
+      return;
+    }
+
+    const created = await request(app)
+      .post("/api/v1/admin/products")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        categoryId,
+        name: "Stable Slug Product",
+        sku: "STABLE-SLUG-001",
+        description: "Slug must remain stable",
+        price: "100.00"
+      });
+
+    const response = await request(app)
+      .patch(`/api/v1/admin/products/${created.body.data.id}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ slug: "changed-slug-not-allowed" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.errors.slug).toBeDefined();
+  });
+
+  it("should return complete Admin Edit detail when the linked Category is soft-deleted", async () => {
+    const created = await request(app)
+      .post("/api/v1/admin/products")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        categoryId,
+        name: "Category History Product",
+        sku: "CATEGORY-HISTORY-001",
+        description: "Edit detail remains readable for integrity recovery",
+        price: "100.00"
+      });
+
+    await Category.destroy({ where: { id: categoryId } });
+
+    const response = await request(app)
+      .get(`/api/v1/admin/products/${created.body.data.id}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      id: created.body.data.id,
+      categoryId,
+      category: { id: categoryId, name: "Dog Food", slug: "dog-food" },
+      variants: [],
+      images: []
+    });
+  });
+
+  it.each([
+    ["money precision", { price: "10.001" }, "price"],
+    ["negative shipping", { price: "10.00", lengthCm: "-1" }, "lengthCm"],
+    ["shipping precision", { price: "10.00", lengthCm: "1.001" }, "lengthCm"]
+  ])("should reject invalid create-time %s instead of rounding or clearing it", async (_label, fields, errorField) => {
+    const response = await request(app)
+      .post("/api/v1/admin/products")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        categoryId,
+        name: `Invalid Product ${errorField}`,
+        sku: `INVALID-${errorField.toUpperCase()}`,
+        description: "Invalid create-time values",
+        ...fields
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe("AUTH_VALIDATION_FAILED");
+    expect(response.body.error.errors[errorField]).toBeDefined();
+    expect(await Product.count()).toBe(0);
+  });
+
   it("should enforce SKU normalization and cross-table uniqueness", async () => {
     await request(app)
       .post("/api/v1/admin/products")
@@ -139,6 +261,26 @@ describe("Stage 13 — Products Backend Integration Tests", () => {
 
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe("PRODUCT_SKU_CONFLICT");
+
+    const firstProduct = await Product.findOne({ where: { sku: "PROD-UNIQUE-001" } });
+    expect(firstProduct).not.toBeNull();
+    await request(app)
+      .delete(`/api/v1/admin/products/${firstProduct!.id}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    const historicalRes = await request(app)
+      .post("/api/v1/admin/products")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        categoryId,
+        name: "Historical SKU Reuse",
+        sku: " prod-unique-001 ",
+        description: "Historical reservations remain authoritative",
+        price: "200.00"
+      });
+
+    expect(historicalRes.status).toBe(409);
+    expect(historicalRes.body.error.code).toBe("PRODUCT_SKU_CONFLICT");
   });
 
   it("should validate shipping readiness before product activation", async () => {

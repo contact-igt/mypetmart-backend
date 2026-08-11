@@ -10,6 +10,7 @@ import {
   handleAdminGetProductById,
   handleAdminGetProductSummary,
   handleAdminListProducts,
+  handleAdminRestoreProduct,
   handleAdminUpdateProduct,
   handleAdminUpdateProductStatus
 } from "./product.controller.js";
@@ -50,6 +51,10 @@ adminProductRouter.patch("/:productId", (req, res, next) => {
 
 adminProductRouter.patch("/:productId/status", (req, res, next) => {
   void handleAdminUpdateProductStatus(req, res, next);
+});
+
+adminProductRouter.patch("/:productId/restore", (req, res, next) => {
+  void handleAdminRestoreProduct(req, res, next);
 });
 
 adminProductRouter.delete("/:productId", (req, res, next) => {

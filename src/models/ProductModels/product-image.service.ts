@@ -1,5 +1,3 @@
-import { Op } from "sequelize";
-
 import { DATABASE_TABLE_NAMES } from "../../constants/database.constants.js";
 import { sequelize } from "../../database/index.js";
 import { ProductImage } from "../../database/tables/ProductImageTable/index.js";
@@ -206,12 +204,11 @@ export class ProductImageService {
     }
 
     const uniqueIds = Array.from(new Set(orderedIds));
-    const images = await ProductImage.findAll({
-      where: { product_id: productId, id: { [Op.in]: uniqueIds } }
-    });
+    const images = await ProductImage.findAll({ where: { product_id: productId } });
+    const requestedIds = new Set(uniqueIds);
 
-    if (images.length !== uniqueIds.length) {
-      throw new InvalidProductDataError("One or more image IDs do not belong to this product.");
+    if (images.length !== uniqueIds.length || images.some((image) => !requestedIds.has(image.id))) {
+      throw new InvalidProductDataError("Image reorder must include every active record belonging to this Product exactly once.");
     }
 
     return await sequelize.transaction(async (t) => {

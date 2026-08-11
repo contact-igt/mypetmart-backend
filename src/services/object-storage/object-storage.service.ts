@@ -175,6 +175,14 @@ export class ObjectStorageService {
     await this.#getProvider().deleteObject(key);
   }
 
+  public async productImageObjectExists(productId: number, key: string): Promise<boolean> {
+    this.ensureConfigured();
+    if (!isSafeProductImageKey(productId, key)) {
+      throw new ImageUploadVerificationFailedError("The image object key does not belong to this product.");
+    }
+    return (await this.#getProvider().headObject(key)) !== null;
+  }
+
   public async cleanupUnattachedProductUploads(referencedKeys: ReadonlySet<string>, now = new Date()): Promise<OrphanCleanupResult> {
     this.ensureConfigured();
     const cutoff = now.getTime() - this.#config.orphanGraceHours * 60 * 60 * 1000;
@@ -206,7 +214,9 @@ export class ObjectStorageService {
       if (!payload || !signature || extra !== undefined) throw new Error("Malformed token");
       const expected = createHmac("sha256", this.#config.uploadIntentSecret!).update(payload).digest();
       const supplied = Buffer.from(signature, "base64url");
-      if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) throw new Error("Invalid signature");
+      if (supplied.toString("base64url") !== signature || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+        throw new Error("Invalid signature");
+      }
 
       const candidate = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<UploadIntent>;
       if (

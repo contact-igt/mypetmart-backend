@@ -147,7 +147,7 @@ describe("Cloudflare R2 Product Image Integration", () => {
     const oversized = await request(app)
       .post(`/api/v1/admin/products/${productId}/images/uploads/presign`)
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ originalFilename: "front.jpg", contentType: "image/jpeg", sizeBytes: 10 * 1024 * 1024 + 1 });
+      .send({ originalFilename: "front.jpg", contentType: "image/jpeg", sizeBytes: 5 * 1024 * 1024 + 1 });
     expect(oversized.status).toBe(413);
     expect(oversized.body.error.code).toBe("IMAGE_TOO_LARGE");
 
@@ -206,6 +206,13 @@ describe("Cloudflare R2 Product Image Integration", () => {
       .send({ orderedIds: [second.id, first.id] });
     expect(reordered.status).toBe(200);
     expect(reordered.body.data.map((image: { id: number }) => image.id)).toEqual([second.id, first.id]);
+
+    const partial = await request(app)
+      .patch(`/api/v1/admin/products/${productId}/images/reorder`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ orderedIds: [first.id] });
+    expect(partial.status).toBe(400);
+    expect(partial.body.error.code).toBe("INVALID_PRODUCT_DATA");
   });
 
   it("deletes metadata and object idempotently, then promotes the next image", async () => {
@@ -249,7 +256,7 @@ describe("Cloudflare R2 Product Image Integration", () => {
     expect((await ProductImage.findByPk(second.id))?.is_primary).toBe(true);
   });
 
-  it("deletes Product image objects when the parent Product is deleted", async () => {
+  it("preserves Product image metadata and R2 objects when the parent Product is trashed", async () => {
     await ProductImageService.attachImage(productId, {
       r2Key: `products/${productId}/parent-delete.jpg`,
       url: `https://images.mypetmart.test/products/${productId}/parent-delete.jpg`,
@@ -264,8 +271,8 @@ describe("Cloudflare R2 Product Image Integration", () => {
       .set("Authorization", `Bearer ${adminToken}`);
 
     expect(response.status).toBe(200);
-    expect(deleteObject).toHaveBeenCalledWith(productId, `products/${productId}/parent-delete.jpg`);
+    expect(deleteObject).not.toHaveBeenCalled();
     expect(await Product.findByPk(productId)).toBeNull();
-    expect(await ProductImage.count({ where: { product_id: productId } })).toBe(0);
+    expect(await ProductImage.count({ where: { product_id: productId } })).toBe(1);
   });
 });

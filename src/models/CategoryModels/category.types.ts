@@ -28,6 +28,7 @@ export type AdminCategoryItem = {
   productCount: number;
   createdAt: string;
   updatedAt: string;
+  deletedAt: string | null;
 };
 
 export type AdminCategoryDetail = AdminCategoryItem;
@@ -74,7 +75,7 @@ export type ListStorefrontCategoriesQuery = {
 export type ListAdminCategoriesQuery = {
   search?: string | undefined;
   petType?: PetType | undefined;
-  status?: "active" | "inactive" | "all" | undefined;
+  status?: "active" | "inactive" | "deleted" | "all" | undefined;
   sort?: "displayOrder" | "name" | "createdAt" | "id" | undefined;
   order?: "ASC" | "DESC" | undefined;
 };

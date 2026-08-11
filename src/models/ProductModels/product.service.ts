@@ -2,6 +2,7 @@ import { Op } from "sequelize";
 import type { Transaction } from "sequelize";
 
 import { DATABASE_TABLE_NAMES } from "../../constants/database.constants.js";
+import { environmentConfig } from "../../config/environment.config.js";
 import { sequelize } from "../../database/index.js";
 import { Category } from "../../database/tables/CategoryTable/index.js";
 import { ProductImage } from "../../database/tables/ProductImageTable/index.js";
@@ -9,19 +10,23 @@ import { objectStorageService } from "../../services/object-storage/object-stora
 import { Product } from "../../database/tables/ProductTable/index.js";
 import { ProductVariant } from "../../database/tables/ProductVariantTable/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
-import { logger } from "../../utils/logger.js";
 import { formatMoney, isCompareAtPriceValid } from "../../utils/product-money.js";
-import { generateDuplicateSku, generateDuplicateSlug, normalizeAndValidateSku, reserveSku } from "./catalog-sku.service.js";
+import { generateDuplicateSku, generateDuplicateSlug, isSkuReservedBy, normalizeAndValidateSku, reserveSku } from "./catalog-sku.service.js";
 import {
   InvalidProductDataError,
-  LastActiveVariantError,
   ProductCategoryInvalidError,
+  ProductLegacyTrashNotRestorableError,
+  ProductNotDeletedError,
   ProductNotFoundError,
   ProductNotSellableError,
+  ProductRestoreConflictError,
+  ProductRestoreSkuConflictError,
+  ProductRestoreSlugConflictError,
   ProductShippingDataInvalidError,
   ProductSkuConflictError,
   ProductSlugConflictError
 } from "./product.errors.js";
+import type { ProductError } from "./product.errors.js";
 import type {
   AdminProductDetailJSON,
   AdminProductListItemJSON,
@@ -37,20 +42,74 @@ import type {
 } from "./product.types.js";
 import { slugify } from "./product.validation.js";
 
-async function deleteProductImageObjects(images: ProductImage[]): Promise<void> {
-  let firstFailure: Error | undefined;
-  for (const image of images) {
-    try {
-      await objectStorageService.deleteProductImageObject(image.product_id, image.r2_key);
-    } catch (error) {
-      firstFailure ??= error instanceof Error ? error : new Error("Cloudflare R2 image cleanup failed.");
-      logger.error(
-        { err: error, productId: image.product_id, imageId: image.id, objectKey: image.r2_key, cleanupPending: true },
-        "Product deletion committed but R2 image object cleanup remains pending"
-      );
+const DEVELOPMENT_SAFE_TRASH_CUTOFF = new Date("2026-08-11T14:00:00.000Z");
+const SAFE_TRASH_CUTOFF = environmentConfig.PRODUCT_SAFE_TRASH_CUTOFF
+  ? new Date(environmentConfig.PRODUCT_SAFE_TRASH_CUTOFF)
+  : DEVELOPMENT_SAFE_TRASH_CUTOFF;
+
+function isLegacyTrash(product: Product): boolean {
+  return product.deleted_at !== null && product.deleted_at.getTime() < SAFE_TRASH_CUTOFF.getTime();
+}
+
+type ProductRestoreEligibility =
+  | { restorable: true; blockedBy: null; variants: ProductVariant[]; images: ProductImage[] }
+  | { restorable: false; blockedBy: ProductError; variants: ProductVariant[]; images: ProductImage[] };
+
+async function evaluateProductRestoreEligibility(product: Product): Promise<ProductRestoreEligibility> {
+  if (!product.deleted_at) {
+    return { restorable: false, blockedBy: new ProductNotDeletedError(product.id), variants: [], images: [] };
+  }
+  if (isLegacyTrash(product)) {
+    return { restorable: false, blockedBy: new ProductLegacyTrashNotRestorableError(product.id), variants: [], images: [] };
+  }
+
+  const [variants, images, category, slugConflict] = await Promise.all([
+    ProductVariant.findAll({ paranoid: false, where: { product_id: product.id } }),
+    ProductImage.findAll({ paranoid: false, where: { product_id: product.id } }),
+    Category.findByPk(product.category_id, { paranoid: false }),
+    Product.findOne({ paranoid: false, where: { slug: product.slug, id: { [Op.ne]: product.id } } })
+  ]);
+
+  if (!category) {
+    return {
+      restorable: false,
+      blockedBy: new ProductCategoryInvalidError(`Product '${product.id}' references a Category that no longer exists.`),
+      variants,
+      images
+    };
+  }
+  if (slugConflict) {
+    return { restorable: false, blockedBy: new ProductRestoreSlugConflictError(product.slug), variants, images };
+  }
+  if (!(await isSkuReservedBy(product.sku, "product", product.id))) {
+    return { restorable: false, blockedBy: new ProductRestoreSkuConflictError(product.sku), variants, images };
+  }
+  for (const variant of variants) {
+    if (!(await isSkuReservedBy(variant.sku, "variant", variant.id))) {
+      return { restorable: false, blockedBy: new ProductRestoreSkuConflictError(variant.sku), variants, images };
     }
   }
-  if (firstFailure) throw firstFailure;
+  for (const image of images.filter((item) => item.deleted_at === null)) {
+    try {
+      if (!(await objectStorageService.productImageObjectExists(product.id, image.r2_key))) {
+        return {
+          restorable: false,
+          blockedBy: new ProductRestoreConflictError(`Product image '${image.id}' is unavailable in Cloudflare R2.`),
+          variants,
+          images
+        };
+      }
+    } catch {
+      return {
+        restorable: false,
+        blockedBy: new ProductRestoreConflictError(`Product image '${image.id}' availability could not be verified in Cloudflare R2.`),
+        variants,
+        images
+      };
+    }
+  }
+
+  return { restorable: true, blockedBy: null, variants, images };
 }
 
 // Helper: Refresh cached aggregates (price, compare_at_price, stock) on a Variant Product
@@ -117,10 +176,14 @@ export async function validateShippingReadiness(product: Product, transaction?: 
     });
 
     if (activeVariants.length === 0) {
-      throw new LastActiveVariantError();
+      throw new ProductNotSellableError("A variant product must have at least one active Variant before activation.");
     }
 
     for (const variant of activeVariants) {
+      if (parseFloat(variant.price) <= 0) {
+        throw new ProductNotSellableError(`Variant '${variant.name}' (SKU: ${variant.sku}) must have a positive selling price before activation.`);
+      }
+
       const weight = variant.weight_grams ?? product.weight_grams;
       const length = variant.length_cm ?? product.length_cm;
       const width = variant.width_cm ?? product.width_cm;
@@ -144,6 +207,17 @@ export async function validateShippingReadiness(product: Product, transaction?: 
       throw new ProductShippingDataInvalidError("Simple product is missing required positive shipping measurements.");
     }
   }
+}
+
+export async function validateProductActivationReadiness(product: Product, transaction?: Transaction): Promise<void> {
+  const category = await Category.findByPk(product.category_id, {
+    ...(transaction ? { transaction } : {})
+  });
+  if (!category || !category.active) {
+    throw new ProductCategoryInvalidError("Product cannot be activated because its Category is inactive or deleted.");
+  }
+  validatePetTypeCompatibility(category.pet_type, product.pet_type);
+  await validateShippingReadiness(product, transaction);
 }
 
 // Helper: Format image DTO
@@ -228,7 +302,7 @@ export class ProductService {
       }
     }
 
-    let order: Array<[string, string]> = [["created_at", "DESC"]];
+    let order: Array<[string, string]> = [["created_at", "DESC"], ["id", "DESC"]];
     if (query.sort === "price_asc") order = [["price", "ASC"], ["id", "ASC"]];
     if (query.sort === "price_desc") order = [["price", "DESC"], ["id", "ASC"]];
     if (query.sort === "name") order = [["name", "ASC"], ["id", "ASC"]];
@@ -363,9 +437,11 @@ export class ProductService {
     const offset = (page - 1) * pageSize;
 
     const whereClause: Record<string, unknown> = {};
+    const deletedOnly = query.status === "deleted";
 
     if (query.categoryId) whereClause.category_id = query.categoryId;
-    if (query.status) whereClause.status = query.status;
+    if (query.status && !deletedOnly) whereClause.status = query.status;
+    if (deletedOnly) whereClause.deleted_at = { [Op.ne]: null };
     if (query.petType) whereClause.pet_type = query.petType;
 
     if (query.stockLevel === "out_of_stock") whereClause.stock = 0;
@@ -385,20 +461,28 @@ export class ProductService {
     const sortOrder = query.order === "ASC" ? "ASC" : "DESC";
 
     const { count, rows } = await Product.findAndCountAll({
+      paranoid: !deletedOnly,
       where: whereClause,
       include: [
-        { model: Category, as: "category", attributes: ["id", "name", "slug", "pet_type"] },
+        { model: Category, as: "category", attributes: ["id", "name", "slug", "pet_type"], ...(deletedOnly ? { paranoid: false } : {}) },
         { model: ProductImage, as: "images", where: { is_primary: true }, required: false },
         { model: ProductVariant, as: "variants", attributes: ["id"], required: false }
       ],
-      order: [[sortCol, sortOrder]],
+      order: [[sortCol, sortOrder], ["id", sortOrder]],
       limit: pageSize,
       offset,
       distinct: true
     });
 
+    const restoreEligibilityById = new Map<number, ProductRestoreEligibility>();
+    if (deletedOnly) {
+      const eligibility = await Promise.all(rows.map(async (product) => [product.id, await evaluateProductRestoreEligibility(product)] as const));
+      eligibility.forEach(([productId, result]) => restoreEligibilityById.set(productId, result));
+    }
+
     const items: AdminProductListItemJSON[] = rows.map((p) => {
       const primaryImg = p.images && p.images.length > 0 && p.images[0] ? formatImageDTO(p.images[0], true) : null;
+      const eligibility = restoreEligibilityById.get(p.id);
       return {
         id: p.id,
         categoryId: p.category_id,
@@ -425,7 +509,10 @@ export class ProductService {
         },
         primaryImage: primaryImg,
         createdAt: p.created_at.toISOString(),
-        updatedAt: p.updated_at.toISOString()
+        updatedAt: p.updated_at.toISOString(),
+        deletedAt: p.deleted_at?.toISOString() ?? null,
+        restorable: eligibility?.restorable ?? false,
+        restoreBlockedReason: eligibility?.blockedBy?.message ?? null
       };
     });
 
@@ -464,7 +551,7 @@ export class ProductService {
   static async getAdminProductById(id: number, transaction?: Transaction): Promise<AdminProductDetailJSON> {
     const product = await Product.findByPk(id, {
       include: [
-        { model: Category, as: "category" },
+        { model: Category, as: "category", paranoid: false },
         { model: ProductVariant, as: "variants", required: false },
         { model: ProductImage, as: "images", required: false }
       ],
@@ -477,6 +564,9 @@ export class ProductService {
 
     if (!product) {
       throw new ProductNotFoundError(id);
+    }
+    if (!product.category) {
+      throw new ProductCategoryInvalidError(`Product '${id}' references a Category that no longer exists.`);
     }
 
     const variants = (product.variants || []).map(formatVariantDTO);
@@ -506,16 +596,19 @@ export class ProductService {
       metaTitle: product.meta_title,
       metaDescription: product.meta_description,
       category: {
-        id: product.category!.id,
-        name: product.category!.name,
-        slug: product.category!.slug,
-        petType: product.category!.pet_type
+        id: product.category.id,
+        name: product.category.name,
+        slug: product.category.slug,
+        petType: product.category.pet_type
       },
       primaryImage: primaryImg,
       variants,
       images,
       createdAt: product.created_at.toISOString(),
-      updatedAt: product.updated_at.toISOString()
+      updatedAt: product.updated_at.toISOString(),
+      deletedAt: product.deleted_at?.toISOString() ?? null,
+      restorable: false,
+      restoreBlockedReason: null
     };
   }
 
@@ -529,7 +622,7 @@ export class ProductService {
     const petType = input.petType ? input.petType : (category.pet_type !== "all" ? (category.pet_type as "dog" | "cat" | "all") : "all");
     validatePetTypeCompatibility(category.pet_type, petType);
 
-    const initialSlug = slugify(input.slug || input.name);
+    const initialSlug = slugify(input.name);
     const existingSlug = await Product.findOne({ where: { slug: initialSlug }, paranoid: false });
     if (existingSlug) {
       throw new ProductSlugConflictError(initialSlug);
@@ -620,7 +713,7 @@ export class ProductService {
       const reloaded = await Product.findByPk(productId, { transaction: t });
 
       if (input.status === "active") {
-        await validateShippingReadiness(reloaded!, t);
+        await validateProductActivationReadiness(reloaded!, t);
       }
 
       return await ProductService.getAdminProductById(productId, t);
@@ -677,15 +770,6 @@ export class ProductService {
       if (input.widthCm !== undefined) updates.width_cm = input.widthCm ? formatMoney(input.widthCm) : null;
       if (input.heightCm !== undefined) updates.height_cm = input.heightCm ? formatMoney(input.heightCm) : null;
 
-      if (input.slug !== undefined && input.slug !== product.slug) {
-        const newSlug = slugify(input.slug);
-        const existing = await Product.findOne({ where: { slug: newSlug, id: { [Op.ne]: id } }, paranoid: false, transaction: t });
-        if (existing) {
-          throw new ProductSlugConflictError(newSlug);
-        }
-        updates.slug = newSlug;
-      }
-
       if (input.sku !== undefined) {
         const newSku = normalizeAndValidateSku(input.sku);
         if (newSku !== product.sku) {
@@ -697,7 +781,7 @@ export class ProductService {
       await product.update(updates, { transaction: t });
 
       if (product.status === "active") {
-        await validateShippingReadiness(product, t);
+        await validateProductActivationReadiness(product, t);
       }
 
       return await ProductService.getAdminProductById(id, t);
@@ -712,7 +796,7 @@ export class ProductService {
     }
 
     if (status === "active") {
-      await validateShippingReadiness(product);
+      await validateProductActivationReadiness(product);
     }
 
     await product.update({ status });
@@ -726,16 +810,48 @@ export class ProductService {
       throw new ProductNotFoundError(id);
     }
 
-    const productImages = await ProductImage.findAll({ where: { product_id: id } });
-    if (productImages.length > 0) objectStorageService.ensureConfigured();
+    await product.destroy();
+  }
 
-    await sequelize.transaction(async (t) => {
-      await ProductVariant.destroy({ where: { product_id: id }, transaction: t });
-      await ProductImage.destroy({ where: { product_id: id }, transaction: t });
-      await product.destroy({ transaction: t });
+  static async restoreProduct(id: number): Promise<AdminProductDetailJSON> {
+    const product = await Product.findByPk(id, { paranoid: false });
+    if (!product) throw new ProductNotFoundError(id);
+    if (!product.deleted_at) throw new ProductNotDeletedError(id);
+
+    const eligibility = await evaluateProductRestoreEligibility(product);
+    if (!eligibility.restorable) throw eligibility.blockedBy;
+    const allVariants = eligibility.variants;
+
+    return await sequelize.transaction(async (t) => {
+      const locked = await Product.findByPk(id, { paranoid: false, transaction: t, lock: true });
+      if (!locked) throw new ProductNotFoundError(id);
+      if (!locked.deleted_at) throw new ProductNotDeletedError(id);
+
+      const category = await Category.findByPk(locked.category_id, { paranoid: false, transaction: t });
+      if (!category) {
+        throw new ProductCategoryInvalidError(`Product '${id}' references a Category that no longer exists.`);
+      }
+
+      const slugConflict = await Product.findOne({
+        paranoid: false,
+        where: { slug: locked.slug, id: { [Op.ne]: id } },
+        transaction: t
+      });
+      if (slugConflict) throw new ProductRestoreSlugConflictError(locked.slug);
+
+      if (!(await isSkuReservedBy(locked.sku, "product", id, t))) {
+        throw new ProductRestoreSkuConflictError(locked.sku);
+      }
+      for (const variant of allVariants) {
+        if (!(await isSkuReservedBy(variant.sku, "variant", variant.id, t))) {
+          throw new ProductRestoreSkuConflictError(variant.sku);
+        }
+      }
+
+      await locked.restore({ transaction: t });
+      await locked.update({ status: "draft" }, { transaction: t });
+      return await ProductService.getAdminProductById(id, t);
     });
-
-    await deleteProductImageObjects(productImages);
   }
 
   // Duplicate Product
@@ -830,7 +946,7 @@ export class ProductService {
 
     if (status === "active") {
       for (const p of products) {
-        await validateShippingReadiness(p);
+        await validateProductActivationReadiness(p);
       }
     }
 
@@ -849,15 +965,6 @@ export class ProductService {
       throw new InvalidProductDataError("One or more Product IDs in bulk delete payload do not exist.");
     }
 
-    const productImages = await ProductImage.findAll({ where: { product_id: uniqueIds } });
-    if (productImages.length > 0) objectStorageService.ensureConfigured();
-
-    const affected = await sequelize.transaction(async (t) => {
-      await ProductVariant.destroy({ where: { product_id: uniqueIds }, transaction: t });
-      await ProductImage.destroy({ where: { product_id: uniqueIds }, transaction: t });
-      return await Product.destroy({ where: { id: uniqueIds }, transaction: t });
-    });
-    await deleteProductImageObjects(productImages);
-    return affected;
+    return await Product.destroy({ where: { id: uniqueIds } });
   }
 }

@@ -30,6 +30,10 @@ router.patch("/:categoryId/status", (req, res, next) => {
   void AdminCategoryController.updateCategoryStatus(req, res, next);
 });
 
+router.patch("/:categoryId/restore", (req, res, next) => {
+  void AdminCategoryController.restoreCategory(req, res, next);
+});
+
 router.delete("/:categoryId", (req, res, next) => {
   void AdminCategoryController.deleteCategory(req, res, next);
 });

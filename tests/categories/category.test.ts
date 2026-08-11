@@ -95,7 +95,8 @@ describe("Stage 12: Categories Backend Integration Tests", () => {
       "test-reorder-2",
       "test-reorder-3",
       "delete-guard-cat",
-      "soft-deleted-slug-test"
+      "soft-deleted-slug-test",
+      "deleted-count-category"
     ];
     const existingCats = await Category.findAll({ where: { slug: testSlugs }, paranoid: false });
     if (existingCats.length > 0) {
@@ -115,7 +116,8 @@ describe("Stage 12: Categories Backend Integration Tests", () => {
       "test-reorder-2",
       "test-reorder-3",
       "delete-guard-cat",
-      "soft-deleted-slug-test"
+      "soft-deleted-slug-test",
+      "deleted-count-category"
     ];
     const existingCats = await Category.findAll({ where: { slug: testSlugs }, paranoid: false });
     if (existingCats.length > 0) {
@@ -186,6 +188,7 @@ describe("Stage 12: Categories Backend Integration Tests", () => {
   describe("Admin Category CRUD & Lifecycle", () => {
     let createdCat1Id: number;
     let createdCat2Id: number;
+    let softDeletedCategoryId: number;
 
     it("should create a new category using transactional IdSequenceService", async () => {
       const payload = {
@@ -395,6 +398,7 @@ describe("Stage 12: Categories Backend Integration Tests", () => {
         .set("Authorization", `Bearer ${adminToken}`)
         .send({ name: "Soft Delete Test", slug: "soft-deleted-slug-test" });
       const softCatId = catRes.body.data.id;
+      softDeletedCategoryId = softCatId;
 
       // Perform soft delete
       const delRes = await request(app)
@@ -426,6 +430,156 @@ describe("Stage 12: Categories Backend Integration Tests", () => {
 
       expect(conflictRes.status).toBe(409);
       expect(conflictRes.body.error.code).toBe("CATEGORY_SLUG_CONFLICT");
+    });
+
+    it("should list only soft-deleted categories while normal and Storefront lists exclude them", async () => {
+      const normalRes = await request(app)
+        .get("/api/v1/admin/categories?status=all")
+        .set("Authorization", `Bearer ${adminToken}`);
+
+      expect(normalRes.status).toBe(200);
+      expect(normalRes.body.data.some((category: { id: number }) => category.id === softDeletedCategoryId)).toBe(false);
+      expect(normalRes.body.data.every((category: { deletedAt: string | null }) => category.deletedAt === null)).toBe(true);
+
+      const deletedRes = await request(app)
+        .get("/api/v1/admin/categories?status=deleted")
+        .set("Authorization", `Bearer ${adminToken}`);
+
+      expect(deletedRes.status).toBe(200);
+      expect(deletedRes.body.data.length).toBeGreaterThan(0);
+      expect(deletedRes.body.data.every((category: { deletedAt: string | null }) => Boolean(category.deletedAt))).toBe(true);
+      const deletedCategory = deletedRes.body.data.find(
+        (category: { id: number }) => category.id === softDeletedCategoryId
+      );
+      expect(deletedCategory).toMatchObject({
+        id: softDeletedCategoryId,
+        slug: "soft-deleted-slug-test",
+        productCount: 0
+      });
+      expect(deletedCategory.deletedAt).toEqual(expect.any(String));
+
+      const storefrontList = await request(app).get("/api/v1/storefront/categories");
+      expect(storefrontList.body.data.some((category: { id: number }) => category.id === softDeletedCategoryId)).toBe(false);
+
+      const storefrontDetail = await request(app).get(
+        "/api/v1/storefront/categories/soft-deleted-slug-test"
+      );
+      expect(storefrontDetail.status).toBe(404);
+      expect(storefrontDetail.body.error.code).toBe("CATEGORY_NOT_FOUND");
+    });
+
+    it("should calculate deleted productCount and preserve legacy Product integrity on restore", async () => {
+      const categoryRes = await request(app)
+        .post("/api/v1/admin/categories")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ name: "Deleted Count Category", slug: "deleted-count-category" });
+      const categoryId = categoryRes.body.data.id;
+
+      const productId = await sequelize.transaction((transaction) =>
+        IdSequenceService.allocateNextId(DATABASE_TABLE_NAMES.products, transaction)
+      );
+      const product = await Product.create({
+        id: productId,
+        category_id: categoryId,
+        name: "Legacy Deleted Category Product",
+        slug: `legacy-deleted-category-product-${Date.now()}`,
+        sku: `LEGACY-DELETED-CATEGORY-${Date.now()}`,
+        description: "Legacy integrity fixture",
+        price: "12.00",
+        stock: 1
+      });
+
+      const category = await Category.findByPk(categoryId);
+      await category?.destroy();
+
+      const deletedRes = await request(app)
+        .get("/api/v1/admin/categories?status=deleted")
+        .set("Authorization", `Bearer ${adminToken}`);
+      const deletedCategory = deletedRes.body.data.find(
+        (item: { id: number }) => item.id === categoryId
+      );
+      expect(deletedCategory.productCount).toBe(1);
+
+      const restoreRes = await request(app)
+        .patch(`/api/v1/admin/categories/${categoryId}/restore`)
+        .set("Authorization", `Bearer ${adminToken}`);
+      expect(restoreRes.status).toBe(200);
+      expect(restoreRes.body.data.productCount).toBe(1);
+      expect(await Product.findByPk(product.id)).not.toBeNull();
+
+      await product.destroy({ force: true });
+    });
+
+    it("should reject restore for invalid, missing, and non-deleted categories with structured errors", async () => {
+      const invalidRes = await request(app)
+        .patch("/api/v1/admin/categories/not-a-number/restore")
+        .set("Authorization", `Bearer ${adminToken}`);
+      expect(invalidRes.status).toBe(400);
+      expect(invalidRes.body.error.code).toBe("INVALID_CATEGORY_ID");
+
+      const missingRes = await request(app)
+        .patch("/api/v1/admin/categories/2147483647/restore")
+        .set("Authorization", `Bearer ${adminToken}`);
+      expect(missingRes.status).toBe(404);
+      expect(missingRes.body.error.code).toBe("CATEGORY_NOT_FOUND");
+
+      const notDeletedRes = await request(app)
+        .patch(`/api/v1/admin/categories/${createdCat1Id}/restore`)
+        .set("Authorization", `Bearer ${adminToken}`);
+      expect(notDeletedRes.status).toBe(409);
+      expect(notDeletedRes.body.error.code).toBe("CATEGORY_NOT_DELETED");
+    });
+
+    it("should restore a deleted category with its ID and slug preserved and inactive", async () => {
+      const restoreRes = await request(app)
+        .patch(`/api/v1/admin/categories/${softDeletedCategoryId}/restore`)
+        .set("Authorization", `Bearer ${adminToken}`);
+
+      expect(restoreRes.status).toBe(200);
+      expect(restoreRes.body.data).toMatchObject({
+        id: softDeletedCategoryId,
+        slug: "soft-deleted-slug-test",
+        active: false,
+        deletedAt: null,
+        productCount: 0
+      });
+
+      const restoredRow = await Category.findByPk(softDeletedCategoryId, { paranoid: false });
+      expect(restoredRow?.id).toBe(softDeletedCategoryId);
+      expect(restoredRow?.slug).toBe("soft-deleted-slug-test");
+      expect(restoredRow?.active).toBe(false);
+      expect(restoredRow?.deleted_at).toBeNull();
+
+      const deletedRes = await request(app)
+        .get("/api/v1/admin/categories?status=deleted")
+        .set("Authorization", `Bearer ${adminToken}`);
+      expect(deletedRes.body.data.some((category: { id: number }) => category.id === softDeletedCategoryId)).toBe(false);
+
+      const normalRes = await request(app)
+        .get("/api/v1/admin/categories?status=inactive")
+        .set("Authorization", `Bearer ${adminToken}`);
+      expect(normalRes.body.data.some((category: { id: number }) => category.id === softDeletedCategoryId)).toBe(true);
+
+      const storefrontRes = await request(app).get(
+        "/api/v1/storefront/categories/soft-deleted-slug-test"
+      );
+      expect(storefrontRes.status).toBe(404);
+
+      const conflictRes = await request(app)
+        .post("/api/v1/admin/categories")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ name: "Still Reserved", slug: "soft-deleted-slug-test" });
+      expect(conflictRes.status).toBe(409);
+      expect(conflictRes.body.error.code).toBe("CATEGORY_SLUG_CONFLICT");
+    });
+
+    it("should reject restoring the same category twice", async () => {
+      const res = await request(app)
+        .patch(`/api/v1/admin/categories/${softDeletedCategoryId}/restore`)
+        .set("Authorization", `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe("CATEGORY_NOT_DELETED");
     });
 
     it("should reorder categories transactionally", async () => {

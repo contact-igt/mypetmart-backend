@@ -145,4 +145,14 @@ export class AdminCategoryController {
       next(error);
     }
   }
+
+  public static async restoreCategory(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const id = parseCategoryId(req.params.categoryId);
+      const category = await CategoryService.restoreCategory(id);
+      sendSuccess(res, 200, category);
+    } catch (error) {
+      next(error);
+    }
+  }
 }
