@@ -3,6 +3,7 @@ import { UniqueConstraintError, type Transaction } from "sequelize";
 import { DATABASE_TABLE_NAMES } from "../../constants/database.constants.js";
 import { sequelize } from "../../database/index.js";
 import { Cart, CartItem, Product, ProductImage, ProductVariant, User } from "../../database/tables/index.js";
+import type { Order } from "../../database/tables/OrderTable/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
 import { formatImageDTO } from "../ProductModels/product.service.js";
 import { ProductNotFoundError, ProductVariantNotFoundError } from "../ProductModels/product.errors.js";
@@ -260,6 +261,37 @@ async function loadSellableProductAndVariant(
 }
 
 export const CartService = {
+  /**
+   * Finalizes the exact Cart that produced a now-verified-paid Order,
+   * flipping it active -> ordered. Called only from
+   * PaymentFinalizationService, inside its own locked transaction — never
+   * opens a transaction of its own. Idempotent: a Cart that is missing,
+   * already `ordered`, or `abandoned` is left untouched, so replaying this
+   * on a duplicate/replayed webhook is always safe.
+   *
+   * Prefers `order.cart_id` (the exact Cart row captured at Order creation
+   * time — see migration 033). Only Orders created before that column
+   * existed (`cart_id === null`) fall back to the legacy "caller's current
+   * active Cart" lookup, which is not guaranteed to be the same Cart that
+   * produced the Order if its contents changed afterward — acceptable only
+   * as a one-time migration bridge, not the steady-state behavior.
+   */
+  async finalizeCartForOrder(order: Order, transaction: Transaction): Promise<void> {
+    const cart =
+      order.cart_id !== null
+        ? await Cart.findByPk(order.cart_id, { transaction, lock: transaction.LOCK.UPDATE })
+        : await Cart.findOne({
+            where: order.user_id !== null ? { user_id: order.user_id, status: "active" as const } : { guest_token_hash: order.guest_identity_hash, status: "active" as const },
+            transaction,
+            lock: transaction.LOCK.UPDATE
+          });
+
+    if (cart && cart.status === "active") {
+      cart.status = "ordered";
+      await cart.save({ transaction });
+    }
+  },
+
   async getCart(identity: CartIdentity): Promise<CartJSON> {
     const cart = await findActiveCart(identity);
     return buildCartDTO(cart);

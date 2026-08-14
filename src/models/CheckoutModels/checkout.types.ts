@@ -9,6 +9,9 @@ export type CheckoutAddressCandidate = {
   state: string;
   postalCode: string;
   country: string;
+  // Coordinates are optional (both or neither). Exposed as number|null.
+  latitude: number | null;
+  longitude: number | null;
 };
 
 export type InlineAddressInput = {
@@ -20,6 +23,9 @@ export type InlineAddressInput = {
   state: string;
   postalCode: string;
   country?: string;
+  // Both must be present together or both absent. Never one without the other.
+  latitude?: number;
+  longitude?: number;
 };
 
 export type CheckoutPreviewInput = {
@@ -27,6 +33,7 @@ export type CheckoutPreviewInput = {
   shippingAddress?: InlineAddressInput;
   billingSameAsShipping: boolean;
   billingAddress?: InlineAddressInput;
+  contactEmail?: string;
 };
 
 export type CheckoutReadiness = {
@@ -54,7 +61,7 @@ export type CheckoutPreviewJSON = {
   billingAddress: CheckoutAddressCandidate;
   shipping: {
     status: "pending";
-    amount: null;
+    amount: string | null;
   };
   totals: CheckoutTotals;
   readiness: CheckoutReadiness;

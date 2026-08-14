@@ -249,4 +249,260 @@ describe("Address Book Backend Integration Tests", () => {
     ).toBe(404);
     expect((await request(app).get(ADDRESS_URL).set("Authorization", `Bearer ${customerAToken}`)).body.data).toHaveLength(1);
   });
+
+  // -------------------------------------------------------------------------
+  // Coordinate Tests
+  // -------------------------------------------------------------------------
+  describe("Address Coordinates", () => {
+    it("creates an address with no coordinates — latitude and longitude are null in response", async () => {
+      const res = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload());
+      expect(res.status).toBe(201);
+      expect(res.body.data.latitude).toBeNull();
+      expect(res.body.data.longitude).toBeNull();
+    });
+
+    it("creates an address with valid coordinates — values are returned as numbers", async () => {
+      const res = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: 19.076, longitude: 72.8777 }));
+      expect(res.status).toBe(201);
+      expect(typeof res.body.data.latitude).toBe("number");
+      expect(typeof res.body.data.longitude).toBe("number");
+      expect(res.body.data.latitude).toBeCloseTo(19.076, 4);
+      expect(res.body.data.longitude).toBeCloseTo(72.8777, 4);
+    });
+
+    it("creates an address with boundary coordinates (lat=90, lon=-180) — accepted", async () => {
+      const res = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: 90, longitude: -180 }));
+      expect(res.status).toBe(201);
+      expect(res.body.data.latitude).toBeCloseTo(90, 4);
+      expect(res.body.data.longitude).toBeCloseTo(-180, 4);
+    });
+
+    it("creates an address with boundary coordinates (lat=-90, lon=180) — accepted", async () => {
+      const res = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: -90, longitude: 180 }));
+      expect(res.status).toBe(201);
+      expect(res.body.data.latitude).toBeCloseTo(-90, 4);
+      expect(res.body.data.longitude).toBeCloseTo(180, 4);
+    });
+
+    // Longitude's valid range is -180..180, one unit wider than latitude's -90..90 — these
+    // two same-sign boundary pairs specifically prove the `longitude DECIMAL(10,6)` column
+    // (one digit of precision wider than `latitude DECIMAL(9,6)`) actually stores the full
+    // magnitude at both extremes, not just values that happen to fit within ±90.
+    it("creates an address with boundary coordinates (lat=90, lon=180) — accepted", async () => {
+      const res = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: 90, longitude: 180 }));
+      expect(res.status).toBe(201);
+      expect(res.body.data.latitude).toBeCloseTo(90, 4);
+      expect(res.body.data.longitude).toBeCloseTo(180, 4);
+
+      const fetched = await request(app).get(`${ADDRESS_URL}/${res.body.data.id}`).set("Authorization", `Bearer ${customerAToken}`);
+      expect(fetched.status).toBe(200);
+      expect(fetched.body.data.longitude).toBeCloseTo(180, 4);
+    });
+
+    it("creates an address with boundary coordinates (lat=-90, lon=-180) — accepted", async () => {
+      const res = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: -90, longitude: -180 }));
+      expect(res.status).toBe(201);
+      expect(res.body.data.latitude).toBeCloseTo(-90, 4);
+      expect(res.body.data.longitude).toBeCloseTo(-180, 4);
+
+      const fetched = await request(app).get(`${ADDRESS_URL}/${res.body.data.id}`).set("Authorization", `Bearer ${customerAToken}`);
+      expect(fetched.status).toBe(200);
+      expect(fetched.body.data.longitude).toBeCloseTo(-180, 4);
+    });
+
+    it("rejects latitude-only (longitude absent)", async () => {
+      const res = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: 19.076 }));
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects longitude-only (latitude absent)", async () => {
+      const res = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ longitude: 72.8777 }));
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects invalid latitude (> 90)", async () => {
+      const res = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: 91, longitude: 72 }));
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects invalid latitude (< -90)", async () => {
+      const res = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: -91, longitude: 72 }));
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects invalid longitude (> 180)", async () => {
+      const res = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: 19, longitude: 181 }));
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects invalid longitude (< -180)", async () => {
+      const res = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: 19, longitude: -181 }));
+      expect(res.status).toBe(400);
+    });
+
+    it("API contract: coordinate values are serialized as JSON numbers, not strings", async () => {
+      const res = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: 28.6139, longitude: 77.209 }));
+      expect(res.status).toBe(201);
+      // Parse the raw JSON body to confirm number type (supertest already parses JSON but
+      // we verify the type explicitly to catch any accidental string serialization).
+      const body = JSON.parse(JSON.stringify(res.body));
+      expect(typeof body.data.latitude).toBe("number");
+      expect(typeof body.data.longitude).toBe("number");
+    });
+
+    it("update: sets coordinates on a previously coordinate-free address", async () => {
+      const created = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload());
+      expect(created.body.data.latitude).toBeNull();
+
+      const updated = await request(app)
+        .patch(`${ADDRESS_URL}/${created.body.data.id}`)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ latitude: 19.076, longitude: 72.8777 });
+      expect(updated.status).toBe(200);
+      expect(updated.body.data.latitude).toBeCloseTo(19.076, 4);
+      expect(updated.body.data.longitude).toBeCloseTo(72.8777, 4);
+    });
+
+    it("update: updates existing coordinates to new values", async () => {
+      const created = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: 19.076, longitude: 72.8777 }));
+
+      const updated = await request(app)
+        .patch(`${ADDRESS_URL}/${created.body.data.id}`)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ latitude: 28.6139, longitude: 77.209 });
+      expect(updated.status).toBe(200);
+      expect(updated.body.data.latitude).toBeCloseTo(28.6139, 4);
+      expect(updated.body.data.longitude).toBeCloseTo(77.209, 4);
+    });
+
+    it("update: clears coordinates by sending both null", async () => {
+      const created = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: 19.076, longitude: 72.8777 }));
+      expect(created.body.data.latitude).not.toBeNull();
+
+      const updated = await request(app)
+        .patch(`${ADDRESS_URL}/${created.body.data.id}`)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ latitude: null, longitude: null });
+      expect(updated.status).toBe(200);
+      expect(updated.body.data.latitude).toBeNull();
+      expect(updated.body.data.longitude).toBeNull();
+    });
+
+    it("update: preserves existing coordinates when neither is sent", async () => {
+      const created = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: 19.076, longitude: 72.8777 }));
+
+      const updated = await request(app)
+        .patch(`${ADDRESS_URL}/${created.body.data.id}`)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ city: "Pune" });
+      expect(updated.status).toBe(200);
+      expect(updated.body.data.city).toBe("Pune");
+      expect(updated.body.data.latitude).toBeCloseTo(19.076, 4);
+      expect(updated.body.data.longitude).toBeCloseTo(72.8777, 4);
+    });
+
+    it("update: rejects latitude-only (longitude absent)", async () => {
+      const created = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload());
+
+      const res = await request(app)
+        .patch(`${ADDRESS_URL}/${created.body.data.id}`)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ latitude: 19.076 });
+      expect(res.status).toBe(400);
+    });
+
+    it("update: rejects longitude-only (latitude absent)", async () => {
+      const created = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload());
+
+      const res = await request(app)
+        .patch(`${ADDRESS_URL}/${created.body.data.id}`)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ longitude: 72.8777 });
+      expect(res.status).toBe(400);
+    });
+
+    it("update: rejects latitude null with a numeric longitude", async () => {
+      const created = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload());
+
+      const res = await request(app)
+        .patch(`${ADDRESS_URL}/${created.body.data.id}`)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ latitude: null, longitude: 72.8777 });
+      expect(res.status).toBe(400);
+    });
+
+    it("update: rejects longitude null with a numeric latitude", async () => {
+      const created = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload());
+
+      const res = await request(app)
+        .patch(`${ADDRESS_URL}/${created.body.data.id}`)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ latitude: 19.076, longitude: null });
+      expect(res.status).toBe(400);
+    });
+  });
 });
+

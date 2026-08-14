@@ -186,6 +186,9 @@ const environmentSchema = z
     PAYMENT_KEY_ID: optionalTrimmedStringSchema,
     PAYMENT_KEY_SECRET: optionalTrimmedStringSchema,
     PAYMENT_WEBHOOK_SECRET: optionalTrimmedStringSchema,
+    // PayU Hosted Checkout form-post endpoint. Optional — payment.config.ts
+    // falls back to PayU's published test/live URL by NODE_ENV when unset.
+    PAYMENT_GATEWAY_URL: z.preprocess(optionalString, z.url("PAYMENT_GATEWAY_URL must be a valid URL.").optional()),
 
     SHIPPING_PROVIDER: optionalTrimmedStringSchema,
     SHIPPING_API_KEY: optionalTrimmedStringSchema,

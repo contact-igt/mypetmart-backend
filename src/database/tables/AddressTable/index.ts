@@ -16,6 +16,10 @@ export class Address extends Model<InferAttributes<Address>, InferCreationAttrib
   declare state: string;
   declare postal_code: string;
   declare country: CreationOptional<string>;
+  // mysql2 / Sequelize return DECIMAL columns as strings. Typed as string|null here;
+  // the public DTO normalizes to number|null via parseFloat().
+  declare latitude: string | null;
+  declare longitude: string | null;
   declare is_default: CreationOptional<boolean>;
   declare created_at: CreationOptional<Date>;
   declare updated_at: CreationOptional<Date>;
@@ -42,6 +46,8 @@ export function initializeAddressTable(sequelize: Sequelize): typeof Address {
       state: { type: DataTypes.STRING(120), allowNull: false, validate: { notEmpty: true, len: [1, 120] } },
       postal_code: { type: DataTypes.STRING(20), allowNull: false, validate: { notEmpty: true, len: [1, 20] } },
       country: { type: DataTypes.STRING(2), allowNull: false, defaultValue: DEFAULT_COUNTRY_CODE, validate: { len: [2, 2] } },
+      latitude: { type: DataTypes.DECIMAL(9, 6), allowNull: true },
+      longitude: { type: DataTypes.DECIMAL(10, 6), allowNull: true },
       is_default: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       created_at: DataTypes.DATE,
       updated_at: DataTypes.DATE,

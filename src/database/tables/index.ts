@@ -20,6 +20,7 @@ import { ReturnRequest, initializeReturnRequestTable } from "./ReturnRequestTabl
 import { Shipment, initializeShipmentTable } from "./ShipmentTable/index.js";
 import { StoreSetting, initializeStoreSettingTable } from "./StoreSettingTable/index.js";
 import { User, initializeUserTable } from "./UserTable/index.js";
+import { Wishlist, initializeWishlistTable } from "./WishlistTable/index.js";
 
 export {
   Address,
@@ -41,7 +42,8 @@ export {
   ReturnRequest,
   Shipment,
   StoreSetting,
-  User
+  User,
+  Wishlist
 };
 
 export const EXPECTED_DATABASE_MODEL_NAMES = [
@@ -64,7 +66,8 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "ContactEnquiry",
   "StoreSetting",
   "AuthChallenge",
-  "PasswordResetToken"
+  "PasswordResetToken",
+  "Wishlist"
 ] as const;
 
 export type DatabaseModelName = (typeof EXPECTED_DATABASE_MODEL_NAMES)[number];
@@ -90,6 +93,7 @@ export type DatabaseModelRegistry = Readonly<{
   StoreSetting: typeof StoreSetting;
   AuthChallenge: typeof AuthChallenge;
   PasswordResetToken: typeof PasswordResetToken;
+  Wishlist: typeof Wishlist;
 }>;
 
 let initializedRegistry: DatabaseModelRegistry | undefined;
@@ -119,6 +123,7 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeStoreSettingTable(sequelize);
   initializeAuthChallengeTable(sequelize);
   initializePasswordResetTokenTable(sequelize);
+  initializeWishlistTable(sequelize);
 
   initializedRegistry = Object.freeze({
     User,
@@ -140,7 +145,8 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     ContactEnquiry,
     StoreSetting,
     AuthChallenge,
-    PasswordResetToken
+    PasswordResetToken,
+    Wishlist
   });
 
   return initializedRegistry;

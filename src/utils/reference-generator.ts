@@ -1,7 +1,7 @@
 /**
  * Centralized business reference code generator.
  */
-export function buildBusinessReference(type: "customer" | "admin" | "super_admin" | "order" | "return" | "enquiry", id: number): string {
+export function buildBusinessReference(type: "customer" | "admin" | "super_admin" | "order" | "return" | "enquiry" | "payment", id: number): string {
   let prefix: string;
   switch (type) {
     case "customer":
@@ -21,6 +21,9 @@ export function buildBusinessReference(type: "customer" | "admin" | "super_admin
       break;
     case "enquiry":
       prefix = "ENQ";
+      break;
+    case "payment":
+      prefix = "PAY";
       break;
     default:
       throw new Error(`Unsupported business reference type: ${type as string}`);

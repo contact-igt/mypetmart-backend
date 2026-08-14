@@ -249,7 +249,7 @@ describe("Checkout Preview Backend Integration Tests", () => {
       const guest = request.agent(app);
       await guest.post(`${CART_URL}/items`).send({ productId: product.id, quantity: 1 });
 
-      const res = await guest.post(CHECKOUT_URL).send({ shippingAddress: validAddressPayload() });
+      const res = await guest.post(CHECKOUT_URL).send({ shippingAddress: validAddressPayload(), contactEmail: "guest@example.com" });
       expect(res.status).toBe(200);
       expect(res.body.data.readiness.cartReady).toBe(true);
       expect(res.body.data.shippingAddress.recipientName).toBe("Jordan Rivera");
@@ -262,9 +262,19 @@ describe("Checkout Preview Backend Integration Tests", () => {
       const guest = request.agent(app);
       await guest.post(`${CART_URL}/items`).send({ productId: product.id, quantity: 1 });
 
-      const res = await guest.post(CHECKOUT_URL).send({ savedAddressId: savedByCustomer.body.data.id });
+      const res = await guest.post(CHECKOUT_URL).send({ savedAddressId: savedByCustomer.body.data.id, contactEmail: "guest@example.com" });
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe("CHECKOUT_ADDRESS_REQUIRED");
+    });
+
+    it("rejects guest checkout without contactEmail", async () => {
+      const product = await createSimpleProduct({ stock: 10 });
+      const guest = request.agent(app);
+      await guest.post(`${CART_URL}/items`).send({ productId: product.id, quantity: 1 });
+
+      const res = await guest.post(CHECKOUT_URL).send({ shippingAddress: validAddressPayload() });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("CHECKOUT_EMAIL_REQUIRED");
     });
   });
 
@@ -515,8 +525,8 @@ describe("Checkout Preview Backend Integration Tests", () => {
         .send({ savedAddressId: address.body.data.id });
 
       expect(res.body.data.totals.merchandiseSubtotal).toBe("59.97");
-      expect(res.body.data.totals.shippingAmount).toBeNull();
-      expect(res.body.data.totals.payableTotal).toBeNull();
+      expect(res.body.data.totals.shippingAmount).toBe("0.00");
+      expect(res.body.data.totals.payableTotal).toBe("59.97");
     });
   });
 
@@ -567,7 +577,7 @@ describe("Checkout Preview Backend Integration Tests", () => {
       const guest = request.agent(app);
       await guest.post(`${CART_URL}/items`).send({ productId: product.id, quantity: 1 });
 
-      const res = await guest.post(CHECKOUT_URL).send({ shippingAddress: validAddressPayload({ line1: "  221B Baker Street  " }) });
+      const res = await guest.post(CHECKOUT_URL).send({ shippingAddress: validAddressPayload({ line1: "  221B Baker Street  " }), contactEmail: "guest@example.com" });
       expect(res.body.data.shippingAddress.country).toBe("IN");
       expect(res.body.data.shippingAddress.line1).toBe("221B Baker Street");
     });
@@ -577,7 +587,7 @@ describe("Checkout Preview Backend Integration Tests", () => {
       const guest = request.agent(app);
       await guest.post(`${CART_URL}/items`).send({ productId: product.id, quantity: 1 });
 
-      const res = await guest.post(CHECKOUT_URL).send({ shippingAddress: validAddressPayload({ recipientName: "", phone: "###" }) });
+      const res = await guest.post(CHECKOUT_URL).send({ shippingAddress: validAddressPayload({ recipientName: "", phone: "###" }), contactEmail: "guest@example.com" });
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe("AUTH_VALIDATION_FAILED");
     });
@@ -606,4 +616,104 @@ describe("Checkout Preview Backend Integration Tests", () => {
       expect(res.body.data.billingSameAsShipping).toBe(true);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Coordinate Tests
+  // -------------------------------------------------------------------------
+  describe("Checkout Coordinates", () => {
+    it("saved address with coordinates — checkout preview propagates them as numbers", async () => {
+      const product = await createSimpleProduct({ stock: 10 });
+      await request(app).post(`${CART_URL}/items`).set("Authorization", `Bearer ${customerAToken}`).send({ productId: product.id, quantity: 1 });
+      const address = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload({ latitude: 19.076, longitude: 72.8777 }));
+
+      const res = await request(app)
+        .post(CHECKOUT_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ savedAddressId: address.body.data.id });
+
+      expect(res.status).toBe(200);
+      expect(typeof res.body.data.shippingAddress.latitude).toBe("number");
+      expect(typeof res.body.data.shippingAddress.longitude).toBe("number");
+      expect(res.body.data.shippingAddress.latitude).toBeCloseTo(19.076, 4);
+      expect(res.body.data.shippingAddress.longitude).toBeCloseTo(72.8777, 4);
+    });
+
+    it("saved address without coordinates — checkout shippingAddress has latitude and longitude null", async () => {
+      const product = await createSimpleProduct({ stock: 10 });
+      await request(app).post(`${CART_URL}/items`).set("Authorization", `Bearer ${customerAToken}`).send({ productId: product.id, quantity: 1 });
+      const address = await request(app)
+        .post(ADDRESS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send(validAddressPayload());
+
+      const res = await request(app)
+        .post(CHECKOUT_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ savedAddressId: address.body.data.id });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.shippingAddress.latitude).toBeNull();
+      expect(res.body.data.shippingAddress.longitude).toBeNull();
+    });
+
+    it("guest inline address with valid coordinates — accepted and returned", async () => {
+      const product = await createSimpleProduct({ stock: 10 });
+      const guest = request.agent(app);
+      await guest.post(`${CART_URL}/items`).send({ productId: product.id, quantity: 1 });
+
+      const res = await guest.post(CHECKOUT_URL).send({
+        shippingAddress: validAddressPayload({ latitude: 28.6139, longitude: 77.209 }),
+        contactEmail: "guest@example.com"
+      });
+
+      expect(res.status).toBe(200);
+      expect(typeof res.body.data.shippingAddress.latitude).toBe("number");
+      expect(res.body.data.shippingAddress.latitude).toBeCloseTo(28.6139, 4);
+    });
+
+    it("guest inline address without coordinates — coordinates are null (coordinates are optional)", async () => {
+      const product = await createSimpleProduct({ stock: 10 });
+      const guest = request.agent(app);
+      await guest.post(`${CART_URL}/items`).send({ productId: product.id, quantity: 1 });
+
+      const res = await guest.post(CHECKOUT_URL).send({
+        shippingAddress: validAddressPayload(),
+        contactEmail: "guest@example.com"
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.shippingAddress.latitude).toBeNull();
+      expect(res.body.data.shippingAddress.longitude).toBeNull();
+    });
+
+    it("guest inline address with latitude-only — rejected (400)", async () => {
+      const product = await createSimpleProduct({ stock: 10 });
+      const guest = request.agent(app);
+      await guest.post(`${CART_URL}/items`).send({ productId: product.id, quantity: 1 });
+
+      const res = await guest.post(CHECKOUT_URL).send({
+        shippingAddress: validAddressPayload({ latitude: 19.076 }),
+        contactEmail: "guest@example.com"
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("guest inline address with longitude-only — rejected (400)", async () => {
+      const product = await createSimpleProduct({ stock: 10 });
+      const guest = request.agent(app);
+      await guest.post(`${CART_URL}/items`).send({ productId: product.id, quantity: 1 });
+
+      const res = await guest.post(CHECKOUT_URL).send({
+        shippingAddress: validAddressPayload({ longitude: 72.8777 }),
+        contactEmail: "guest@example.com"
+      });
+
+      expect(res.status).toBe(400);
+    });
+  });
 });
+

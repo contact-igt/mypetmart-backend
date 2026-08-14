@@ -7,6 +7,19 @@ import { IdSequenceService } from "../../database/sequences/id-sequence.service.
 import { AddressDefaultRequiredError, AddressNotFoundError } from "./address.errors.js";
 import type { AddressJSON, CreateAddressInput, UpdateAddressInput } from "./address.types.js";
 
+// ---------------------------------------------------------------------------
+// Coordinate normalization
+// ---------------------------------------------------------------------------
+
+// mysql2 returns DECIMAL columns as strings. The public API contract exposes
+// latitude/longitude as number|null. This helper normalizes safely without
+// risking JS float precision loss at 6-decimal-place geographic precision.
+function parseCoordinate(raw: string | null | undefined): number | null {
+  if (raw === null || raw === undefined) return null;
+  const n = parseFloat(raw);
+  return isFinite(n) ? n : null;
+}
+
 function formatAddressDTO(address: Address): AddressJSON {
   return {
     id: address.id,
@@ -19,6 +32,8 @@ function formatAddressDTO(address: Address): AddressJSON {
     state: address.state,
     postalCode: address.postal_code,
     country: address.country,
+    latitude: parseCoordinate(address.latitude),
+    longitude: parseCoordinate(address.longitude),
     isDefault: address.is_default,
     createdAt: address.created_at.toISOString(),
     updatedAt: address.updated_at.toISOString()
@@ -80,6 +95,8 @@ export const AddressService = {
           state: input.state,
           postal_code: input.postalCode,
           country: input.country ?? undefined,
+          latitude: input.latitude !== undefined ? String(input.latitude) : null,
+          longitude: input.longitude !== undefined ? String(input.longitude) : null,
           is_default: shouldBeDefault
         },
         { transaction: t }
@@ -111,6 +128,19 @@ export const AddressService = {
       if (input.state !== undefined) address.state = input.state;
       if (input.postalCode !== undefined) address.postal_code = input.postalCode;
       if (input.country !== undefined) address.country = input.country;
+
+      // Coordinate update: Zod has already enforced the pair contract before this point.
+      // Possible states arriving here:
+      //   both undefined  → preserve existing (no assignment)
+      //   both null       → clear (explicit null in input)
+      //   both numbers    → set/update
+      const latInInput = "latitude" in input;
+      const lonInInput = "longitude" in input;
+      if (latInInput && lonInInput) {
+        address.latitude = input.latitude !== null && input.latitude !== undefined ? String(input.latitude) : null;
+        address.longitude = input.longitude !== null && input.longitude !== undefined ? String(input.longitude) : null;
+      }
+
       await address.save({ transaction: t });
 
       if (input.isDefault === true && !address.is_default) {

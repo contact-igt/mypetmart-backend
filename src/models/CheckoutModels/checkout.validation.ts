@@ -7,7 +7,8 @@ export const checkoutPreviewSchema = z
     savedAddressId: z.number().int().positive().optional(),
     shippingAddress: addressFieldsSchema.optional(),
     billingSameAsShipping: z.boolean().optional().default(true),
-    billingAddress: addressFieldsSchema.optional()
+    billingAddress: addressFieldsSchema.optional(),
+    contactEmail: z.string().email().optional()
   })
   .refine((data) => data.billingSameAsShipping || data.billingAddress !== undefined, {
     message: "billingAddress is required when billingSameAsShipping is false.",

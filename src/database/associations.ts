@@ -25,7 +25,8 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
     ReturnNote,
     ReturnRequest,
     Shipment,
-    User
+    User,
+    Wishlist
   } = models;
 
   User.hasMany(AuthChallenge, { foreignKey: "user_id", as: "authChallenges" });
@@ -64,6 +65,9 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
   User.hasMany(Order, { foreignKey: "user_id", as: "orders" });
   Order.belongsTo(User, { foreignKey: "user_id", as: "user" });
 
+  Cart.hasMany(Order, { foreignKey: "cart_id", as: "orders" });
+  Order.belongsTo(Cart, { foreignKey: "cart_id", as: "cart" });
+
   Order.hasMany(OrderItem, { foreignKey: "order_id", as: "items" });
   OrderItem.belongsTo(Order, { foreignKey: "order_id", as: "order" });
 
@@ -99,6 +103,12 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
 
   User.hasMany(ReturnNote, { foreignKey: "admin_id", as: "authoredReturnNotes" });
   ReturnNote.belongsTo(User, { foreignKey: "admin_id", as: "author" });
+
+  User.hasMany(Wishlist, { foreignKey: "user_id", as: "wishlistItems" });
+  Wishlist.belongsTo(User, { foreignKey: "user_id", as: "user" });
+
+  Product.hasMany(Wishlist, { foreignKey: "product_id", as: "wishlistedBy" });
+  Wishlist.belongsTo(Product, { foreignKey: "product_id", as: "product" });
 
   associationsInitialized = true;
 }

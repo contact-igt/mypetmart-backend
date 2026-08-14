@@ -402,6 +402,7 @@ describe("Cart Backend Integration Tests", () => {
 
       expect(res.status).toBe(422);
       expect(res.body.error.code).toBe("CART_INSUFFICIENT_STOCK");
+      expect(res.body.error.details).toEqual({ availableQuantity: 3 });
     });
 
     it("rejects adding a product with zero stock", async () => {
@@ -410,6 +411,28 @@ describe("Cart Backend Integration Tests", () => {
 
       expect(res.status).toBe(422);
       expect(res.body.error.code).toBe("CART_INSUFFICIENT_STOCK");
+      expect(res.body.error.details).toEqual({ availableQuantity: 0 });
+    });
+
+    it("rejects a combined add that exceeds the per-line quantity cap, reporting the real cap in error.details", async () => {
+      const product = await createSimpleProduct({ stock: 50 });
+      await request(app).post(`${CART_URL}/items`).set("Authorization", `Bearer ${customerAToken}`).send({ productId: product.id, quantity: 15 });
+
+      const res = await request(app).post(`${CART_URL}/items`).set("Authorization", `Bearer ${customerAToken}`).send({ productId: product.id, quantity: 10 });
+
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe("CART_QUANTITY_LIMIT_EXCEEDED");
+      expect(res.body.error.details).toEqual({ max: 20 });
+    });
+
+    it("does not include a details field on errors that carry no structured domain data", async () => {
+      const product = await createSimpleProduct();
+      await product.destroy();
+      const res = await request(app).post(`${CART_URL}/items`).set("Authorization", `Bearer ${customerAToken}`).send({ productId: product.id, quantity: 1 });
+
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe("PRODUCT_NOT_FOUND");
+      expect(res.body.error).not.toHaveProperty("details");
     });
   });
 

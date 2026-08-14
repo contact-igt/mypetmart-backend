@@ -58,7 +58,6 @@ function toApplicationError(error: unknown): ApplicationError {
     statusCode: 500,
     code: "INTERNAL_ERROR",
     message: INTERNAL_ERROR_MESSAGE,
-    details: error,
     isOperational: false
   });
 }
@@ -79,5 +78,10 @@ export const errorHandlerMiddleware: ErrorRequestHandler = (error, request, resp
   }
 
   const errors = applicationError instanceof ValidationError ? applicationError.errors : undefined;
-  sendError(response, applicationError.statusCode, applicationError.code, applicationError.publicMessage, errors);
+  // Only ever forward `details` for operational (expected, application-thrown) errors — an
+  // unexpected/internal error's ApplicationError never carries one (see toApplicationError
+  // above), but this gate is kept as a second, explicit line of defense against ever leaking
+  // internal exception data to a client through this field.
+  const details = applicationError.isOperational ? applicationError.details : undefined;
+  sendError(response, applicationError.statusCode, applicationError.code, applicationError.publicMessage, errors, details);
 };

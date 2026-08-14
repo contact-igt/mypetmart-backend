@@ -13,6 +13,11 @@ import { adminImageRouter } from "../../models/ProductModels/admin-image.routes.
 import { storefrontCartRouter } from "../../models/CartModels/storefront-cart.routes.js";
 import { storefrontAddressRouter } from "../../models/AddressModels/storefront-address.routes.js";
 import { storefrontCheckoutRouter } from "../../models/CheckoutModels/storefront-checkout.routes.js";
+import { storefrontOrderRouter } from "../../models/OrderModels/storefront-order.routes.js";
+import { adminOrderRouter } from "../../models/OrderModels/admin-order.routes.js";
+import { storefrontWishlistRouter } from "../../models/WishlistModels/storefront-wishlist.routes.js";
+import { storefrontPaymentRouter } from "../../models/PaymentModels/storefront-payment.routes.js";
+import { payuWebhookRouter } from "../../models/PaymentModels/payu-webhook.routes.js";
 
 export const v1Router = Router();
 
@@ -29,5 +34,10 @@ v1Router.use("/admin/products", adminImageRouter);
 v1Router.use("/storefront/cart", storefrontCartRouter);
 v1Router.use("/storefront/addresses", storefrontAddressRouter);
 v1Router.use("/storefront/checkout", storefrontCheckoutRouter);
+v1Router.use("/storefront/orders", storefrontOrderRouter);
+v1Router.use("/admin/orders", adminOrderRouter);
+v1Router.use("/storefront/wishlist", storefrontWishlistRouter);
+v1Router.use("/storefront/payments", storefrontPaymentRouter);
+v1Router.use("/payments/payu", payuWebhookRouter);
 
 

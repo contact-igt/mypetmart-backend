@@ -59,6 +59,7 @@ describe("application middleware", () => {
     });
     expect(JSON.stringify(body)).not.toContain("private implementation failure");
     expect(JSON.stringify(body)).not.toContain("stack");
+    expect(body.error).not.toHaveProperty("details");
   });
 
   it("returns a safe malformed JSON response", async () => {

@@ -6,6 +6,7 @@ import {
   DEFAULT_COUNTRY_CODE,
   DEFAULT_CURRENCY_CODE,
   FULFILMENT_STATUS_VALUES,
+  ORDER_COMMERCE_EXCEPTION_VALUES,
   ORDER_STATUS_VALUES,
   PAYMENT_STATUS_VALUES,
   PET_TYPE_VALUES,
@@ -110,6 +111,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`state\` VARCHAR(120) NOT NULL,
         \`postal_code\` VARCHAR(20) NOT NULL,
         \`country\` VARCHAR(2) NOT NULL DEFAULT '${DEFAULT_COUNTRY_CODE}',
+        \`latitude\` DECIMAL(9,6) NULL,
+        \`longitude\` DECIMAL(10,6) NULL,
         \`is_default\` TINYINT(1) NOT NULL DEFAULT 0,
         \`default_user_id\` INT UNSIGNED GENERATED ALWAYS AS (CASE WHEN \`is_default\` = 1 THEN \`user_id\` ELSE NULL END) STORED,
         ${createdUpdated},
@@ -121,7 +124,10 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         KEY \`addresses_city_state_idx\` (\`city\`, \`state\`),
         KEY \`addresses_postal_code_idx\` (\`postal_code\`),
         KEY \`addresses_deleted_at_idx\` (\`deleted_at\`),
-        CONSTRAINT \`fk_addresses_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT
+        CONSTRAINT \`fk_addresses_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_addresses_latitude_range\` CHECK (\`latitude\` IS NULL OR (\`latitude\` >= -90 AND \`latitude\` <= 90)),
+        CONSTRAINT \`chk_addresses_longitude_range\` CHECK (\`longitude\` IS NULL OR (\`longitude\` >= -180 AND \`longitude\` <= 180)),
+        CONSTRAINT \`chk_addresses_coord_pair\` CHECK ((\`latitude\` IS NULL AND \`longitude\` IS NULL) OR (\`latitude\` IS NOT NULL AND \`longitude\` IS NOT NULL))
       ) ${engine};
     `
   },
@@ -322,10 +328,14 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.orders)} (
         \`id\` INT UNSIGNED NOT NULL,
         \`order_number\` VARCHAR(50) NOT NULL,
-        \`user_id\` INT UNSIGNED NOT NULL,
+        \`user_id\` INT UNSIGNED NULL,
+        \`guest_identity_hash\` VARCHAR(255) NULL,
+        \`guest_access_token_hash\` VARCHAR(255) NULL,
+        \`cart_id\` INT UNSIGNED NULL,
         \`status\` ${enumSql(ORDER_STATUS_VALUES)} NOT NULL DEFAULT 'pending',
         \`payment_status\` ${enumSql(PAYMENT_STATUS_VALUES)} NOT NULL DEFAULT 'pending',
         \`fulfilment_status\` ${enumSql(FULFILMENT_STATUS_VALUES)} NOT NULL DEFAULT 'unfulfilled',
+        \`commerce_exception\` ${enumSql(ORDER_COMMERCE_EXCEPTION_VALUES)} NULL,
         \`subtotal\` DECIMAL(10,2) NOT NULL DEFAULT 0,
         \`shipping_fee\` DECIMAL(10,2) NOT NULL DEFAULT 0,
         \`total\` DECIMAL(10,2) NOT NULL DEFAULT 0,
@@ -338,20 +348,30 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`ship_state\` VARCHAR(120) NOT NULL,
         \`ship_postal_code\` VARCHAR(20) NOT NULL,
         \`ship_country\` VARCHAR(2) NOT NULL DEFAULT '${DEFAULT_COUNTRY_CODE}',
+        \`ship_latitude\` DECIMAL(9,6) NULL,
+        \`ship_longitude\` DECIMAL(10,6) NULL,
         \`placed_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         \`cancelled_at\` DATETIME NULL,
         ${createdUpdated},
         PRIMARY KEY (\`id\`),
         UNIQUE KEY \`orders_order_number_unique\` (\`order_number\`),
+        UNIQUE KEY \`orders_guest_access_token_hash_unique\` (\`guest_access_token_hash\`),
+        KEY \`orders_guest_identity_status_idx\` (\`guest_identity_hash\`, \`status\`),
         KEY \`orders_user_placed_idx\` (\`user_id\`, \`placed_at\`),
         KEY \`orders_status_placed_idx\` (\`status\`, \`placed_at\`),
         KEY \`orders_payment_status_idx\` (\`payment_status\`),
         KEY \`orders_fulfilment_status_idx\` (\`fulfilment_status\`),
         KEY \`orders_ship_state_city_idx\` (\`ship_state\`, \`ship_city\`),
+        KEY \`orders_cart_id_idx\` (\`cart_id\`),
+        KEY \`orders_commerce_exception_idx\` (\`commerce_exception\`),
         CONSTRAINT \`fk_orders_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_orders_cart_id\` FOREIGN KEY (\`cart_id\`) REFERENCES \`carts\` (\`id\`) ON DELETE SET NULL ON UPDATE RESTRICT,
         CONSTRAINT \`chk_orders_subtotal_nonnegative\` CHECK (\`subtotal\` >= 0),
         CONSTRAINT \`chk_orders_shipping_fee_nonnegative\` CHECK (\`shipping_fee\` >= 0),
-        CONSTRAINT \`chk_orders_total_nonnegative\` CHECK (\`total\` >= 0)
+        CONSTRAINT \`chk_orders_total_nonnegative\` CHECK (\`total\` >= 0),
+        CONSTRAINT \`chk_orders_ship_latitude_range\` CHECK (\`ship_latitude\` IS NULL OR (\`ship_latitude\` >= -90 AND \`ship_latitude\` <= 90)),
+        CONSTRAINT \`chk_orders_ship_longitude_range\` CHECK (\`ship_longitude\` IS NULL OR (\`ship_longitude\` >= -180 AND \`ship_longitude\` <= 180)),
+        CONSTRAINT \`chk_orders_ship_coord_pair\` CHECK ((\`ship_latitude\` IS NULL AND \`ship_longitude\` IS NULL) OR (\`ship_latitude\` IS NOT NULL AND \`ship_longitude\` IS NOT NULL))
       ) ${engine};
     `
   },
@@ -589,6 +609,24 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         KEY \`password_reset_tokens_user_id_idx\` (\`user_id\`),
         KEY \`password_reset_tokens_expires_at_idx\` (\`expires_at\`),
         CONSTRAINT \`fk_password_reset_tokens_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE CASCADE ON UPDATE CASCADE
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.wishlists,
+    migrationName: "027-create-wishlists",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.wishlists)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`user_id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NOT NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`wishlists_user_product_unique\` (\`user_id\`, \`product_id\`),
+        KEY \`wishlists_user_id_idx\` (\`user_id\`),
+        KEY \`wishlists_product_id_idx\` (\`product_id\`),
+        CONSTRAINT \`fk_wishlists_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_wishlists_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT
       ) ${engine};
     `
   }

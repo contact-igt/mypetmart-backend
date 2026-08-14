@@ -18,7 +18,14 @@ const SCHEMA_ALTER_MIGRATION_NAMES = [
   "023-remove-auto-increment.ts",
   "024-add-shipping-dimensions-to-products.ts",
   "025-create-catalog-sku-reservations.ts",
-  "026-allow-zero-product-price-cache.ts"
+  "026-allow-zero-product-price-cache.ts",
+  "028-add-coordinates.ts",
+  "029-allow-guest-orders.ts",
+  "030-add-guest-order-access.ts",
+  "031-add-order-contact-email.ts",
+  "032-add-payment-cancelled-status.ts",
+  "033-add-order-cart-id.ts",
+  "034-add-order-commerce-exception.ts"
 ] as const;
 export const MIGRATION_FILE_NAMES = [
   ...INITIAL_SCHEMA_TABLES.map((table) => `${table.migrationName}.ts`),

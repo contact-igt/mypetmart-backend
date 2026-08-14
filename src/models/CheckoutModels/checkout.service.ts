@@ -1,8 +1,9 @@
-import { DEFAULT_COUNTRY_CODE } from "../../constants/database.constants.js";
+import { DEFAULT_COUNTRY_CODE, V1_FREE_SHIPPING_FEE } from "../../constants/database.constants.js";
 import { Address } from "../../database/tables/index.js";
+import { formatPaiseAsMoney, parseMoneyToPaise } from "../../utils/product-money.js";
 import { CartService } from "../CartModels/cart.service.js";
 import type { CartIdentity } from "../CartModels/cart.types.js";
-import { CheckoutAddressNotFoundError, CheckoutAddressRequiredError, CheckoutCartEmptyError } from "./checkout.errors.js";
+import { CheckoutAddressNotFoundError, CheckoutAddressRequiredError, CheckoutCartEmptyError, CheckoutEmailRequiredError } from "./checkout.errors.js";
 import type {
   CheckoutAddressCandidate,
   CheckoutPreviewInput,
@@ -20,7 +21,9 @@ function fromSavedAddress(address: Address): CheckoutAddressCandidate {
     city: address.city,
     state: address.state,
     postalCode: address.postal_code,
-    country: address.country
+    country: address.country,
+    latitude: address.latitude !== null && address.latitude !== undefined ? parseFloat(address.latitude) : null,
+    longitude: address.longitude !== null && address.longitude !== undefined ? parseFloat(address.longitude) : null
   };
 }
 
@@ -33,7 +36,9 @@ function fromInlineAddress(input: InlineAddressInput): CheckoutAddressCandidate 
     city: input.city,
     state: input.state,
     postalCode: input.postalCode,
-    country: input.country ?? DEFAULT_COUNTRY_CODE
+    country: input.country ?? DEFAULT_COUNTRY_CODE,
+    latitude: input.latitude !== undefined ? input.latitude : null,
+    longitude: input.longitude !== undefined ? input.longitude : null
   };
 }
 
@@ -64,6 +69,10 @@ export const CheckoutService = {
     const cart = await CartService.getCart(identity);
     if (cart.items.length === 0) {
       throw new CheckoutCartEmptyError();
+    }
+
+    if (identity.type === "guest" && !input.contactEmail) {
+      throw new CheckoutEmailRequiredError();
     }
 
     const shippingAddress = await resolveShippingAddress(identity, input);
@@ -100,11 +109,11 @@ export const CheckoutService = {
       shippingAddress,
       billingSameAsShipping: input.billingSameAsShipping,
       billingAddress,
-      shipping: { status: "pending", amount: null },
+      shipping: { status: "pending", amount: V1_FREE_SHIPPING_FEE },
       totals: {
         merchandiseSubtotal: cart.subtotal,
-        shippingAmount: null,
-        payableTotal: null
+        shippingAmount: V1_FREE_SHIPPING_FEE,
+        payableTotal: formatPaiseAsMoney(parseMoneyToPaise(cart.subtotal) + parseMoneyToPaise(V1_FREE_SHIPPING_FEE))
       },
       readiness
     };

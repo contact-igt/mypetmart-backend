@@ -32,3 +32,14 @@ export class CheckoutAddressNotFoundError extends CheckoutError {
     this.name = "CheckoutAddressNotFoundError";
   }
 }
+
+// Guest-only: a contact email is required so a future payment provider has a
+// valid address for receipts/correspondence. Never thrown for an
+// authenticated customer — their account email is always server-derived
+// instead (see checkout.service.ts's resolveContactEmail).
+export class CheckoutEmailRequiredError extends CheckoutError {
+  public constructor() {
+    super("CHECKOUT_EMAIL_REQUIRED", "A contact email is required to preview checkout as a guest.", 400);
+    this.name = "CheckoutEmailRequiredError";
+  }
+}

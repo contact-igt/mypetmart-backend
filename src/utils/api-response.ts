@@ -18,6 +18,7 @@ type ErrorResponse = {
     code: string;
     message: string;
     errors?: Record<string, string[]>;
+    details?: unknown;
   };
   meta: ResponseMeta;
 };
@@ -43,14 +44,16 @@ export function sendError(
   statusCode: number,
   code: string,
   message: string,
-  errors?: Record<string, string[]>
+  errors?: Record<string, string[]>,
+  details?: unknown
 ): void {
   const body: ErrorResponse = {
     success: false,
     error: {
       code,
       message,
-      ...(errors ? { errors } : {})
+      ...(errors ? { errors } : {}),
+      ...(details !== undefined ? { details } : {})
     },
     meta: {
       requestId: getResponseRequestId(response)
