@@ -121,14 +121,29 @@ const environmentSchema = z
     LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
     REQUEST_BODY_LIMIT: requiredString("REQUEST_BODY_LIMIT").default("1mb"),
 
-    STOREFRONT_ORIGIN: z.url("STOREFRONT_ORIGIN must be a valid URL."),
-    ADMIN_ORIGIN: z.url("ADMIN_ORIGIN must be a valid URL."),
+    STOREFRONT_ORIGIN: requiredString("STOREFRONT_ORIGIN"),
+    ADMIN_ORIGIN: requiredString("ADMIN_ORIGIN"),
 
-    DB_HOST: requiredString("DB_HOST"),
-    DB_PORT: integerFromString("DB_PORT", 1, 65535),
-    DB_NAME: requiredString("DB_NAME").default("mypetmart"),
-    DB_USER: requiredString("DB_USER"),
-    DB_PASSWORD: z.string().default(""),
+    DB_HOST: z.preprocess(
+      (val) => (typeof val === "string" && val.trim().length > 0 ? val.trim() : process.env.PRODUCTION_DB_HOST ?? val),
+      z.string({ error: "DB_HOST is required." }).min(1, "DB_HOST is required.")
+    ),
+    DB_PORT: z.preprocess(
+      (val) => (val !== undefined && val !== "" ? Number(val) : process.env.PRODUCTION_DB_PORT ? Number(process.env.PRODUCTION_DB_PORT) : val),
+      z.number({ error: "DB_PORT must be a number." }).int().min(1).max(65535)
+    ),
+    DB_NAME: z.preprocess(
+      (val) => (typeof val === "string" && val.trim().length > 0 ? val.trim() : process.env.PRODUCTION_DB_NAME ?? val),
+      z.string().default("mypetmart")
+    ),
+    DB_USER: z.preprocess(
+      (val) => (typeof val === "string" && val.trim().length > 0 ? val.trim() : process.env.PRODUCTION_DB_USER ?? val),
+      z.string({ error: "DB_USER is required." }).min(1, "DB_USER is required.")
+    ),
+    DB_PASSWORD: z.preprocess(
+      (val) => (typeof val === "string" ? val : process.env.PRODUCTION_DB_PASSWORD ?? ""),
+      z.string().default("")
+    ),
     DB_LOGGING: booleanFromString("DB_LOGGING").default(false),
     DB_POOL_MAX: integerFromString("DB_POOL_MAX", 1, 100).default(10),
     DB_POOL_MIN: integerFromString("DB_POOL_MIN", 0, 100).default(0),
