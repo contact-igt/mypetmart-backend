@@ -1,14 +1,15 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
 import { DATABASE_TABLE_NAMES, RETURN_STATUS_VALUES, RETURN_TYPE_VALUES, type ReturnStatus, type ReturnType } from "../../../constants/database.constants.js";
-import { isModelInitialized, timestampModelOptions, uuidPrimaryKeyAttribute } from "../table-helpers.js";
+import { isModelInitialized, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { OrderItem } from "../OrderItemTable/index.js";
 import type { Order } from "../OrderTable/index.js";
 import type { ReturnNote } from "../ReturnNoteTable/index.js";
 import type { User } from "../UserTable/index.js";
 
 export class ReturnRequest extends Model<InferAttributes<ReturnRequest>, InferCreationAttributes<ReturnRequest>> {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
+  declare return_number: CreationOptional<string>;
   declare order_id: ForeignKey<Order["id"]>;
   declare order_item_id: ForeignKey<OrderItem["id"]>;
   declare user_id: ForeignKey<User["id"]>;
@@ -36,10 +37,11 @@ export function initializeReturnRequestTable(sequelize: Sequelize): typeof Retur
 
   ReturnRequest.init(
     {
-      id: uuidPrimaryKeyAttribute(),
-      order_id: { type: DataTypes.UUID, allowNull: false },
-      order_item_id: { type: DataTypes.UUID, allowNull: false },
-      user_id: { type: DataTypes.UUID, allowNull: false },
+      id: numericPrimaryKeyAttribute(),
+      return_number: { type: DataTypes.STRING(50), allowNull: false, unique: true },
+      order_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+      order_item_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+      user_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
       type: { type: DataTypes.ENUM(...RETURN_TYPE_VALUES), allowNull: false },
       status: { type: DataTypes.ENUM(...RETURN_STATUS_VALUES), allowNull: false, defaultValue: "requested" },
       reason: { type: DataTypes.TEXT, allowNull: false, validate: { notEmpty: true } },
@@ -55,6 +57,7 @@ export function initializeReturnRequestTable(sequelize: Sequelize): typeof Retur
       sequelize,
       ...timestampModelOptions(DATABASE_TABLE_NAMES.returnRequests, "ReturnRequest", false),
       indexes: [
+        { unique: true, fields: ["return_number"], name: "return_requests_return_number_unique" },
         { fields: ["status", "requested_at"], name: "return_requests_status_requested_at_idx" },
         { fields: ["order_id"], name: "return_requests_order_id_idx" },
         { fields: ["order_item_id"], name: "return_requests_order_item_id_idx" },
@@ -62,6 +65,8 @@ export function initializeReturnRequestTable(sequelize: Sequelize): typeof Retur
       ]
     }
   );
+
+
 
   return ReturnRequest;
 }

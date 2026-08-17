@@ -2,6 +2,7 @@ import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { app } from "../../app.js";
+import { r2Config } from "../../config/r2.config.js";
 import { sequelize } from "../../database/index.js";
 
 type SuccessReadinessBody = {
@@ -12,6 +13,10 @@ type SuccessReadinessBody = {
     database: {
       status: "connected";
       name: string;
+    };
+    objectStorage: {
+      provider: "cloudflare_r2";
+      status: "configured" | "not_configured";
     };
     timestamp: string;
   };
@@ -50,7 +55,11 @@ describe("GET /api/v1/health/ready", () => {
         service: "mypetmart-backend",
         database: {
           status: "connected",
-          name: "mypetmart"
+          name: sequelize.config.database || "mypetmart"
+        },
+        objectStorage: {
+          provider: "cloudflare_r2",
+          status: r2Config.ready ? "configured" : "not_configured"
         }
       },
       meta: {

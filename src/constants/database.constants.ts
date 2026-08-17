@@ -16,10 +16,16 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   returnRequests: "return_requests",
   returnNotes: "return_notes",
   contactEnquiries: "contact_enquiries",
-  storeSettings: "store_settings"
+  storeSettings: "store_settings",
+  authChallenges: "auth_challenges",
+  passwordResetTokens: "password_reset_tokens",
+  wishlists: "wishlists"
 });
 
-export const USER_ROLE_VALUES = ["customer", "admin"] as const;
+export const AUTH_CHALLENGE_PURPOSE_VALUES = ["email_verification", "password_reset"] as const;
+export type AuthChallengePurpose = (typeof AUTH_CHALLENGE_PURPOSE_VALUES)[number];
+
+export const USER_ROLE_VALUES = ["customer", "admin", "super_admin"] as const;
 export type UserRole = (typeof USER_ROLE_VALUES)[number];
 
 export const USER_STATUS_VALUES = ["active", "disabled"] as const;
@@ -40,11 +46,26 @@ export type CartStatus = (typeof CART_STATUS_VALUES)[number];
 export const ORDER_STATUS_VALUES = ["pending", "confirmed", "processing", "shipped", "delivered", "cancelled", "return_requested"] as const;
 export type OrderStatus = (typeof ORDER_STATUS_VALUES)[number];
 
-export const PAYMENT_STATUS_VALUES = ["pending", "paid", "failed", "refunded"] as const;
+export const PAYMENT_STATUS_VALUES = ["pending", "paid", "failed", "refunded", "cancelled"] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUS_VALUES)[number];
 
 export const FULFILMENT_STATUS_VALUES = ["unfulfilled", "processing", "packed", "shipped", "delivered"] as const;
 export type FulfilmentStatus = (typeof FULFILMENT_STATUS_VALUES)[number];
+
+// Set only when verified-successful payment finalization could not confirm
+// the Order (see PaymentFinalizationService) — PayU genuinely captured the
+// money (payment_status stays "paid") but the Order must not be treated as
+// normally confirmed/fulfillable until an operator manually resolves it
+// (restock/refund/cancellation-reconciliation; all out of scope here).
+// "inventory_unavailable": stock ran out between Order creation and
+// finalization (the two-Orders-race-for-the-last-unit case).
+// "order_not_confirmable": the Order's own status was no longer eligible for
+// the pending -> confirmed transition when a verified success arrived (e.g.
+// it was independently cancelled while a Payment attempt was still in
+// flight at PayU) — a distinct reason from a stock shortage, so it is not
+// mislabeled as one. NULL for every ordinary Order.
+export const ORDER_COMMERCE_EXCEPTION_VALUES = ["inventory_unavailable", "order_not_confirmable"] as const;
+export type OrderCommerceException = (typeof ORDER_COMMERCE_EXCEPTION_VALUES)[number];
 
 export const SHIPPING_METHOD_VALUES = ["standard", "express"] as const;
 export type ShippingMethod = (typeof SHIPPING_METHOD_VALUES)[number];
@@ -66,3 +87,12 @@ export const DEFAULT_CURRENCY_CODE = "INR";
 export const UUID_COLUMN_LENGTH = 36;
 export const MONEY_PRECISION = 10;
 export const MONEY_SCALE = 2;
+
+// V1 locked business rule: MyPetMart ships every order free of charge until a
+// real logistics/shipping-rate integration replaces this fixed amount. Order
+// creation persists this value into orders.shipping_fee and folds it into
+// orders.total; Checkout Preview echoes the same value so both endpoints
+// agree on the payable amount before any provider (PayU) initiation exists.
+// Future logistics/shipping-rate integration must replace this backend-owned
+// calculation before PayU initiation uses non-zero shipping.
+export const V1_FREE_SHIPPING_FEE = "0.00";

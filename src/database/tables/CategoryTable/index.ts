@@ -1,11 +1,11 @@
 import { DataTypes, Model, type CreationOptional, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
 import { DATABASE_TABLE_NAMES, PET_TYPE_VALUES, type PetType } from "../../../constants/database.constants.js";
-import { isModelInitialized, timestampModelOptions, uuidPrimaryKeyAttribute } from "../table-helpers.js";
+import { isModelInitialized, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { Product } from "../ProductTable/index.js";
 
 export class Category extends Model<InferAttributes<Category>, InferCreationAttributes<Category>> {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
   declare name: string;
   declare slug: string;
   declare description: string | null;
@@ -29,7 +29,7 @@ export function initializeCategoryTable(sequelize: Sequelize): typeof Category {
 
   Category.init(
     {
-      id: uuidPrimaryKeyAttribute(),
+      id: numericPrimaryKeyAttribute(),
       name: { type: DataTypes.STRING(160), allowNull: false, validate: { notEmpty: true, len: [1, 160] } },
       slug: { type: DataTypes.STRING(190), allowNull: false, unique: true, validate: { notEmpty: true, len: [1, 190] } },
       description: { type: DataTypes.TEXT, allowNull: true },

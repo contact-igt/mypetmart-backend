@@ -1,4 +1,5 @@
 import compression from "compression";
+import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
@@ -19,6 +20,7 @@ app.use(helmet());
 app.use(compression());
 app.use(requestIdMiddleware);
 app.use(httpLogger);
+app.use(cookieParser());
 app.use(cors(corsOptions));
 app.use(express.json({ limit: serverConfig.requestBodyLimit }));
 app.use(express.urlencoded({ extended: false, limit: serverConfig.requestBodyLimit }));

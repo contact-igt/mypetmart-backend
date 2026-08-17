@@ -1,6 +1,7 @@
 import type { Model, ModelStatic, Sequelize } from "sequelize";
 
 import { Address, initializeAddressTable } from "./AddressTable/index.js";
+import { AuthChallenge, initializeAuthChallengeTable } from "./AuthChallengeTable/index.js";
 import { AuthSession, initializeAuthSessionTable } from "./AuthSessionTable/index.js";
 import { Cart, initializeCartTable } from "./CartTable/index.js";
 import { CartItem, initializeCartItemTable } from "./CartItemTable/index.js";
@@ -9,6 +10,7 @@ import { ContactEnquiry, initializeContactEnquiryTable } from "./ContactEnquiryT
 import { Order, initializeOrderTable } from "./OrderTable/index.js";
 import { OrderItem, initializeOrderItemTable } from "./OrderItemTable/index.js";
 import { OrderNote, initializeOrderNoteTable } from "./OrderNoteTable/index.js";
+import { PasswordResetToken, initializePasswordResetTokenTable } from "./PasswordResetTokenTable/index.js";
 import { Payment, initializePaymentTable } from "./PaymentTable/index.js";
 import { Product, initializeProductTable } from "./ProductTable/index.js";
 import { ProductImage, initializeProductImageTable } from "./ProductImageTable/index.js";
@@ -18,9 +20,11 @@ import { ReturnRequest, initializeReturnRequestTable } from "./ReturnRequestTabl
 import { Shipment, initializeShipmentTable } from "./ShipmentTable/index.js";
 import { StoreSetting, initializeStoreSettingTable } from "./StoreSettingTable/index.js";
 import { User, initializeUserTable } from "./UserTable/index.js";
+import { Wishlist, initializeWishlistTable } from "./WishlistTable/index.js";
 
 export {
   Address,
+  AuthChallenge,
   AuthSession,
   Cart,
   CartItem,
@@ -29,6 +33,7 @@ export {
   Order,
   OrderItem,
   OrderNote,
+  PasswordResetToken,
   Payment,
   Product,
   ProductImage,
@@ -37,7 +42,8 @@ export {
   ReturnRequest,
   Shipment,
   StoreSetting,
-  User
+  User,
+  Wishlist
 };
 
 export const EXPECTED_DATABASE_MODEL_NAMES = [
@@ -58,7 +64,10 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "ReturnRequest",
   "ReturnNote",
   "ContactEnquiry",
-  "StoreSetting"
+  "StoreSetting",
+  "AuthChallenge",
+  "PasswordResetToken",
+  "Wishlist"
 ] as const;
 
 export type DatabaseModelName = (typeof EXPECTED_DATABASE_MODEL_NAMES)[number];
@@ -82,6 +91,9 @@ export type DatabaseModelRegistry = Readonly<{
   ReturnNote: typeof ReturnNote;
   ContactEnquiry: typeof ContactEnquiry;
   StoreSetting: typeof StoreSetting;
+  AuthChallenge: typeof AuthChallenge;
+  PasswordResetToken: typeof PasswordResetToken;
+  Wishlist: typeof Wishlist;
 }>;
 
 let initializedRegistry: DatabaseModelRegistry | undefined;
@@ -109,6 +121,9 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeReturnNoteTable(sequelize);
   initializeContactEnquiryTable(sequelize);
   initializeStoreSettingTable(sequelize);
+  initializeAuthChallengeTable(sequelize);
+  initializePasswordResetTokenTable(sequelize);
+  initializeWishlistTable(sequelize);
 
   initializedRegistry = Object.freeze({
     User,
@@ -128,7 +143,10 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     ReturnRequest,
     ReturnNote,
     ContactEnquiry,
-    StoreSetting
+    StoreSetting,
+    AuthChallenge,
+    PasswordResetToken,
+    Wishlist
   });
 
   return initializedRegistry;

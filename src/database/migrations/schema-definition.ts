@@ -1,10 +1,12 @@
-﻿import {
+import {
+  AUTH_CHALLENGE_PURPOSE_VALUES,
   CART_STATUS_VALUES,
   CONTACT_ENQUIRY_STATUS_VALUES,
   DATABASE_TABLE_NAMES,
   DEFAULT_COUNTRY_CODE,
   DEFAULT_CURRENCY_CODE,
   FULFILMENT_STATUS_VALUES,
+  ORDER_COMMERCE_EXCEPTION_VALUES,
   ORDER_STATUS_VALUES,
   PAYMENT_STATUS_VALUES,
   PET_TYPE_VALUES,
@@ -27,7 +29,7 @@ export type ExpectedForeignKey = {
   updateRule: "RESTRICT" | "CASCADE" | "SET NULL" | "NO ACTION";
 };
 export type ExpectedCheck = { name: string };
-export type ExpectedColumn = { name: string; nullable: boolean; dataTypeHint: string; generated: boolean };
+export type ExpectedColumn = { name: string; nullable: boolean; dataTypeHint: string; generated: boolean; autoIncrement: boolean };
 export type SchemaTableDefinition = {
   tableName: string;
   migrationName: string;
@@ -46,7 +48,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "001-create-users",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.users)} (
-        \`id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`reference_code\` VARCHAR(50) NOT NULL,
         \`role\` ${enumSql(USER_ROLE_VALUES)} NOT NULL DEFAULT 'customer',
         \`status\` ${enumSql(USER_STATUS_VALUES)} NOT NULL DEFAULT 'active',
         \`name\` VARCHAR(160) NOT NULL,
@@ -59,6 +62,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         ${deletedAt},
         PRIMARY KEY (\`id\`),
         UNIQUE KEY \`users_email_unique\` (\`email\`),
+        UNIQUE KEY \`users_reference_code_unique\` (\`reference_code\`),
         KEY \`users_role_idx\` (\`role\`),
         KEY \`users_status_idx\` (\`status\`),
         KEY \`users_phone_idx\` (\`phone\`),
@@ -72,8 +76,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "002-create-auth-sessions",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.authSessions)} (
-        \`id\` CHAR(36) NOT NULL,
-        \`user_id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`user_id\` INT UNSIGNED NOT NULL,
         \`session_type\` ${enumSql(SESSION_TYPE_VALUES)} NOT NULL,
         \`token_hash\` VARCHAR(255) NOT NULL,
         \`user_agent\` VARCHAR(512) NULL,
@@ -96,8 +100,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "003-create-addresses",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.addresses)} (
-        \`id\` CHAR(36) NOT NULL,
-        \`user_id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`user_id\` INT UNSIGNED NOT NULL,
         \`label\` VARCHAR(80) NULL,
         \`recipient_name\` VARCHAR(160) NOT NULL,
         \`phone\` VARCHAR(32) NOT NULL,
@@ -107,8 +111,10 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`state\` VARCHAR(120) NOT NULL,
         \`postal_code\` VARCHAR(20) NOT NULL,
         \`country\` VARCHAR(2) NOT NULL DEFAULT '${DEFAULT_COUNTRY_CODE}',
+        \`latitude\` DECIMAL(9,6) NULL,
+        \`longitude\` DECIMAL(10,6) NULL,
         \`is_default\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`default_user_id\` CHAR(36) GENERATED ALWAYS AS (CASE WHEN \`is_default\` = 1 THEN \`user_id\` ELSE NULL END) STORED,
+        \`default_user_id\` INT UNSIGNED GENERATED ALWAYS AS (CASE WHEN \`is_default\` = 1 THEN \`user_id\` ELSE NULL END) STORED,
         ${createdUpdated},
         ${deletedAt},
         PRIMARY KEY (\`id\`),
@@ -118,7 +124,10 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         KEY \`addresses_city_state_idx\` (\`city\`, \`state\`),
         KEY \`addresses_postal_code_idx\` (\`postal_code\`),
         KEY \`addresses_deleted_at_idx\` (\`deleted_at\`),
-        CONSTRAINT \`fk_addresses_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT
+        CONSTRAINT \`fk_addresses_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_addresses_latitude_range\` CHECK (\`latitude\` IS NULL OR (\`latitude\` >= -90 AND \`latitude\` <= 90)),
+        CONSTRAINT \`chk_addresses_longitude_range\` CHECK (\`longitude\` IS NULL OR (\`longitude\` >= -180 AND \`longitude\` <= 180)),
+        CONSTRAINT \`chk_addresses_coord_pair\` CHECK ((\`latitude\` IS NULL AND \`longitude\` IS NULL) OR (\`latitude\` IS NOT NULL AND \`longitude\` IS NOT NULL))
       ) ${engine};
     `
   },
@@ -127,7 +136,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "004-create-categories",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.categories)} (
-        \`id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
         \`name\` VARCHAR(160) NOT NULL,
         \`slug\` VARCHAR(190) NOT NULL,
         \`description\` TEXT NULL,
@@ -153,8 +162,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "005-create-products",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.products)} (
-        \`id\` CHAR(36) NOT NULL,
-        \`category_id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`category_id\` INT UNSIGNED NOT NULL,
         \`name\` VARCHAR(190) NOT NULL,
         \`slug\` VARCHAR(190) NOT NULL,
         \`sku\` VARCHAR(100) NOT NULL,
@@ -169,6 +178,10 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`tags\` JSON NULL,
         \`meta_title\` VARCHAR(190) NULL,
         \`meta_description\` VARCHAR(255) NULL,
+        \`weight_grams\` INT UNSIGNED NULL,
+        \`length_cm\` DECIMAL(8,2) NULL,
+        \`width_cm\` DECIMAL(8,2) NULL,
+        \`height_cm\` DECIMAL(8,2) NULL,
         ${createdUpdated},
         ${deletedAt},
         PRIMARY KEY (\`id\`),
@@ -182,9 +195,13 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         KEY \`products_updated_at_idx\` (\`updated_at\`),
         KEY \`products_deleted_at_idx\` (\`deleted_at\`),
         CONSTRAINT \`fk_products_category_id\` FOREIGN KEY (\`category_id\`) REFERENCES \`categories\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-        CONSTRAINT \`chk_products_price_positive\` CHECK (\`price\` > 0),
+        CONSTRAINT \`chk_products_price_nonnegative\` CHECK (\`price\` >= 0),
         CONSTRAINT \`chk_products_compare_at_price\` CHECK (\`compare_at_price\` IS NULL OR \`compare_at_price\` >= \`price\`),
-        CONSTRAINT \`chk_products_stock_nonnegative\` CHECK (\`stock\` >= 0)
+        CONSTRAINT \`chk_products_stock_nonnegative\` CHECK (\`stock\` >= 0),
+        CONSTRAINT \`chk_products_weight_grams_positive\` CHECK (\`weight_grams\` IS NULL OR \`weight_grams\` > 0),
+        CONSTRAINT \`chk_products_length_cm_positive\` CHECK (\`length_cm\` IS NULL OR \`length_cm\` > 0),
+        CONSTRAINT \`chk_products_width_cm_positive\` CHECK (\`width_cm\` IS NULL OR \`width_cm\` > 0),
+        CONSTRAINT \`chk_products_height_cm_positive\` CHECK (\`height_cm\` IS NULL OR \`height_cm\` > 0)
       ) ${engine};
     `
   },
@@ -193,8 +210,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "006-create-product-variants",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.productVariants)} (
-        \`id\` CHAR(36) NOT NULL,
-        \`product_id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NOT NULL,
         \`name\` VARCHAR(160) NOT NULL,
         \`sku\` VARCHAR(100) NOT NULL,
         \`price\` DECIMAL(10,2) NOT NULL,
@@ -202,6 +219,10 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`stock\` INT NOT NULL DEFAULT 0,
         \`active\` TINYINT(1) NOT NULL DEFAULT 1,
         \`display_order\` INT NOT NULL DEFAULT 0,
+        \`weight_grams\` INT UNSIGNED NULL,
+        \`length_cm\` DECIMAL(8,2) NULL,
+        \`width_cm\` DECIMAL(8,2) NULL,
+        \`height_cm\` DECIMAL(8,2) NULL,
         ${createdUpdated},
         ${deletedAt},
         PRIMARY KEY (\`id\`),
@@ -213,7 +234,11 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         CONSTRAINT \`chk_product_variants_price_positive\` CHECK (\`price\` > 0),
         CONSTRAINT \`chk_product_variants_compare_at_price\` CHECK (\`compare_at_price\` IS NULL OR \`compare_at_price\` >= \`price\`),
         CONSTRAINT \`chk_product_variants_stock_nonnegative\` CHECK (\`stock\` >= 0),
-        CONSTRAINT \`chk_product_variants_display_order_nonnegative\` CHECK (\`display_order\` >= 0)
+        CONSTRAINT \`chk_product_variants_display_order_nonnegative\` CHECK (\`display_order\` >= 0),
+        CONSTRAINT \`chk_product_variants_weight_grams_positive\` CHECK (\`weight_grams\` IS NULL OR \`weight_grams\` > 0),
+        CONSTRAINT \`chk_product_variants_length_cm_positive\` CHECK (\`length_cm\` IS NULL OR \`length_cm\` > 0),
+        CONSTRAINT \`chk_product_variants_width_cm_positive\` CHECK (\`width_cm\` IS NULL OR \`width_cm\` > 0),
+        CONSTRAINT \`chk_product_variants_height_cm_positive\` CHECK (\`height_cm\` IS NULL OR \`height_cm\` > 0)
       ) ${engine};
     `
   },
@@ -222,8 +247,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "007-create-product-images",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.productImages)} (
-        \`id\` CHAR(36) NOT NULL,
-        \`product_id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NOT NULL,
         \`r2_key\` VARCHAR(512) NOT NULL,
         \`url\` VARCHAR(1000) NOT NULL,
         \`alt\` VARCHAR(255) NOT NULL,
@@ -233,7 +258,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`height\` INT UNSIGNED NULL,
         \`sort_order\` INT NOT NULL DEFAULT 0,
         \`is_primary\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`primary_product_id\` CHAR(36) GENERATED ALWAYS AS (CASE WHEN \`is_primary\` = 1 THEN \`product_id\` ELSE NULL END) STORED,
+        \`primary_product_id\` INT UNSIGNED GENERATED ALWAYS AS (CASE WHEN \`is_primary\` = 1 THEN \`product_id\` ELSE NULL END) STORED,
         ${createdUpdated},
         ${deletedAt},
         PRIMARY KEY (\`id\`),
@@ -255,8 +280,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "008-create-carts",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.carts)} (
-        \`id\` CHAR(36) NOT NULL,
-        \`user_id\` CHAR(36) NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`user_id\` INT UNSIGNED NULL,
         \`guest_token_hash\` VARCHAR(255) NULL,
         \`status\` ${enumSql(CART_STATUS_VALUES)} NOT NULL DEFAULT 'active',
         \`expires_at\` DATETIME NULL,
@@ -274,11 +299,11 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "009-create-cart-items",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.cartItems)} (
-        \`id\` CHAR(36) NOT NULL,
-        \`cart_id\` CHAR(36) NOT NULL,
-        \`product_id\` CHAR(36) NOT NULL,
-        \`product_variant_id\` CHAR(36) NULL,
-        \`variant_identity\` CHAR(36) GENERATED ALWAYS AS (COALESCE(\`product_variant_id\`, '00000000-0000-0000-0000-000000000000')) STORED,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`cart_id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NOT NULL,
+        \`product_variant_id\` INT UNSIGNED NULL,
+        \`variant_identity\` INT UNSIGNED GENERATED ALWAYS AS (COALESCE(\`product_variant_id\`, 0)) STORED,
         \`quantity\` INT NOT NULL DEFAULT 1,
         \`unit_price_snapshot\` DECIMAL(10,2) NULL,
         ${createdUpdated},
@@ -301,12 +326,16 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "010-create-orders",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.orders)} (
-        \`id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
         \`order_number\` VARCHAR(50) NOT NULL,
-        \`user_id\` CHAR(36) NOT NULL,
+        \`user_id\` INT UNSIGNED NULL,
+        \`guest_identity_hash\` VARCHAR(255) NULL,
+        \`guest_access_token_hash\` VARCHAR(255) NULL,
+        \`cart_id\` INT UNSIGNED NULL,
         \`status\` ${enumSql(ORDER_STATUS_VALUES)} NOT NULL DEFAULT 'pending',
         \`payment_status\` ${enumSql(PAYMENT_STATUS_VALUES)} NOT NULL DEFAULT 'pending',
         \`fulfilment_status\` ${enumSql(FULFILMENT_STATUS_VALUES)} NOT NULL DEFAULT 'unfulfilled',
+        \`commerce_exception\` ${enumSql(ORDER_COMMERCE_EXCEPTION_VALUES)} NULL,
         \`subtotal\` DECIMAL(10,2) NOT NULL DEFAULT 0,
         \`shipping_fee\` DECIMAL(10,2) NOT NULL DEFAULT 0,
         \`total\` DECIMAL(10,2) NOT NULL DEFAULT 0,
@@ -319,20 +348,30 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`ship_state\` VARCHAR(120) NOT NULL,
         \`ship_postal_code\` VARCHAR(20) NOT NULL,
         \`ship_country\` VARCHAR(2) NOT NULL DEFAULT '${DEFAULT_COUNTRY_CODE}',
+        \`ship_latitude\` DECIMAL(9,6) NULL,
+        \`ship_longitude\` DECIMAL(10,6) NULL,
         \`placed_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         \`cancelled_at\` DATETIME NULL,
         ${createdUpdated},
         PRIMARY KEY (\`id\`),
         UNIQUE KEY \`orders_order_number_unique\` (\`order_number\`),
+        UNIQUE KEY \`orders_guest_access_token_hash_unique\` (\`guest_access_token_hash\`),
+        KEY \`orders_guest_identity_status_idx\` (\`guest_identity_hash\`, \`status\`),
         KEY \`orders_user_placed_idx\` (\`user_id\`, \`placed_at\`),
         KEY \`orders_status_placed_idx\` (\`status\`, \`placed_at\`),
         KEY \`orders_payment_status_idx\` (\`payment_status\`),
         KEY \`orders_fulfilment_status_idx\` (\`fulfilment_status\`),
         KEY \`orders_ship_state_city_idx\` (\`ship_state\`, \`ship_city\`),
+        KEY \`orders_cart_id_idx\` (\`cart_id\`),
+        KEY \`orders_commerce_exception_idx\` (\`commerce_exception\`),
         CONSTRAINT \`fk_orders_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_orders_cart_id\` FOREIGN KEY (\`cart_id\`) REFERENCES \`carts\` (\`id\`) ON DELETE SET NULL ON UPDATE RESTRICT,
         CONSTRAINT \`chk_orders_subtotal_nonnegative\` CHECK (\`subtotal\` >= 0),
         CONSTRAINT \`chk_orders_shipping_fee_nonnegative\` CHECK (\`shipping_fee\` >= 0),
-        CONSTRAINT \`chk_orders_total_nonnegative\` CHECK (\`total\` >= 0)
+        CONSTRAINT \`chk_orders_total_nonnegative\` CHECK (\`total\` >= 0),
+        CONSTRAINT \`chk_orders_ship_latitude_range\` CHECK (\`ship_latitude\` IS NULL OR (\`ship_latitude\` >= -90 AND \`ship_latitude\` <= 90)),
+        CONSTRAINT \`chk_orders_ship_longitude_range\` CHECK (\`ship_longitude\` IS NULL OR (\`ship_longitude\` >= -180 AND \`ship_longitude\` <= 180)),
+        CONSTRAINT \`chk_orders_ship_coord_pair\` CHECK ((\`ship_latitude\` IS NULL AND \`ship_longitude\` IS NULL) OR (\`ship_latitude\` IS NOT NULL AND \`ship_longitude\` IS NOT NULL))
       ) ${engine};
     `
   },
@@ -341,10 +380,10 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "011-create-order-items",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.orderItems)} (
-        \`id\` CHAR(36) NOT NULL,
-        \`order_id\` CHAR(36) NOT NULL,
-        \`product_id\` CHAR(36) NULL,
-        \`product_variant_id\` CHAR(36) NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`order_id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NULL,
+        \`product_variant_id\` INT UNSIGNED NULL,
         \`product_name\` VARCHAR(190) NOT NULL,
         \`product_sku\` VARCHAR(100) NOT NULL,
         \`variant_name\` VARCHAR(160) NULL,
@@ -374,9 +413,9 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "012-create-order-notes",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.orderNotes)} (
-        \`id\` CHAR(36) NOT NULL,
-        \`order_id\` CHAR(36) NOT NULL,
-        \`admin_id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`order_id\` INT UNSIGNED NOT NULL,
+        \`admin_id\` INT UNSIGNED NOT NULL,
         \`message\` TEXT NOT NULL,
         ${createdUpdated},
         PRIMARY KEY (\`id\`),
@@ -392,8 +431,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "013-create-payments",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.payments)} (
-        \`id\` CHAR(36) NOT NULL,
-        \`order_id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`order_id\` INT UNSIGNED NOT NULL,
         \`provider\` VARCHAR(80) NOT NULL,
         \`provider_order_id\` VARCHAR(190) NULL,
         \`provider_payment_id\` VARCHAR(190) NULL,
@@ -422,8 +461,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "014-create-shipments",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.shipments)} (
-        \`id\` CHAR(36) NOT NULL,
-        \`order_id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`order_id\` INT UNSIGNED NOT NULL,
         \`method\` ${enumSql(SHIPPING_METHOD_VALUES)} NOT NULL DEFAULT 'standard',
         \`carrier\` VARCHAR(120) NULL,
         \`tracking_number\` VARCHAR(120) NULL,
@@ -447,10 +486,11 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "015-create-return-requests",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.returnRequests)} (
-        \`id\` CHAR(36) NOT NULL,
-        \`order_id\` CHAR(36) NOT NULL,
-        \`order_item_id\` CHAR(36) NOT NULL,
-        \`user_id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`return_number\` VARCHAR(50) NOT NULL,
+        \`order_id\` INT UNSIGNED NOT NULL,
+        \`order_item_id\` INT UNSIGNED NOT NULL,
+        \`user_id\` INT UNSIGNED NOT NULL,
         \`type\` ${enumSql(RETURN_TYPE_VALUES)} NOT NULL,
         \`status\` ${enumSql(RETURN_STATUS_VALUES)} NOT NULL DEFAULT 'requested',
         \`reason\` TEXT NOT NULL,
@@ -461,6 +501,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`resolved_at\` DATETIME NULL,
         ${createdUpdated},
         PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`return_requests_return_number_unique\` (\`return_number\`),
         KEY \`return_requests_status_requested_idx\` (\`status\`, \`requested_at\`),
         KEY \`return_requests_order_id_idx\` (\`order_id\`),
         KEY \`return_requests_order_item_id_idx\` (\`order_item_id\`),
@@ -476,9 +517,9 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "016-create-return-notes",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.returnNotes)} (
-        \`id\` CHAR(36) NOT NULL,
-        \`return_request_id\` CHAR(36) NOT NULL,
-        \`admin_id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`return_request_id\` INT UNSIGNED NOT NULL,
+        \`admin_id\` INT UNSIGNED NOT NULL,
         \`message\` TEXT NOT NULL,
         ${createdUpdated},
         PRIMARY KEY (\`id\`),
@@ -494,7 +535,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "017-create-contact-enquiries",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.contactEnquiries)} (
-        \`id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
+        \`enquiry_number\` VARCHAR(50) NOT NULL,
         \`name\` VARCHAR(160) NOT NULL,
         \`email\` VARCHAR(190) NOT NULL,
         \`phone\` VARCHAR(32) NULL,
@@ -504,6 +546,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`admin_note\` TEXT NULL,
         ${createdUpdated},
         PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`contact_enquiries_enquiry_number_unique\` (\`enquiry_number\`),
         KEY \`contact_enquiries_status_created_idx\` (\`status\`, \`created_at\`),
         KEY \`contact_enquiries_email_idx\` (\`email\`),
         KEY \`contact_enquiries_created_at_idx\` (\`created_at\`)
@@ -515,7 +558,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
     migrationName: "018-create-store-settings",
     createSql: `
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.storeSettings)} (
-        \`id\` CHAR(36) NOT NULL,
+        \`id\` INT UNSIGNED NOT NULL,
         \`setting_key\` VARCHAR(120) NOT NULL,
         \`setting_value\` JSON NOT NULL,
         \`is_public\` TINYINT(1) NOT NULL DEFAULT 0,
@@ -526,14 +569,79 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         KEY \`store_settings_setting_key_idx\` (\`setting_key\`)
       ) ${engine};
     `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.authChallenges,
+    migrationName: "020-create-auth-challenges",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.authChallenges)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`user_id\` INT UNSIGNED NOT NULL,
+        \`purpose\` ${enumSql(AUTH_CHALLENGE_PURPOSE_VALUES)} NOT NULL,
+        \`code_hash\` VARCHAR(128) NOT NULL,
+        \`expires_at\` DATETIME NOT NULL,
+        \`attempt_count\` INT UNSIGNED NOT NULL DEFAULT 0,
+        \`max_attempts\` INT UNSIGNED NOT NULL DEFAULT 5,
+        \`resend_available_at\` DATETIME NOT NULL,
+        \`consumed_at\` DATETIME NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        KEY \`auth_challenges_user_purpose_idx\` (\`user_id\`, \`purpose\`),
+        KEY \`auth_challenges_code_hash_idx\` (\`code_hash\`),
+        KEY \`auth_challenges_expires_at_idx\` (\`expires_at\`),
+        CONSTRAINT \`fk_auth_challenges_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE CASCADE ON UPDATE CASCADE
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.passwordResetTokens,
+    migrationName: "021-create-password-reset-tokens",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.passwordResetTokens)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`user_id\` INT UNSIGNED NOT NULL,
+        \`token_hash\` VARCHAR(128) NOT NULL,
+        \`expires_at\` DATETIME NOT NULL,
+        \`consumed_at\` DATETIME NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`password_reset_tokens_token_hash_unique\` (\`token_hash\`),
+        KEY \`password_reset_tokens_user_id_idx\` (\`user_id\`),
+        KEY \`password_reset_tokens_expires_at_idx\` (\`expires_at\`),
+        CONSTRAINT \`fk_password_reset_tokens_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE CASCADE ON UPDATE CASCADE
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.wishlists,
+    migrationName: "027-create-wishlists",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.wishlists)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`user_id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NOT NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`wishlists_user_product_unique\` (\`user_id\`, \`product_id\`),
+        KEY \`wishlists_user_id_idx\` (\`user_id\`),
+        KEY \`wishlists_product_id_idx\` (\`product_id\`),
+        CONSTRAINT \`fk_wishlists_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_wishlists_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT
+      ) ${engine};
+    `
   }
 ];
 
 const tableByName = new Map(INITIAL_SCHEMA_TABLES.map((table) => [table.tableName, table]));
 
 export const EXPECTED_BUSINESS_TABLE_NAMES = INITIAL_SCHEMA_TABLES.map((table) => table.tableName);
+export const EXPECTED_INFRASTRUCTURE_TABLE_NAMES = ["id_sequences", "catalog_sku_reservations"] as const;
 export const EXPECTED_METADATA_TABLE_NAME = "SequelizeMeta";
-export const EXPECTED_SCHEMA_TABLE_NAMES = [...EXPECTED_BUSINESS_TABLE_NAMES, EXPECTED_METADATA_TABLE_NAME] as const;
+export const EXPECTED_SCHEMA_TABLE_NAMES = [
+  ...EXPECTED_BUSINESS_TABLE_NAMES,
+  ...EXPECTED_INFRASTRUCTURE_TABLE_NAMES,
+  EXPECTED_METADATA_TABLE_NAME
+] as const;
 
 export function getInitialSchemaTable(tableName: string): SchemaTableDefinition {
   const table = tableByName.get(tableName);
@@ -562,7 +670,8 @@ export function expectedColumnsFor(definition: SchemaTableDefinition): ExpectedC
         name,
         nullable: !normalized.includes(" not null"),
         dataTypeHint: typeMatch?.[1] ?? "",
-        generated: normalized.includes("generated always")
+        generated: normalized.includes("generated always"),
+        autoIncrement: normalized.includes("auto_increment")
       };
     });
 }

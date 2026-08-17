@@ -7,7 +7,7 @@ describe("database configuration", () => {
     const options = getSequelizeOptions();
 
     expect(databaseConfig.dialect).toBe("mysql");
-    expect(databaseConfig.database).toBe("mypetmart");
+    expect(databaseConfig.database).toBe(process.env.DB_NAME || "mypetmart");
     expect(options.dialect).toBe("mysql");
     expect(options.host).toBe(databaseConfig.host);
     expect(options.port).toBe(databaseConfig.port);

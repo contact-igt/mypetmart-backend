@@ -1,4 +1,4 @@
-﻿# MyPetMart Backend
+# MyPetMart Backend
 
 MyPetMart backend is the standalone Node.js and Express API for the customer storefront and admin panel.
 
@@ -9,11 +9,11 @@ MyPetMart backend is the standalone Node.js and Express API for the customer sto
 - Language: TypeScript
 - Module system: ES modules
 - Database target: MySQL 8.4
-- ORM target: Sequelize with Umzug-backed migrations and later Sequelize seeders
+- ORM target: Sequelize with Umzug-backed migrations and seeders
 - Image storage target: Cloudflare R2
 - API base path: `/api/v1`
 
-## Stage 5 Capabilities
+## Stage 6 Capabilities
 
 - Express application foundation with versioned `/api/v1` routing
 - Liveness and readiness health endpoints
@@ -23,11 +23,13 @@ MyPetMart backend is the standalone Node.js and Express API for the customer sto
 - Eighteen registered Sequelize model classes and associations
 - Explicit Umzug migration runner using SequelizeStorage table `SequelizeMeta`
 - Eighteen initial MySQL migrations for the approved business tables
-- Read-only schema verifier for tables, columns, indexes, FKs, checks, generated helper columns, and pending migrations
+- Read-only schema verifier for tables, columns, indexes, FKs, checks, generated helper columns, pending migrations, and optional seeder metadata
 - MySQL advisory migration lock: `mypetmart_schema_migrations`
-- Local rollback drill command with production block and required confirmation flag
-- No automatic schema synchronization or startup migrations
-- No seed data, auth, business APIs, R2, payment, shipping, or Swagger/OpenAPI yet
+- Local migration rollback drill command with production block and required confirmation flag
+- Secure bootstrap admin seeder using ignored environment values, bcrypt hashing, Umzug metadata table `SequelizeSeedMeta`, and MySQL advisory seeder lock `mypetmart_data_seeders`
+- Seeder status, up, down, and local down-all commands with production rollback blocks
+- No automatic schema synchronization, startup migrations, or startup seeders
+- No catalog seed data, auth APIs, business APIs, R2, payment, shipping, or Swagger/OpenAPI yet
 
 ## Registered Tables
 
@@ -50,6 +52,8 @@ MyPetMart backend is the standalone Node.js and Express API for the customer sto
 17. contact_enquiries
 18. store_settings
 
+Seeder metadata uses `SequelizeSeedMeta`; migration metadata uses `SequelizeMeta`.
+
 ## Requirements
 
 - Node.js `>=24 <25`
@@ -60,7 +64,7 @@ MyPetMart backend is the standalone Node.js and Express API for the customer sto
 
 Use `.env.example` as the template. The local `.env` file is intentionally ignored by Git.
 
-Required Stage 5 values:
+Required values:
 
 ```bash
 NODE_ENV=development
@@ -81,6 +85,17 @@ DB_POOL_ACQUIRE_MS=30000
 DB_POOL_IDLE_MS=10000
 ```
 
+Bootstrap admin seeding also requires local ignored values before `npm run db:seed` can apply the seeder:
+
+```bash
+SEED_SUPER_ADMIN_NAME=Admin
+SEED_SUPER_ADMIN_EMAIL=admin@example.com
+SEED_SUPER_ADMIN_PASSWORD=StrongPassword#123
+ALLOW_PRODUCTION_SEED=false
+```
+
+Do not commit real seed admin names, emails, passwords, or generated password hashes. The seeder reads them only from local environment, validates password strength, lowercases the email, and stores only a bcrypt hash.
+
 ## Commands
 
 ```bash
@@ -97,6 +112,9 @@ npm run db:migrate:status
 npm run db:migrate
 npm run db:schema:verify
 npm run test:migrations
+npm run db:seed:status
+npm run db:seed
+npm run test:seeders
 ```
 
 Rollback commands for a local/disposable database only:
@@ -105,9 +123,13 @@ Rollback commands for a local/disposable database only:
 npm run db:migrate:down
 npm run db:migrate:down:all -- --confirm-local-schema-reset
 npm run db:schema:verify -- --expect-empty
+npm run db:seed:down
+npm run db:seed:down:all -- --confirm-local-seed-reset
 ```
 
 `db:migrate:down:all` is blocked when `NODE_ENV=production`, requires the confirmation flag, verifies the connected database name, rejects unexpected tables, and drops `SequelizeMeta` after all Stage 5 tables are reverted.
+
+Seeder rollback commands are blocked in production, verify the connected database name, and only remove the owned bootstrap admin when the seeder metadata and safety checks match.
 
 ## Migration Operations
 
@@ -128,6 +150,22 @@ Production migration checklist:
 4. Run `npm run db:migrate` during the approved deployment window.
 5. Run `npm run db:schema:verify`.
 6. Keep rollback SQL/down-migration plan and backup restore procedure ready before applying changes.
+
+## Seeder Operations
+
+Seeders are explicit operator commands. Backend startup does not run seeders.
+
+The seeder runner uses:
+
+- `umzug`
+- Sequelize query interface context
+- `SequelizeStorage` with metadata table `SequelizeSeedMeta`
+- MySQL advisory lock `mypetmart_data_seeders`
+- `bcrypt` for bootstrap admin password hashing
+
+`npm run db:seed` is blocked in production unless `ALLOW_PRODUCTION_SEED=true`. Seeder rollback remains blocked in production.
+
+The bootstrap admin seeder creates one active admin user from `SEED_ADMIN_*` values. It is idempotent when the existing admin row already matches the configured ID, normalized email, role, and status. It fails safely on ID/email conflicts, non-admin role conflicts, disabled admin conflicts, missing seed config, pending migrations, and unsafe rollback dependencies.
 
 ## Stage 5 Schema Decisions
 
@@ -156,18 +194,20 @@ src/database/
   associations.ts
   commands/
   migrations/
+  seeders/
   tables/
 ```
 
 ## Current Limitations
 
-- No seeders or seed data are implemented yet.
+- Live local bootstrap admin seed has not been applied until ignored `.env` contains `SEED_ADMIN_NAME`, `SEED_ADMIN_EMAIL`, and `SEED_ADMIN_PASSWORD`.
 - Authentication is not implemented yet.
 - Cloudflare R2 is not implemented yet.
 - Payment and shipping providers are not implemented yet.
 - Swagger/OpenAPI is not implemented yet.
 - Category/product/cart/order/return/contact/settings APIs are not implemented yet.
+- Catalog/product/order demo seed data is not implemented yet.
 
 ## Next Stage
 
-Stage 6, Seeders.
+Fill local ignored bootstrap admin seed values and rerun the Stage 6 live seeding drill; after that, continue to Stage 8, Standard API responses.

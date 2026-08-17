@@ -1,8 +1,11 @@
 import type { ErrorRequestHandler } from "express";
+import { ZodError } from "zod";
 
 import { ApplicationError } from "../../utils/application-error.js";
 import { sendError } from "../../utils/api-response.js";
 import { logger } from "../../utils/logger.js";
+
+import { ValidationError } from "../../models/AuthModels/auth.errors.js";
 
 const INTERNAL_ERROR_MESSAGE = "An unexpected error occurred.";
 const PAYLOAD_TOO_LARGE_MESSAGE = "The request body is too large.";
@@ -21,6 +24,16 @@ function isBodyParserError(error: unknown): error is BodyParserError {
 function toApplicationError(error: unknown): ApplicationError {
   if (error instanceof ApplicationError) {
     return error;
+  }
+
+  if (error instanceof ZodError) {
+    const formatted: Record<string, string[]> = {};
+    for (const issue of error.issues) {
+      const field = issue.path.join(".") || "body";
+      if (!formatted[field]) formatted[field] = [];
+      formatted[field].push(issue.message);
+    }
+    return new ValidationError(formatted);
   }
 
   if (isBodyParserError(error)) {
@@ -45,7 +58,6 @@ function toApplicationError(error: unknown): ApplicationError {
     statusCode: 500,
     code: "INTERNAL_ERROR",
     message: INTERNAL_ERROR_MESSAGE,
-    details: error,
     isOperational: false
   });
 }
@@ -65,5 +77,11 @@ export const errorHandlerMiddleware: ErrorRequestHandler = (error, request, resp
     );
   }
 
-  sendError(response, applicationError.statusCode, applicationError.code, applicationError.publicMessage);
+  const errors = applicationError instanceof ValidationError ? applicationError.errors : undefined;
+  // Only ever forward `details` for operational (expected, application-thrown) errors — an
+  // unexpected/internal error's ApplicationError never carries one (see toApplicationError
+  // above), but this gate is kept as a second, explicit line of defense against ever leaking
+  // internal exception data to a client through this field.
+  const details = applicationError.isOperational ? applicationError.details : undefined;
+  sendError(response, applicationError.statusCode, applicationError.code, applicationError.publicMessage, errors, details);
 };

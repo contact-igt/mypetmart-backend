@@ -1,11 +1,11 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
 import { DATABASE_TABLE_NAMES, SESSION_TYPE_VALUES, type SessionType } from "../../../constants/database.constants.js";
-import { isModelInitialized, removeSensitiveFields, timestampModelOptions, uuidPrimaryKeyAttribute, type SerializedModel } from "../table-helpers.js";
+import { isModelInitialized, removeSensitiveFields, timestampModelOptions, numericPrimaryKeyAttribute, type SerializedModel } from "../table-helpers.js";
 import type { User } from "../UserTable/index.js";
 
 export class AuthSession extends Model<InferAttributes<AuthSession>, InferCreationAttributes<AuthSession>> {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
   declare user_id: ForeignKey<User["id"]>;
   declare session_type: SessionType;
   declare token_hash: string;
@@ -30,8 +30,8 @@ export function initializeAuthSessionTable(sequelize: Sequelize): typeof AuthSes
 
   AuthSession.init(
     {
-      id: uuidPrimaryKeyAttribute(),
-      user_id: { type: DataTypes.UUID, allowNull: false },
+      id: numericPrimaryKeyAttribute(),
+      user_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
       session_type: { type: DataTypes.ENUM(...SESSION_TYPE_VALUES), allowNull: false },
       token_hash: { type: DataTypes.STRING(255), allowNull: false, unique: true, validate: { notEmpty: true, len: [1, 255] } },
       user_agent: { type: DataTypes.STRING(512), allowNull: true, validate: { len: [0, 512] } },
