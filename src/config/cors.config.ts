@@ -3,8 +3,17 @@ import type { CorsOptions } from "cors";
 import { ApplicationError } from "../utils/application-error.js";
 import { environmentConfig } from "./environment.config.js";
 
+function parseOrigins(value: string): string[] {
+  return value.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+const parsedAllowedOrigins = [
+  ...parseOrigins(environmentConfig.STOREFRONT_ORIGIN),
+  ...parseOrigins(environmentConfig.ADMIN_ORIGIN)
+];
+
 export const corsConfig = Object.freeze({
-  allowedOrigins: Object.freeze([environmentConfig.STOREFRONT_ORIGIN, environmentConfig.ADMIN_ORIGIN]),
+  allowedOrigins: Object.freeze(parsedAllowedOrigins),
   allowedMethods: Object.freeze(["GET", "POST", "PATCH", "DELETE", "OPTIONS"]),
   allowedHeaders: Object.freeze(["Content-Type", "Authorization", "X-Request-Id"]),
   credentials: true
