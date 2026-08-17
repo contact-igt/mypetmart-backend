@@ -134,6 +134,12 @@ const environmentSchema = z
     DB_POOL_MIN: integerFromString("DB_POOL_MIN", 0, 100).default(0),
     DB_POOL_ACQUIRE_MS: integerFromString("DB_POOL_ACQUIRE_MS", 1000, 120000).default(30000),
     DB_POOL_IDLE_MS: integerFromString("DB_POOL_IDLE_MS", 1000, 120000).default(10000),
+
+    PRODUCTION_DB_HOST: optionalTrimmedStringSchema,
+    PRODUCTION_DB_PORT: integerFromString("PRODUCTION_DB_PORT", 1, 65535).optional(),
+    PRODUCTION_DB_NAME: optionalTrimmedStringSchema,
+    PRODUCTION_DB_USER: optionalTrimmedStringSchema,
+    PRODUCTION_DB_PASSWORD: z.preprocess(optionalString, z.string().optional()),
     PRODUCT_SAFE_TRASH_CUTOFF: z.preprocess(
       optionalString,
       z.iso.datetime({ offset: true, message: "PRODUCT_SAFE_TRASH_CUTOFF must be an ISO-8601 timestamp." }).optional()
