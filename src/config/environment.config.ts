@@ -210,6 +210,21 @@ const environmentSchema = z
     // PayU Hosted Checkout form-post endpoint. Optional — payment.config.ts
     // falls back to PayU's published test/live URL by NODE_ENV when unset.
     PAYMENT_GATEWAY_URL: z.preprocess(optionalString, z.url("PAYMENT_GATEWAY_URL must be a valid URL.").optional()),
+    // This backend's own public HTTPS origin — needed only for the PayU
+    // refund-status callback URL (var5 on cancel_refund_transaction), which
+    // must be a stable address PayU's servers can reach. Nothing before the
+    // Refund feature needed to describe its own public address, so no such
+    // var previously existed (STOREFRONT_ORIGIN/ADMIN_ORIGIN below describe
+    // the two frontends, not this API). Optional at the env layer — refund
+    // initiation itself throws PaymentProviderNotConfiguredError if unset,
+    // the same pattern as a missing PAYMENT_KEY_ID/PAYMENT_KEY_SECRET.
+    BACKEND_PUBLIC_ORIGIN: z.preprocess(optionalString, z.url("BACKEND_PUBLIC_ORIGIN must be a valid URL.").optional()),
+    // Return eligibility window. No business decision on this number existed
+    // anywhere in the codebase/docs prior to the Returns feature — rather
+    // than inventing a silent default, it is a named, documented, ops-owned
+    // setting. 7 is a provisional default only (common baseline for a pet-
+    // commerce store) — revisit once the client confirms the real policy.
+    RETURN_WINDOW_DAYS: integerFromString("RETURN_WINDOW_DAYS", 1, 365).default(7),
 
     SHIPPING_PROVIDER: optionalTrimmedStringSchema,
     SHIPPING_API_KEY: optionalTrimmedStringSchema,

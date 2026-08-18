@@ -18,6 +18,10 @@ import { adminOrderRouter } from "../../models/OrderModels/admin-order.routes.js
 import { storefrontWishlistRouter } from "../../models/WishlistModels/storefront-wishlist.routes.js";
 import { storefrontPaymentRouter } from "../../models/PaymentModels/storefront-payment.routes.js";
 import { payuWebhookRouter } from "../../models/PaymentModels/payu-webhook.routes.js";
+import { storefrontReturnRouter } from "../../models/ReturnModels/storefront-return.routes.js";
+import { adminReturnRouter } from "../../models/ReturnModels/admin-return.routes.js";
+import { adminRefundRouter } from "../../models/RefundModels/admin-refund.routes.js";
+import { payuRefundWebhookRouter } from "../../models/RefundModels/payu-refund-webhook.routes.js";
 
 export const v1Router = Router();
 
@@ -39,5 +43,9 @@ v1Router.use("/admin/orders", adminOrderRouter);
 v1Router.use("/storefront/wishlist", storefrontWishlistRouter);
 v1Router.use("/storefront/payments", storefrontPaymentRouter);
 v1Router.use("/payments/payu", payuWebhookRouter);
+v1Router.use("/storefront/returns", storefrontReturnRouter);
+v1Router.use("/admin/returns", adminReturnRouter);
+v1Router.use("/admin", adminRefundRouter);
+v1Router.use("/payments/payu", payuRefundWebhookRouter);
 
 

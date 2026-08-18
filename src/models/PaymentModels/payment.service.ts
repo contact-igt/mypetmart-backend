@@ -117,6 +117,8 @@ export const PaymentService = {
       if (error instanceof PaymentAttemptAlreadyActiveError) {
         const existing = await Payment.findOne({ where: { order_id: orderId, status: "pending" } });
         if (existing) {
+          existing.provider_order_id = `${buildBusinessReference("payment", existing.id)}-${Date.now()}`;
+          await existing.save();
           return existing;
         }
       }
@@ -146,7 +148,7 @@ export const PaymentService = {
       if (payment.provider_order_id) {
         return payment;
       }
-      payment.provider_order_id = buildBusinessReference("payment", payment.id);
+      payment.provider_order_id = `${buildBusinessReference("payment", payment.id)}-${Date.now()}`;
       await payment.save({ transaction: t });
       return payment;
     });
@@ -230,15 +232,16 @@ export const PaymentService = {
     }
 
     const [firstNameRaw, ...restName] = order.ship_recipient_name.trim().split(/\s+/);
-    const firstname = (firstNameRaw || "Customer").replace(/\|/g, " ");
+    const firstname = (firstNameRaw || "Customer").replace(/[^a-zA-Z0-9]/g, "") || "Customer";
     void restName;
 
     const amount = formatMoney(payment.amount);
     const txnid = payment.provider_order_id;
-    const email = order.contact_email ?? "";
-    const phone = order.ship_phone;
+    const email = order.contact_email?.trim() || "customer@example.com";
+    const rawPhone = order.ship_phone ? order.ship_phone.replace(/\D/g, "") : "";
+    const phone = rawPhone.length >= 10 ? rawPhone.slice(-10) : "9999999999";
     const udf1 = String(order.id);
-    const sanitizedProductInfo = productinfo.replace(/\|/g, " ").slice(0, 255);
+    const sanitizedProductInfo = productinfo.replace(/[^a-zA-Z0-9\s-]/g, " ").trim().slice(0, 255) || "Order Purchase";
 
     const hash = buildPayuRequestHash(
       {
@@ -253,22 +256,25 @@ export const PaymentService = {
       paymentConfig.payuSalt
     );
 
+    const resFields = {
+      key: paymentConfig.payuKey,
+      txnid,
+      amount,
+      productinfo: sanitizedProductInfo,
+      firstname,
+      email,
+      phone,
+      surl: paymentConfig.successReturnUrl,
+      furl: paymentConfig.failureReturnUrl,
+      udf1,
+      hash,
+      service_provider: "payu_paisa"
+    };
+
     return {
       provider: "payu",
       gatewayUrl: paymentConfig.gatewayUrl,
-      fields: {
-        key: paymentConfig.payuKey,
-        txnid,
-        amount,
-        productinfo: sanitizedProductInfo,
-        firstname,
-        email,
-        phone,
-        surl: paymentConfig.successReturnUrl,
-        furl: paymentConfig.failureReturnUrl,
-        udf1,
-        hash
-      }
+      fields: resFields
     };
   },
 

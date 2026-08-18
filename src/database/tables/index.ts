@@ -15,6 +15,8 @@ import { Payment, initializePaymentTable } from "./PaymentTable/index.js";
 import { Product, initializeProductTable } from "./ProductTable/index.js";
 import { ProductImage, initializeProductImageTable } from "./ProductImageTable/index.js";
 import { ProductVariant, initializeProductVariantTable } from "./ProductVariantTable/index.js";
+import { Replacement, initializeReplacementTable } from "./ReplacementTable/index.js";
+import { Refund, initializeRefundTable } from "./RefundTable/index.js";
 import { ReturnNote, initializeReturnNoteTable } from "./ReturnNoteTable/index.js";
 import { ReturnRequest, initializeReturnRequestTable } from "./ReturnRequestTable/index.js";
 import { Shipment, initializeShipmentTable } from "./ShipmentTable/index.js";
@@ -38,6 +40,8 @@ export {
   Product,
   ProductImage,
   ProductVariant,
+  Replacement,
+  Refund,
   ReturnNote,
   ReturnRequest,
   Shipment,
@@ -63,6 +67,8 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "Shipment",
   "ReturnRequest",
   "ReturnNote",
+  "Refund",
+  "Replacement",
   "ContactEnquiry",
   "StoreSetting",
   "AuthChallenge",
@@ -89,6 +95,8 @@ export type DatabaseModelRegistry = Readonly<{
   Shipment: typeof Shipment;
   ReturnRequest: typeof ReturnRequest;
   ReturnNote: typeof ReturnNote;
+  Refund: typeof Refund;
+  Replacement: typeof Replacement;
   ContactEnquiry: typeof ContactEnquiry;
   StoreSetting: typeof StoreSetting;
   AuthChallenge: typeof AuthChallenge;
@@ -119,6 +127,8 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeShipmentTable(sequelize);
   initializeReturnRequestTable(sequelize);
   initializeReturnNoteTable(sequelize);
+  initializeRefundTable(sequelize);
+  initializeReplacementTable(sequelize);
   initializeContactEnquiryTable(sequelize);
   initializeStoreSettingTable(sequelize);
   initializeAuthChallengeTable(sequelize);
@@ -142,6 +152,8 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     Shipment,
     ReturnRequest,
     ReturnNote,
+    Refund,
+    Replacement,
     ContactEnquiry,
     StoreSetting,
     AuthChallenge,

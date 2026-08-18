@@ -6,6 +6,7 @@ import type { Cart } from "../CartTable/index.js";
 import type { OrderItem } from "../OrderItemTable/index.js";
 import type { OrderNote } from "../OrderNoteTable/index.js";
 import type { Payment } from "../PaymentTable/index.js";
+import type { Refund } from "../RefundTable/index.js";
 import type { ReturnRequest } from "../ReturnRequestTable/index.js";
 import type { Shipment } from "../ShipmentTable/index.js";
 import type { User } from "../UserTable/index.js";
@@ -65,6 +66,7 @@ export class Order extends Model<InferAttributes<Order>, InferCreationAttributes
   declare payments?: NonAttribute<Payment[]>;
   declare shipments?: NonAttribute<Shipment[]>;
   declare returns?: NonAttribute<ReturnRequest[]>;
+  declare refunds?: NonAttribute<Refund[]>;
 }
 
 function nonNegativeMoneyValidator(fieldName: string) {

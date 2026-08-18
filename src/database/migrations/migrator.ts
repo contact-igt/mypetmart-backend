@@ -25,7 +25,9 @@ const SCHEMA_ALTER_MIGRATION_NAMES = [
   "031-add-order-contact-email.ts",
   "032-add-payment-cancelled-status.ts",
   "033-add-order-cart-id.ts",
-  "034-add-order-commerce-exception.ts"
+  "034-add-order-commerce-exception.ts",
+  "036-add-return-request-quantity.ts",
+  "037-add-partially-refunded-status.ts"
 ] as const;
 export const MIGRATION_FILE_NAMES = [
   ...INITIAL_SCHEMA_TABLES.map((table) => `${table.migrationName}.ts`),

@@ -42,6 +42,18 @@ export const paymentConfig = Object.freeze({
   // already trusts, plus fixed, backend-owned paths.
   successReturnUrl: `${environmentConfig.STOREFRONT_ORIGIN}/order/payment/success`,
   failureReturnUrl: `${environmentConfig.STOREFRONT_ORIGIN}/order/payment/failure`,
+  // PayU's V1 refund API (cancel_refund_transaction / check_action_status_txnid)
+  // is served by the exact same merchant postservice endpoint as Verify
+  // Payment — confirmed 2026-08-17 against docs.payu.in/reference/
+  // refund_transaction_api and .../check_action_status_api_with_request_id —
+  // so it deliberately reuses verifyApiUrl rather than introducing a second,
+  // redundant URL config.
+  refundApiUrl: resolveVerifyApiUrl(),
+  // PayU's cancel_refund_transaction requires a callback URL (var5) it can
+  // reach to post refund status updates. Only meaningful when this backend
+  // has a public address — see BACKEND_PUBLIC_ORIGIN in environment.config.ts.
+  refundWebhookUrl: environmentConfig.BACKEND_PUBLIC_ORIGIN ? `${environmentConfig.BACKEND_PUBLIC_ORIGIN}/api/v1/payments/payu/refund-webhook` : undefined,
+  returnWindowDays: environmentConfig.RETURN_WINDOW_DAYS,
   keyIdConfigured: Boolean(environmentConfig.PAYMENT_KEY_ID),
   keySecretConfigured: Boolean(environmentConfig.PAYMENT_KEY_SECRET),
   webhookSecretConfigured: Boolean(environmentConfig.PAYMENT_WEBHOOK_SECRET),
@@ -49,5 +61,8 @@ export const paymentConfig = Object.freeze({
     Boolean(environmentConfig.PAYMENT_PROVIDER) &&
     Boolean(environmentConfig.PAYMENT_KEY_ID) &&
     Boolean(environmentConfig.PAYMENT_KEY_SECRET) &&
-    Boolean(environmentConfig.PAYMENT_WEBHOOK_SECRET)
+    Boolean(environmentConfig.PAYMENT_WEBHOOK_SECRET),
+  // Refund initiation additionally requires a reachable public callback URL —
+  // never silently degrades to "no webhook" for a real-money operation.
+  refundReady: Boolean(environmentConfig.PAYMENT_PROVIDER) && Boolean(environmentConfig.PAYMENT_KEY_ID) && Boolean(environmentConfig.PAYMENT_KEY_SECRET) && Boolean(environmentConfig.BACKEND_PUBLIC_ORIGIN)
 });

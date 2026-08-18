@@ -11,6 +11,8 @@ import {
   PAYMENT_STATUS_VALUES,
   PET_TYPE_VALUES,
   PRODUCT_STATUS_VALUES,
+  REPLACEMENT_STATUS_VALUES,
+  REFUND_STATUS_VALUES,
   RETURN_STATUS_VALUES,
   RETURN_TYPE_VALUES,
   SESSION_TYPE_VALUES,
@@ -490,6 +492,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`return_number\` VARCHAR(50) NOT NULL,
         \`order_id\` INT UNSIGNED NOT NULL,
         \`order_item_id\` INT UNSIGNED NOT NULL,
+        \`quantity\` INT UNSIGNED NOT NULL,
         \`user_id\` INT UNSIGNED NOT NULL,
         \`type\` ${enumSql(RETURN_TYPE_VALUES)} NOT NULL,
         \`status\` ${enumSql(RETURN_STATUS_VALUES)} NOT NULL DEFAULT 'requested',
@@ -508,7 +511,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         KEY \`return_requests_user_id_idx\` (\`user_id\`),
         CONSTRAINT \`fk_return_requests_order_id\` FOREIGN KEY (\`order_id\`) REFERENCES \`orders\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
         CONSTRAINT \`fk_return_requests_order_item_id\` FOREIGN KEY (\`order_item_id\`) REFERENCES \`order_items\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-        CONSTRAINT \`fk_return_requests_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT
+        CONSTRAINT \`fk_return_requests_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_return_requests_quantity_positive\` CHECK (\`quantity\` > 0)
       ) ${engine};
     `
   },
@@ -627,6 +631,85 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         KEY \`wishlists_product_id_idx\` (\`product_id\`),
         CONSTRAINT \`fk_wishlists_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
         CONSTRAINT \`fk_wishlists_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.refunds,
+    migrationName: "035-create-refunds",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.refunds)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`refund_number\` VARCHAR(50) NOT NULL,
+        \`order_id\` INT UNSIGNED NOT NULL,
+        \`payment_id\` INT UNSIGNED NOT NULL,
+        \`return_request_id\` INT UNSIGNED NULL,
+        \`provider\` VARCHAR(80) NOT NULL,
+        \`provider_refund_token\` VARCHAR(190) NOT NULL,
+        \`provider_request_id\` VARCHAR(190) NULL,
+        \`provider_refund_id\` VARCHAR(190) NULL,
+        \`provider_status\` VARCHAR(80) NULL,
+        \`status\` ${enumSql(REFUND_STATUS_VALUES)} NOT NULL DEFAULT 'pending',
+        \`amount\` DECIMAL(10,2) NOT NULL,
+        \`currency\` VARCHAR(3) NOT NULL DEFAULT 'INR',
+        \`failure_code\` VARCHAR(120) NULL,
+        \`failure_message\` VARCHAR(500) NULL,
+        \`initiated_by_admin_id\` INT UNSIGNED NOT NULL,
+        \`initiated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`completed_at\` DATETIME NULL,
+        \`failed_at\` DATETIME NULL,
+        \`raw_payload\` JSON NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`refunds_refund_number_unique\` (\`refund_number\`),
+        UNIQUE KEY \`refunds_provider_refund_token_unique\` (\`provider_refund_token\`),
+        UNIQUE KEY \`refunds_provider_refund_id_unique\` (\`provider_refund_id\`),
+        KEY \`refunds_order_id_idx\` (\`order_id\`),
+        KEY \`refunds_payment_id_idx\` (\`payment_id\`),
+        KEY \`refunds_return_request_id_idx\` (\`return_request_id\`),
+        KEY \`refunds_status_idx\` (\`status\`),
+        KEY \`refunds_initiated_by_admin_id_idx\` (\`initiated_by_admin_id\`),
+        CONSTRAINT \`fk_refunds_order_id\` FOREIGN KEY (\`order_id\`) REFERENCES \`orders\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_refunds_payment_id\` FOREIGN KEY (\`payment_id\`) REFERENCES \`payments\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_refunds_return_request_id\` FOREIGN KEY (\`return_request_id\`) REFERENCES \`return_requests\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_refunds_initiated_by_admin_id\` FOREIGN KEY (\`initiated_by_admin_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_refunds_amount_positive\` CHECK (\`amount\` > 0)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.replacements,
+    migrationName: "038-create-replacements",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.replacements)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`replacement_number\` VARCHAR(50) NOT NULL,
+        \`return_request_id\` INT UNSIGNED NOT NULL,
+        \`order_id\` INT UNSIGNED NOT NULL,
+        \`order_item_id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NOT NULL,
+        \`product_variant_id\` INT UNSIGNED NULL,
+        \`quantity\` INT UNSIGNED NOT NULL,
+        \`status\` ${enumSql(REPLACEMENT_STATUS_VALUES)} NOT NULL,
+        \`approved_by_admin_id\` INT UNSIGNED NOT NULL,
+        \`stock_consumed_at\` DATETIME NULL,
+        \`completed_at\` DATETIME NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`replacements_number_unique\` (\`replacement_number\`),
+        UNIQUE KEY \`replacements_return_request_unique\` (\`return_request_id\`),
+        KEY \`replacements_order_id_idx\` (\`order_id\`),
+        KEY \`replacements_order_item_id_idx\` (\`order_item_id\`),
+        KEY \`replacements_product_id_idx\` (\`product_id\`),
+        KEY \`replacements_variant_id_idx\` (\`product_variant_id\`),
+        KEY \`replacements_status_idx\` (\`status\`),
+        CONSTRAINT \`fk_replacements_return_request_id\` FOREIGN KEY (\`return_request_id\`) REFERENCES \`return_requests\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_replacements_order_id\` FOREIGN KEY (\`order_id\`) REFERENCES \`orders\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_replacements_order_item_id\` FOREIGN KEY (\`order_item_id\`) REFERENCES \`order_items\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_replacements_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_replacements_variant_id\` FOREIGN KEY (\`product_variant_id\`) REFERENCES \`product_variants\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_replacements_admin_id\` FOREIGN KEY (\`approved_by_admin_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_replacements_quantity_positive\` CHECK (\`quantity\` > 0)
       ) ${engine};
     `
   }
