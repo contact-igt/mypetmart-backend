@@ -22,7 +22,8 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   storeSettings: "store_settings",
   authChallenges: "auth_challenges",
   passwordResetTokens: "password_reset_tokens",
-  wishlists: "wishlists"
+  wishlists: "wishlists",
+  mediaAssets: "media_assets"
 });
 
 export const AUTH_CHALLENGE_PURPOSE_VALUES = ["email_verification", "password_reset"] as const;

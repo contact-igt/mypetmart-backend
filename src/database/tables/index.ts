@@ -10,6 +10,7 @@ import { ContactEnquiry, initializeContactEnquiryTable } from "./ContactEnquiryT
 import { Order, initializeOrderTable } from "./OrderTable/index.js";
 import { OrderItem, initializeOrderItemTable } from "./OrderItemTable/index.js";
 import { OrderNote, initializeOrderNoteTable } from "./OrderNoteTable/index.js";
+import { MediaAsset, initializeMediaAssetTable } from "./MediaAssetTable/index.js";
 import { PasswordResetToken, initializePasswordResetTokenTable } from "./PasswordResetTokenTable/index.js";
 import { Payment, initializePaymentTable } from "./PaymentTable/index.js";
 import { Product, initializeProductTable } from "./ProductTable/index.js";
@@ -33,6 +34,7 @@ export {
   CartItem,
   Category,
   ContactEnquiry,
+  MediaAsset,
   Order,
   OrderItem,
   OrderNote,
@@ -60,6 +62,7 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "Product",
   "ProductVariant",
   "ProductImage",
+  "MediaAsset",
   "Cart",
   "CartItem",
   "Order",
@@ -89,6 +92,7 @@ export type DatabaseModelRegistry = Readonly<{
   Product: typeof Product;
   ProductVariant: typeof ProductVariant;
   ProductImage: typeof ProductImage;
+  MediaAsset: typeof MediaAsset;
   Cart: typeof Cart;
   CartItem: typeof CartItem;
   Order: typeof Order;
@@ -122,6 +126,7 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeProductTable(sequelize);
   initializeProductVariantTable(sequelize);
   initializeProductImageTable(sequelize);
+  initializeMediaAssetTable(sequelize);
   initializeCartTable(sequelize);
   initializeCartItemTable(sequelize);
   initializeOrderTable(sequelize);
@@ -148,6 +153,7 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     Product,
     ProductVariant,
     ProductImage,
+    MediaAsset,
     Cart,
     CartItem,
     Order,

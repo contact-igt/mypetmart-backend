@@ -14,6 +14,7 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
     Cart,
     CartItem,
     Category,
+    MediaAsset,
     Order,
     OrderItem,
     OrderNote,
@@ -52,6 +53,12 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
 
   Product.hasMany(ProductImage, { foreignKey: "product_id", as: "images" });
   ProductImage.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+
+  User.hasMany(MediaAsset, { foreignKey: "uploaded_by", as: "uploadedMediaAssets" });
+  MediaAsset.belongsTo(User, { foreignKey: "uploaded_by", as: "uploadedBy" });
+
+  MediaAsset.hasMany(ProductImage, { foreignKey: "media_asset_id", as: "productImages" });
+  ProductImage.belongsTo(MediaAsset, { foreignKey: "media_asset_id", as: "mediaAsset" });
 
   User.hasMany(Cart, { foreignKey: "user_id", as: "carts" });
   Cart.belongsTo(User, { foreignKey: "user_id", as: "user" });

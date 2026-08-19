@@ -43,3 +43,20 @@ export type VerifiedProductImageUpload = {
   contentType: string;
   sizeBytes: number;
 };
+
+export type MediaAssetUploadAuthorization = {
+  uploadUrl: string;
+  method: "PUT";
+  requiredHeaders: Readonly<Record<string, string>>;
+  r2Key: string;
+  publicUrl: string;
+  expiresAt: string;
+  uploadToken: string;
+};
+
+export type VerifiedMediaAssetUpload = {
+  r2Key: string;
+  publicUrl: string;
+  contentType: string;
+  sizeBytes: number;
+};

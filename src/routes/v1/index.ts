@@ -10,6 +10,7 @@ import { storefrontProductRouter } from "../../models/ProductModels/storefront-p
 import { adminProductRouter } from "../../models/ProductModels/admin-product.routes.js";
 import { adminVariantRouter } from "../../models/ProductModels/admin-variant.routes.js";
 import { adminImageRouter } from "../../models/ProductModels/admin-image.routes.js";
+import { adminMediaRouter } from "../../models/MediaModels/admin-media.routes.js";
 import { storefrontCartRouter } from "../../models/CartModels/storefront-cart.routes.js";
 import { storefrontAddressRouter } from "../../models/AddressModels/storefront-address.routes.js";
 import { storefrontCheckoutRouter } from "../../models/CheckoutModels/storefront-checkout.routes.js";
@@ -36,6 +37,7 @@ v1Router.use("/storefront/products", storefrontProductRouter);
 v1Router.use("/admin/products", adminProductRouter);
 v1Router.use("/admin/products", adminVariantRouter);
 v1Router.use("/admin/products", adminImageRouter);
+v1Router.use("/admin/media", adminMediaRouter);
 v1Router.use("/storefront/cart", storefrontCartRouter);
 v1Router.use("/storefront/addresses", storefrontAddressRouter);
 v1Router.use("/storefront/checkout", storefrontCheckoutRouter);

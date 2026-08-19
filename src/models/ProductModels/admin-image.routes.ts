@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import { authenticate } from "../../middlewares/auth/authenticate.middleware.js";
 import {
+  handleAdminAttachImageFromGallery,
   handleAdminCompleteImageUpload,
   handleAdminDeleteImage,
   handleAdminPresignImageUpload,
@@ -19,6 +20,10 @@ adminImageRouter.post("/:productId/images/uploads/presign", (req, res, next) => 
 
 adminImageRouter.post("/:productId/images/uploads/complete", (req, res, next) => {
   void handleAdminCompleteImageUpload(req, res, next);
+});
+
+adminImageRouter.post("/:productId/images/attach-from-gallery", (req, res, next) => {
+  void handleAdminAttachImageFromGallery(req, res, next);
 });
 
 adminImageRouter.patch("/:productId/images/reorder", (req, res, next) => {

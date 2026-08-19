@@ -2,8 +2,9 @@ import type { NextFunction, Request, Response } from "express";
 
 import { sendSuccess } from "../../utils/api-response.js";
 import { ProductImageService } from "./product-image.service.js";
-import type { CompleteProductImageUploadInput, UpdateImageInput } from "./product.types.js";
+import type { AttachImageFromMediaAssetInput, CompleteProductImageUploadInput, UpdateImageInput } from "./product.types.js";
 import {
+  attachImageFromMediaAssetSchema,
   completeProductImageUploadSchema,
   parseImageId,
   parseProductId,
@@ -28,6 +29,17 @@ export async function handleAdminCompleteImageUpload(req: Request, res: Response
     const productId = parseProductId(req.params.productId);
     const validated = completeProductImageUploadSchema.parse(req.body) as CompleteProductImageUploadInput;
     const image = await ProductImageService.completeUpload(productId, validated);
+    sendSuccess(res, 201, image);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleAdminAttachImageFromGallery(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const productId = parseProductId(req.params.productId);
+    const validated = attachImageFromMediaAssetSchema.parse(req.body) as AttachImageFromMediaAssetInput;
+    const image = await ProductImageService.attachFromMediaAsset(productId, validated);
     sendSuccess(res, 201, image);
   } catch (error) {
     next(error);

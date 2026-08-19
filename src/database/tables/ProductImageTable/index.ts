@@ -2,12 +2,14 @@ import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAtt
 
 import { DATABASE_TABLE_NAMES } from "../../../constants/database.constants.js";
 import { isModelInitialized, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
+import type { MediaAsset } from "../MediaAssetTable/index.js";
 import type { Product } from "../ProductTable/index.js";
 
 export class ProductImage extends Model<InferAttributes<ProductImage>, InferCreationAttributes<ProductImage>> {
   declare id: CreationOptional<number>;
   declare product_id: ForeignKey<Product["id"]>;
-  declare r2_key: string;
+  declare media_asset_id: ForeignKey<MediaAsset["id"]> | null;
+  declare r2_key: string | null;
   declare url: string;
   declare alt: string;
   declare content_type: string;
@@ -21,6 +23,7 @@ export class ProductImage extends Model<InferAttributes<ProductImage>, InferCrea
   declare deleted_at: CreationOptional<Date | null>;
 
   declare product?: NonAttribute<Product>;
+  declare mediaAsset?: NonAttribute<MediaAsset>;
 }
 
 export function initializeProductImageTable(sequelize: Sequelize): typeof ProductImage {
@@ -32,7 +35,8 @@ export function initializeProductImageTable(sequelize: Sequelize): typeof Produc
     {
       id: numericPrimaryKeyAttribute(),
       product_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
-      r2_key: { type: DataTypes.STRING(512), allowNull: false, unique: true, validate: { notEmpty: true, len: [1, 512] } },
+      media_asset_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+      r2_key: { type: DataTypes.STRING(512), allowNull: true, unique: true, validate: { len: [1, 512] } },
       url: { type: DataTypes.STRING(1000), allowNull: false, validate: { notEmpty: true, len: [1, 1000], isUrl: true } },
       alt: { type: DataTypes.STRING(255), allowNull: false, validate: { notEmpty: true, len: [1, 255] } },
       content_type: { type: DataTypes.STRING(100), allowNull: false, validate: { notEmpty: true, len: [1, 100] } },
@@ -52,6 +56,7 @@ export function initializeProductImageTable(sequelize: Sequelize): typeof Produc
         { unique: true, fields: ["r2_key"], name: "product_images_r2_key_unique" },
         { fields: ["product_id", "sort_order"], name: "product_images_product_sort_order_idx" },
         { fields: ["product_id", "is_primary"], name: "product_images_product_primary_idx" },
+        { fields: ["media_asset_id"], name: "product_images_media_asset_id_idx" },
         { fields: ["deleted_at"], name: "product_images_deleted_at_idx" }
       ]
     }

@@ -89,9 +89,14 @@ async function evaluateProductRestoreEligibility(product: Product): Promise<Prod
       return { restorable: false, blockedBy: new ProductRestoreSkuConflictError(variant.sku), variants, images };
     }
   }
-  for (const image of images.filter((item) => item.deleted_at === null)) {
+  // Media Gallery-linked images (r2_key null, media_asset_id set) do not own
+  // a "products/{id}/..." R2 key of their own, so they cannot be checked via
+  // productImageObjectExists — their object's continued existence is instead
+  // guaranteed by the Media Asset FK's ON DELETE RESTRICT (a referenced
+  // Media Asset can never be deleted while this row exists).
+  for (const image of images.filter((item) => item.deleted_at === null && item.r2_key !== null)) {
     try {
-      if (!(await objectStorageService.productImageObjectExists(product.id, image.r2_key))) {
+      if (!(await objectStorageService.productImageObjectExists(product.id, image.r2_key!))) {
         return {
           restorable: false,
           blockedBy: new ProductRestoreConflictError(`Product image '${image.id}' is unavailable in Cloudflare R2.`),
@@ -220,12 +225,17 @@ export async function validateProductActivationReadiness(product: Product, trans
   await validateShippingReadiness(product, transaction);
 }
 
-// Helper: Format image DTO
+// Helper: Format image DTO. A Media Gallery-linked image (media_asset_id
+// set) has no r2_key of its own — see the product_images.r2_key comment in
+// schema-definition.ts — so its already-resolved, denormalized `url` column
+// (copied from the Media Asset at attach time) is used as-is instead of
+// re-deriving a public URL from a null key.
 export function formatImageDTO(img: ProductImage, includeR2Key = false): ProductImageJSON {
   return {
     id: img.id,
-    ...(includeR2Key ? { r2Key: img.r2_key } : {}),
-    url: objectStorageService.getPublicUrl(img.r2_key) ?? img.url,
+    ...(includeR2Key && img.r2_key ? { r2Key: img.r2_key } : {}),
+    mediaAssetId: img.media_asset_id,
+    url: (img.r2_key ? objectStorageService.getPublicUrl(img.r2_key) : undefined) ?? img.url,
     alt: img.alt,
     contentType: img.content_type,
     sizeBytes: img.size_bytes,
@@ -283,7 +293,8 @@ export class ProductService {
       whereClause[Op.or as unknown as string] = [
         { name: { [Op.like]: term } },
         { slug: { [Op.like]: term } },
-        { sku: { [Op.like]: term } }
+        { sku: { [Op.like]: term } },
+        { brand: { [Op.like]: term } }
       ];
     }
 
@@ -330,6 +341,7 @@ export class ProductService {
         id: p.id,
         name: p.name,
         slug: p.slug,
+        brand: p.brand,
         petType: p.pet_type,
         price: formatMoney(p.price),
         compareAtPrice: p.compare_at_price ? formatMoney(p.compare_at_price) : null,
@@ -397,6 +409,7 @@ export class ProductService {
       name: product.name,
       slug: product.slug,
       sku: product.sku,
+      brand: product.brand,
       description: product.description,
       petType: product.pet_type,
       price: formatMoney(product.price),
@@ -579,6 +592,7 @@ export class ProductService {
       name: product.name,
       slug: product.slug,
       sku: product.sku,
+      brand: product.brand,
       description: product.description,
       petType: product.pet_type,
       status: product.status,
@@ -657,6 +671,7 @@ export class ProductService {
           name: input.name,
           slug: initialSlug,
           sku: normalizedMasterSku,
+          brand: input.brand || null,
           description: input.description,
           pet_type: petType,
           status: input.status || "draft",
@@ -754,6 +769,7 @@ export class ProductService {
       const updates: Record<string, unknown> = {};
 
       if (input.name !== undefined) updates.name = input.name;
+      if (input.brand !== undefined) updates.brand = input.brand || null;
       if (input.description !== undefined) updates.description = input.description;
       if (input.categoryId !== undefined) updates.category_id = input.categoryId;
       if (input.petType !== undefined) updates.pet_type = input.petType;
@@ -878,6 +894,7 @@ export class ProductService {
           name: `${source.name} Copy`,
           slug: newSlug,
           sku: newMasterSku,
+          brand: source.brand,
           description: source.description,
           pet_type: source.pet_type,
           status: "draft",

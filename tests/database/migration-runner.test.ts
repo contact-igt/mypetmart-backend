@@ -17,7 +17,7 @@ import { databaseConfig } from "../../src/config/database.config.js";
 
 describe("Stage 5 migration runner", () => {
   it("discovers the initial schema migrations in numeric order", () => {
-    expect(INITIAL_SCHEMA_TABLES).toHaveLength(24);
+    expect(INITIAL_SCHEMA_TABLES).toHaveLength(25);
     expect(expectedBusinessTableNames()).toEqual([
       "users",
       "auth_sessions",
@@ -42,7 +42,8 @@ describe("Stage 5 migration runner", () => {
       "password_reset_tokens",
       "wishlists",
       "refunds",
-      "replacements"
+      "replacements",
+      "media_assets"
     ]);
     expect(MIGRATION_FILE_NAMES).toEqual([...MIGRATION_FILE_NAMES].sort());
   });
