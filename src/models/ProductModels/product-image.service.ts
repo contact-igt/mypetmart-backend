@@ -1,13 +1,16 @@
 import { DATABASE_TABLE_NAMES } from "../../constants/database.constants.js";
 import { sequelize } from "../../database/index.js";
+import { MediaAsset } from "../../database/tables/MediaAssetTable/index.js";
 import { ProductImage } from "../../database/tables/ProductImageTable/index.js";
 import { Product } from "../../database/tables/ProductTable/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
+import { MediaAssetNotFoundError } from "../MediaModels/media-asset.errors.js";
 import { objectStorageService, type ObjectStorageService } from "../../services/object-storage/object-storage.service.js";
 import { logger } from "../../utils/logger.js";
 import { InvalidProductDataError, ProductImageNotFoundError, ProductNotFoundError } from "./product.errors.js";
 import { formatImageDTO } from "./product.service.js";
 import type {
+  AttachImageFromMediaAssetInput,
   AttachImageInput,
   CompleteProductImageUploadInput,
   PresignProductImageInput,
@@ -101,6 +104,62 @@ export class ProductImageService {
     });
   }
 
+  // Attach an existing Media Gallery asset to a Product without a new R2 upload.
+  // The resulting row shares its underlying R2 object (and public url) with
+  // every other Product that reuses the same Media Asset — see the
+  // product_images.r2_key comment in schema-definition.ts. Only alt text,
+  // ordering, and primary-image status are Product-specific.
+  static async attachFromMediaAsset(productId: number, input: AttachImageFromMediaAssetInput): Promise<ProductImageJSON> {
+    const product = await Product.findByPk(productId);
+    if (!product) {
+      throw new ProductNotFoundError(productId);
+    }
+
+    const mediaAsset = await MediaAsset.findByPk(input.mediaAssetId);
+    if (!mediaAsset) {
+      throw new MediaAssetNotFoundError(input.mediaAssetId);
+    }
+
+    return await sequelize.transaction(async (t) => {
+      // Row lock product to prevent primary switch race conditions
+      await Product.findByPk(productId, { transaction: t, lock: true });
+
+      const existingCount = await ProductImage.count({
+        where: { product_id: productId },
+        transaction: t
+      });
+
+      const isPrimary = existingCount === 0 ? true : Boolean(input.isPrimary);
+
+      if (isPrimary) {
+        await ProductImage.update({ is_primary: false }, { where: { product_id: productId }, transaction: t });
+      }
+
+      const imageId = await IdSequenceService.allocateNextId(DATABASE_TABLE_NAMES.productImages, t);
+      const alt = input.alt?.trim() || mediaAsset.alt_text || mediaAsset.title || mediaAsset.original_name;
+
+      const image = await ProductImage.create(
+        {
+          id: imageId,
+          product_id: productId,
+          media_asset_id: mediaAsset.id,
+          r2_key: null,
+          url: objectStorageService.getPublicUrl(mediaAsset.storage_key) ?? mediaAsset.public_url,
+          alt,
+          content_type: mediaAsset.mime_type,
+          size_bytes: mediaAsset.file_size,
+          width: mediaAsset.width,
+          height: mediaAsset.height,
+          sort_order: input.sortOrder ?? imageId,
+          is_primary: isPrimary
+        },
+        { transaction: t }
+      );
+
+      return formatImageDTO(image, true);
+    });
+  }
+
   // Update Image Metadata
   static async updateImage(productId: number, imageId: number, input: UpdateImageInput): Promise<ProductImageJSON> {
     const product = await Product.findByPk(productId);
@@ -153,8 +212,15 @@ export class ProductImageService {
       throw new ProductImageNotFoundError(imageId);
     }
 
-    storage.ensureConfigured();
+    // A Media Gallery-linked image (r2_key null, media_asset_id set) does not
+    // own its R2 object — it shares the Media Asset's object with every
+    // other Product that reuses it, so deleting this attachment must never
+    // delete the object itself. Only a directly-uploaded image (its own,
+    // exclusively-owned r2_key) triggers R2 cleanup here.
     const objectKey = image.r2_key;
+    if (objectKey) {
+      storage.ensureConfigured();
+    }
 
     await sequelize.transaction(async (t) => {
       await Product.findByPk(productId, { transaction: t, lock: true });
@@ -184,6 +250,8 @@ export class ProductImageService {
         }
       }
     });
+
+    if (!objectKey) return;
 
     try {
       await storage.deleteProductImageObject(productId, objectKey);

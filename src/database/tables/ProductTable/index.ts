@@ -14,6 +14,7 @@ export class Product extends Model<InferAttributes<Product>, InferCreationAttrib
   declare name: string;
   declare slug: string;
   declare sku: string;
+  declare brand: string | null;
   declare description: string;
   declare pet_type: CreationOptional<PetType>;
   declare status: CreationOptional<ProductStatus>;
@@ -52,6 +53,7 @@ export function initializeProductTable(sequelize: Sequelize): typeof Product {
       name: { type: DataTypes.STRING(190), allowNull: false, validate: { notEmpty: true, len: [1, 190] } },
       slug: { type: DataTypes.STRING(190), allowNull: false, unique: true, validate: { notEmpty: true, len: [1, 190] } },
       sku: { type: DataTypes.STRING(100), allowNull: false, unique: true, validate: { notEmpty: true, len: [1, 100] } },
+      brand: { type: DataTypes.STRING(120), allowNull: true, validate: { len: [0, 120] } },
       description: { type: DataTypes.TEXT, allowNull: false, validate: { notEmpty: true } },
       pet_type: { type: DataTypes.ENUM(...PET_TYPE_VALUES), allowNull: false, defaultValue: "all" },
       status: { type: DataTypes.ENUM(...PRODUCT_STATUS_VALUES), allowNull: false, defaultValue: "draft" },

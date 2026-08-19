@@ -85,7 +85,7 @@ describe("database model attributes and indexes", () => {
       expect(registeredModel.options.updatedAt).toBe("updated_at");
     }
 
-    for (const modelName of ["User", "Address", "Category", "Product", "ProductVariant", "ProductImage"] as const) {
+    for (const modelName of ["User", "Address", "Category", "Product", "ProductVariant", "ProductImage", "MediaAsset"] as const) {
       expect(databaseModels[modelName].options.paranoid).toBe(true);
       expect(databaseModels[modelName].options.deletedAt).toBe("deleted_at");
     }

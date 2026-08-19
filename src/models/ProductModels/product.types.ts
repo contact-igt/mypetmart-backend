@@ -10,6 +10,7 @@ export type StorefrontCategorySummaryJSON = {
 export type ProductImageJSON = {
   id: number;
   r2Key?: string;
+  mediaAssetId: number | null;
   url: string;
   alt: string;
   contentType: string;
@@ -42,6 +43,7 @@ export type StorefrontProductListItemJSON = {
   id: number;
   name: string;
   slug: string;
+  brand: string | null;
   petType: PetType;
   price: string;
   compareAtPrice: string | null;
@@ -95,6 +97,7 @@ export type AdminProductListItemJSON = {
 };
 
 export type AdminProductDetailJSON = AdminProductListItemJSON & {
+  brand: string | null;
   description: string;
   tags: string[];
   metaTitle: string | null;
@@ -123,6 +126,7 @@ export type CreateProductInput = {
   categoryId: number;
   name: string;
   sku: string;
+  brand?: string | null;
   description: string;
   petType?: PetType;
   status?: ProductStatus;
@@ -145,6 +149,7 @@ export type UpdateProductInput = {
   categoryId?: number;
   name?: string;
   sku?: string;
+  brand?: string | null;
   description?: string;
   petType?: PetType;
   price?: string;
@@ -196,6 +201,13 @@ export type CompleteProductImageUploadInput = {
 };
 
 export type UpdateImageInput = {
+  alt?: string;
+  sortOrder?: number;
+  isPrimary?: boolean;
+};
+
+export type AttachImageFromMediaAssetInput = {
+  mediaAssetId: number;
   alt?: string;
   sortOrder?: number;
   isPrimary?: boolean;

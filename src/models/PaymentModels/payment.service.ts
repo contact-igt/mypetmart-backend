@@ -49,7 +49,39 @@ function generatePayuTxnId(paymentId: number): string {
   return `PAY-${String(paymentId).padStart(6, "0")}-${random}`;
 }
 
+/**
+ * Reconciles a still-"pending" Payment Attempt against PayU's Verify
+ * Payment API before any caller treats its local "pending" status as
+ * current truth. Originally only ever called reactively (getPaymentStatus,
+ * when the browser/customer explicitly asks) — that left two real gaps:
+ * (1) initiatePayuCheckout would reuse a pending attempt's txnid for a
+ * fresh PayU submission without first checking whether PayU had already
+ * captured it on a prior attempt, which PayU then bounces with its own
+ * generic "txnid has been used previously or was successfully captured"
+ * page; (2) OrderModels.createOrder would reject a new Order as
+ * OrderAlreadyPendingError purely because an old Order still looked
+ * "pending" locally, even when it had actually already been paid. Calling
+ * this proactively before either of those decisions closes both gaps. A
+ * network/provider failure here is logged and swallowed — the caller
+ * proceeds with the last-known local state, exactly like every other
+ * reconciliation path in this codebase.
+ */
+async function reconcilePendingAttempt(payment: Payment): Promise<void> {
+  if (!payment.provider_order_id) {
+    return;
+  }
+  try {
+    const raw = await PayuVerifyClient.verifyPayment(payment.provider_order_id);
+    const normalized = normalizeVerifyApiResult(payment.provider_order_id, raw);
+    await PaymentFinalizationService.processVerifiedPaymentResult(normalized);
+  } catch (error) {
+    logger.warn({ err: error, paymentAttemptId: payment.id }, "payment reconciliation: Verify Payment API call failed, proceeding with last-known local state");
+  }
+}
+
 export const PaymentService = {
+  reconcilePendingAttempt,
+
   /**
    * Creates a new Payment Attempt for a given Order.
    * Enforces that only one active (pending) attempt exists at a time using row-level locking.
@@ -308,6 +340,21 @@ export const PaymentService = {
     const itemCount = await OrderItem.count({ where: { order_id: order.id } });
     this.assertOrderPayable(order, itemCount);
 
+    // Reconcile any existing pending attempt with PayU BEFORE deciding
+    // whether to reuse its txnid — otherwise a payment that actually
+    // succeeded on a previous submission gets resubmitted with the same
+    // txnid and bounced by PayU's own duplicate-txnid protection, stranding
+    // the customer on PayU's raw error page instead of our result page.
+    const existingPendingAttempt = await Payment.findOne({ where: { order_id: order.id, status: "pending" } });
+    if (existingPendingAttempt) {
+      await reconcilePendingAttempt(existingPendingAttempt);
+    }
+
+    const reconciledOrder = await Order.findByPk(order.id);
+    if (reconciledOrder?.payment_status === "paid") {
+      throw new OrderAlreadyPaidError(order.id);
+    }
+
     const attempt = await this.getOrCreateActiveAttempt(order.id);
     const attemptWithTxnId = await this.ensureProviderTransactionId(attempt.id);
 
@@ -348,14 +395,8 @@ export const PaymentService = {
       };
     }
 
-    if (payment.status === "pending" && payment.provider_order_id) {
-      try {
-        const raw = await PayuVerifyClient.verifyPayment(payment.provider_order_id);
-        const normalized = normalizeVerifyApiResult(payment.provider_order_id, raw);
-        await PaymentFinalizationService.processVerifiedPaymentResult(normalized);
-      } catch (error) {
-        logger.warn({ err: error, paymentAttemptId: payment.id, orderId: order.id }, "payment status: Verify Payment API reconciliation failed, returning last-known local state");
-      }
+    if (payment.status === "pending") {
+      await reconcilePendingAttempt(payment);
     }
 
     const [refreshedOrder, refreshedPayment] = await Promise.all([Order.findByPk(order.id), Payment.findByPk(payment.id)]);

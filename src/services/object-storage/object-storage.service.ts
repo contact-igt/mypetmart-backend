@@ -11,8 +11,10 @@ import {
 } from "./object-storage.errors.js";
 import { R2ObjectStorageProvider } from "./r2-object-storage.provider.js";
 import type {
+  MediaAssetUploadAuthorization,
   ObjectStorageProvider,
   ProductImageUploadAuthorization,
+  VerifiedMediaAssetUpload,
   VerifiedProductImageUpload
 } from "./object-storage.types.js";
 
@@ -23,17 +25,34 @@ const PRODUCT_IMAGE_TYPES = Object.freeze({
 } as const);
 
 const NEW_PRODUCT_IMAGE_KEY_PATTERN = /^products\/(\d+)\/uploads\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f-]{36})\.(jpg|png|webp)$/;
+const MEDIA_ASSET_KEY_PATTERN = /^media\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f-]{36})\.(jpg|png|webp)$/;
 
 type SupportedProductImageType = keyof typeof PRODUCT_IMAGE_TYPES;
 
-type UploadIntent = {
+type ProductImageUploadIntent = {
   version: 1;
+  scope: "product_image";
   productId: number;
   r2Key: string;
   contentType: SupportedProductImageType;
   sizeBytes: number;
   expiresAtEpochSeconds: number;
 };
+
+// Media Assets are not scoped to any single Product (that is the point of a
+// reusable library), so their upload intent deliberately carries no
+// productId — it is verified only against MEDIA_ASSET_KEY_PATTERN's "media/"
+// namespace instead of a "products/{id}/" one.
+type MediaAssetUploadIntent = {
+  version: 1;
+  scope: "media_asset";
+  r2Key: string;
+  contentType: SupportedProductImageType;
+  sizeBytes: number;
+  expiresAtEpochSeconds: number;
+};
+
+type UploadIntent = ProductImageUploadIntent | MediaAssetUploadIntent;
 
 export type ObjectStorageRuntimeConfig = {
   ready: boolean;
@@ -113,6 +132,7 @@ export class ObjectStorageService {
     const expiresAtEpochSeconds = Math.floor(now.getTime() / 1000) + this.#config.uploadUrlExpirySeconds;
     const uploadToken = this.#signIntent({
       version: 1,
+      scope: "product_image",
       productId,
       r2Key: key,
       contentType,
@@ -139,7 +159,7 @@ export class ObjectStorageService {
   public async verifyProductImageUpload(productId: number, uploadToken: string): Promise<VerifiedProductImageUpload> {
     this.ensureConfigured();
     const intent = this.#verifyIntent(uploadToken);
-    if (intent.productId !== productId || !this.isAuthorizedProductImageKey(productId, intent.r2Key)) {
+    if (intent.scope !== "product_image" || intent.productId !== productId || !this.isAuthorizedProductImageKey(productId, intent.r2Key)) {
       throw new InvalidImageUploadIntentError();
     }
 
@@ -165,6 +185,85 @@ export class ObjectStorageService {
   public isAuthorizedProductImageKey(productId: number, key: string): boolean {
     const match = NEW_PRODUCT_IMAGE_KEY_PATTERN.exec(key);
     return match !== null && Number(match[1]) === productId;
+  }
+
+  public async presignMediaAssetUpload(input: { contentType: string; sizeBytes: number }): Promise<MediaAssetUploadAuthorization> {
+    const contentType = normalizeContentType(input.contentType);
+    if (!isSupportedProductImageType(contentType)) throw new ImageTypeNotAllowedError();
+    if (input.sizeBytes > this.#config.maxImageSizeBytes) throw new ImageTooLargeError(this.#config.maxImageSizeBytes);
+    this.ensureConfigured();
+
+    const now = new Date();
+    const extension = PRODUCT_IMAGE_TYPES[contentType];
+    const key = [
+      "media",
+      String(now.getUTCFullYear()),
+      String(now.getUTCMonth() + 1).padStart(2, "0"),
+      String(now.getUTCDate()).padStart(2, "0"),
+      `${randomUUID()}.${extension}`
+    ].join("/");
+    const expiresAtEpochSeconds = Math.floor(now.getTime() / 1000) + this.#config.uploadUrlExpirySeconds;
+    const uploadToken = this.#signIntent({
+      version: 1,
+      scope: "media_asset",
+      r2Key: key,
+      contentType,
+      sizeBytes: input.sizeBytes,
+      expiresAtEpochSeconds
+    });
+    const result = await this.#getProvider().createPresignedPut({
+      key,
+      contentType,
+      expiresInSeconds: this.#config.uploadUrlExpirySeconds
+    });
+
+    return {
+      uploadUrl: result.uploadUrl,
+      method: "PUT",
+      requiredHeaders: Object.freeze({ "Content-Type": contentType }),
+      r2Key: key,
+      publicUrl: this.getPublicUrl(key)!,
+      expiresAt: new Date(expiresAtEpochSeconds * 1000).toISOString(),
+      uploadToken
+    };
+  }
+
+  public async verifyMediaAssetUpload(uploadToken: string): Promise<VerifiedMediaAssetUpload> {
+    this.ensureConfigured();
+    const intent = this.#verifyIntent(uploadToken);
+    if (intent.scope !== "media_asset" || !this.isAuthorizedMediaAssetKey(intent.r2Key)) {
+      throw new InvalidImageUploadIntentError();
+    }
+
+    const object = await this.#getProvider().headObject(intent.r2Key);
+    if (!object) throw new ImageUploadNotFoundError();
+    const actualContentType = object.contentType ? normalizeContentType(object.contentType) : "";
+    if (actualContentType !== intent.contentType) {
+      throw new ImageUploadVerificationFailedError("The uploaded image content type does not match its authorization.");
+    }
+    if (object.sizeBytes === undefined || object.sizeBytes !== intent.sizeBytes) {
+      throw new ImageUploadVerificationFailedError("The uploaded image size does not match its authorization.");
+    }
+    if (object.sizeBytes > this.#config.maxImageSizeBytes) throw new ImageTooLargeError(this.#config.maxImageSizeBytes);
+
+    return {
+      r2Key: intent.r2Key,
+      publicUrl: this.getPublicUrl(intent.r2Key)!,
+      contentType: intent.contentType,
+      sizeBytes: object.sizeBytes
+    };
+  }
+
+  public isAuthorizedMediaAssetKey(key: string): boolean {
+    return MEDIA_ASSET_KEY_PATTERN.test(key);
+  }
+
+  public async deleteMediaAssetObject(key: string): Promise<void> {
+    this.ensureConfigured();
+    if (!this.isAuthorizedMediaAssetKey(key)) {
+      throw new ImageUploadVerificationFailedError("The image object key does not belong to the Media Gallery.");
+    }
+    await this.#getProvider().deleteObject(key);
   }
 
   public async deleteProductImageObject(productId: number, key: string): Promise<void> {
@@ -218,11 +317,9 @@ export class ObjectStorageService {
         throw new Error("Invalid signature");
       }
 
-      const candidate = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<UploadIntent>;
+      const candidate = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<UploadIntent> & { scope?: unknown; productId?: unknown };
       if (
         candidate.version !== 1 ||
-        !Number.isSafeInteger(candidate.productId) ||
-        (candidate.productId ?? 0) <= 0 ||
         typeof candidate.r2Key !== "string" ||
         typeof candidate.contentType !== "string" ||
         !isSupportedProductImageType(candidate.contentType) ||
@@ -233,7 +330,19 @@ export class ObjectStorageService {
       ) {
         throw new Error("Invalid claims");
       }
-      return candidate as UploadIntent;
+
+      if (candidate.scope === "product_image") {
+        if (!Number.isSafeInteger(candidate.productId) || (candidate.productId as number) <= 0) {
+          throw new Error("Invalid claims");
+        }
+        return candidate as ProductImageUploadIntent;
+      }
+
+      if (candidate.scope === "media_asset") {
+        return candidate as MediaAssetUploadIntent;
+      }
+
+      throw new Error("Invalid claims");
     } catch {
       throw new InvalidImageUploadIntentError();
     }

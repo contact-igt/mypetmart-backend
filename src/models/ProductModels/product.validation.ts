@@ -152,6 +152,7 @@ export const createProductSchema = z
     name: z.string().trim().min(1, "Product name is required").max(190, "Product name max 190 characters"),
     slug: z.never({ message: "Product slug is system-controlled and generated from the Product name" }).optional(),
     sku: skuSchema,
+    brand: z.string().trim().max(120, "Brand max 120 characters").nullable().optional(),
     description: z.string().trim().min(1, "Product description is required"),
     petType: z.enum(PET_TYPE_VALUES).optional().default("all"),
     status: z.enum(PRODUCT_STATUS_VALUES).optional().default("draft"),
@@ -187,6 +188,7 @@ export const updateProductSchema = z.object({
   name: z.string().trim().min(1).max(190).optional(),
   slug: z.never({ message: "Product slug is system-controlled and cannot be changed" }).optional(),
   sku: skuSchema.optional(),
+  brand: z.string().trim().max(120, "Brand max 120 characters").nullable().optional(),
   description: z.string().trim().min(1).optional(),
   petType: z.enum(PET_TYPE_VALUES).optional(),
   price: moneySchema.optional(),
@@ -277,6 +279,13 @@ export const updateImageSchema = z.object({
   alt: z.string().trim().min(1).max(255).optional(),
   sortOrder: z.number().int().min(0).optional(),
   isPrimary: z.boolean().optional()
+});
+
+export const attachImageFromMediaAssetSchema = z.object({
+  mediaAssetId: z.number().int().positive("Media asset ID must be positive"),
+  alt: z.string().trim().min(1).max(255).optional(),
+  sortOrder: z.number().int().min(0).optional(),
+  isPrimary: z.boolean().optional().default(false)
 });
 
 export const reorderSchema = z.object({

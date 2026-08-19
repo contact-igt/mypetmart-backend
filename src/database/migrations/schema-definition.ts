@@ -170,6 +170,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`name\` VARCHAR(190) NOT NULL,
         \`slug\` VARCHAR(190) NOT NULL,
         \`sku\` VARCHAR(100) NOT NULL,
+        \`brand\` VARCHAR(120) NULL,
         \`description\` TEXT NOT NULL,
         \`pet_type\` ${enumSql(PET_TYPE_VALUES)} NOT NULL DEFAULT 'all',
         \`status\` ${enumSql(PRODUCT_STATUS_VALUES)} NOT NULL DEFAULT 'draft',
@@ -252,7 +253,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
       CREATE TABLE ${q(DATABASE_TABLE_NAMES.productImages)} (
         \`id\` INT UNSIGNED NOT NULL,
         \`product_id\` INT UNSIGNED NOT NULL,
-        \`r2_key\` VARCHAR(512) NOT NULL,
+        \`media_asset_id\` INT UNSIGNED NULL,
+        \`r2_key\` VARCHAR(512) NULL,
         \`url\` VARCHAR(1000) NOT NULL,
         \`alt\` VARCHAR(255) NOT NULL,
         \`content_type\` VARCHAR(100) NOT NULL,
@@ -269,6 +271,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         UNIQUE KEY \`product_images_one_primary_unique\` (\`primary_product_id\`),
         KEY \`product_images_product_sort_idx\` (\`product_id\`, \`sort_order\`),
         KEY \`product_images_product_primary_idx\` (\`product_id\`, \`is_primary\`),
+        KEY \`product_images_media_asset_id_idx\` (\`media_asset_id\`),
         KEY \`product_images_deleted_at_idx\` (\`deleted_at\`),
         CONSTRAINT \`fk_product_images_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
         CONSTRAINT \`chk_product_images_size_nonnegative\` CHECK (\`size_bytes\` IS NULL OR \`size_bytes\` >= 0),
@@ -277,6 +280,20 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         CONSTRAINT \`chk_product_images_sort_order_nonnegative\` CHECK (\`sort_order\` >= 0)
       ) ${engine};
     `
+    // NOTE: media_asset_id is a plain nullable column + index here (no FK in
+    // this text) even though it references media_assets.id. media_assets is
+    // migration 041 — created AFTER this table (migration 007) — so a FK
+    // clause baked into this CREATE TABLE text would break fresh installs
+    // (product_images would be created before media_assets exists). The real
+    // FK constraint is instead added by migration 042, once media_assets
+    // exists, and is enforced by MySQL even though db:schema:verify (which
+    // reads only this text) does not check for it. r2_key is nullable
+    // because a Product Image attached from the Media Gallery shares its R2
+    // object with every other Product that reuses the same asset — it
+    // deliberately does NOT own a unique r2_key of its own (its url is
+    // copied from the Media Asset instead). MySQL's UNIQUE KEY permits
+    // unlimited NULLs, so this coexists safely with directly-uploaded
+    // Product Images, which still each own a distinct, unique r2_key.
   },
   {
     tableName: DATABASE_TABLE_NAMES.carts,
@@ -761,6 +778,37 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         CONSTRAINT \`fk_replacements_variant_id\` FOREIGN KEY (\`product_variant_id\`) REFERENCES \`product_variants\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
         CONSTRAINT \`fk_replacements_admin_id\` FOREIGN KEY (\`approved_by_admin_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
         CONSTRAINT \`chk_replacements_quantity_positive\` CHECK (\`quantity\` > 0)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.mediaAssets,
+    migrationName: "041-create-media-assets",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.mediaAssets)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`file_name\` VARCHAR(255) NOT NULL,
+        \`original_name\` VARCHAR(255) NOT NULL,
+        \`storage_key\` VARCHAR(512) NOT NULL,
+        \`public_url\` VARCHAR(1000) NOT NULL,
+        \`mime_type\` VARCHAR(100) NOT NULL,
+        \`file_size\` INT UNSIGNED NOT NULL,
+        \`width\` INT UNSIGNED NULL,
+        \`height\` INT UNSIGNED NULL,
+        \`alt_text\` VARCHAR(255) NULL,
+        \`title\` VARCHAR(190) NULL,
+        \`uploaded_by\` INT UNSIGNED NOT NULL,
+        ${createdUpdated},
+        ${deletedAt},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`media_assets_storage_key_unique\` (\`storage_key\`),
+        KEY \`media_assets_uploaded_by_idx\` (\`uploaded_by\`),
+        KEY \`media_assets_created_at_idx\` (\`created_at\`),
+        KEY \`media_assets_deleted_at_idx\` (\`deleted_at\`),
+        CONSTRAINT \`fk_media_assets_uploaded_by\` FOREIGN KEY (\`uploaded_by\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_media_assets_file_size_nonnegative\` CHECK (\`file_size\` >= 0),
+        CONSTRAINT \`chk_media_assets_width_nonnegative\` CHECK (\`width\` IS NULL OR \`width\` >= 0),
+        CONSTRAINT \`chk_media_assets_height_nonnegative\` CHECK (\`height\` IS NULL OR \`height\` >= 0)
       ) ${engine};
     `
   }
