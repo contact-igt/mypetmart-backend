@@ -21,7 +21,7 @@ Approval creates at most one `replacements` row for the Return Request:
 
 - `stock_unavailable`: the same product/variant is unavailable; no stock, Refund, Payment, or PayU mutation occurred.
 - `processing`: sellable inventory was atomically consumed exactly once.
-- `completed`: an Admin manually confirmed operational completion; the Return Request becomes `resolved`.
+- `completed`: the forward Replacement Shipment reached provider-verified `delivered`; the Return Request becomes `resolved`.
 
 The unique `return_request_id` constraint, Return Request lock, inventory row lock, and `stock_consumed_at` guard provide idempotency and concurrency safety. Stock-unavailable replacements can retry allocation. Returned inbound items are never automatically restocked.
 
@@ -29,4 +29,6 @@ The unique `return_request_id` constraint, Return Request lock, inventory row lo
 
 Original Order, OrderItem snapshots, Payment amount/provider identifiers, and PayU history remain unchanged by Replacement. V1 replaces only with the same persisted product and variant identity and approved quantity; no exchange catalog, new payment, or automatic refund exists.
 
-Shipment automation is not implemented. Replacement AWB, courier booking, tracking, return pickup, shipped/delivered automation, and cancellation/restock policy are deferred to the Shipping + Replacement Fulfilment module.
+Replacement forward fulfilment now reuses the common Shipment domain and iThink V3 adapter. Only a `processing` Replacement with inventory already consumed can be booked. Its AWB, courier, and append-only tracking timeline are visible in Admin and customer Return detail; provider-verified delivery completes the Replacement. The former Admin `processing -> completed` transition is removed; the remaining status update only retries inventory allocation from `stock_unavailable -> processing`.
+
+Return pickup, reverse AWB, inbound tracking, and cancellation/restock policy remain deferred reverse-logistics work.

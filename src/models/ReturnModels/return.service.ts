@@ -9,6 +9,7 @@ import { Replacement } from "../../database/tables/ReplacementTable/index.js";
 import { ReturnNote } from "../../database/tables/ReturnNoteTable/index.js";
 import { ReturnRequest } from "../../database/tables/ReturnRequestTable/index.js";
 import { Shipment } from "../../database/tables/ShipmentTable/index.js";
+import { ShipmentTrackingEvent } from "../../database/tables/ShipmentTrackingEventTable/index.js";
 import { User } from "../../database/tables/UserTable/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
 import { buildBusinessReference } from "../../utils/reference-generator.js";
@@ -16,6 +17,7 @@ import { formatMoney } from "../../utils/product-money.js";
 import { getValidNextOrderStatuses } from "../OrderModels/order.constants.js";
 import { OrderNotFoundError } from "../OrderModels/order.errors.js";
 import { ReplacementService } from "../ReplacementModels/replacement.service.js";
+import { ShipmentService } from "../ShipmentModels/shipment.service.js";
 import {
   ReturnAlreadyReviewedError,
   ReturnNotEligibleError,
@@ -40,7 +42,7 @@ import type {
 // room for a second one).
 const QUANTITY_HOLDING_STATUSES = ["requested", "approved", "resolved"] as const;
 
-function toJSON(returnRequest: ReturnRequest, order: Order, orderItem: OrderItem, refunds: Refund[], replacement: Replacement | null): ReturnRequestJSON {
+function toJSON(returnRequest: ReturnRequest, order: Order, orderItem: OrderItem, refunds: Refund[], replacement: Replacement | null, shipment: Shipment | null = null): ReturnRequestJSON {
   return {
     id: returnRequest.id,
     returnNumber: returnRequest.return_number,
@@ -68,7 +70,7 @@ function toJSON(returnRequest: ReturnRequest, order: Order, orderItem: OrderItem
       failedAt: refund.failed_at ? refund.failed_at.toISOString() : null,
       failureMessage: refund.failure_message
     })),
-    replacement: replacement ? ReplacementService.toJSON(replacement) : null
+    replacement: replacement ? ReplacementService.toJSON(replacement, shipment ? ShipmentService.toJSON(shipment) : null) : null
   };
 }
 
@@ -87,7 +89,8 @@ async function loadDetail(returnRequest: ReturnRequest): Promise<ReturnRequestDe
     throw new Error(`ReturnRequest '${returnRequest.id}' references a missing Order or OrderItem.`);
   }
 
-  const base = toJSON(returnRequest, order, orderItem, refunds, replacement);
+  const shipment = replacement ? await Shipment.findOne({ where: { replacement_id: replacement.id }, include: [{ model: ShipmentTrackingEvent, as: "trackingEvents" }] }) : null;
+  const base = toJSON(returnRequest, order, orderItem, refunds, replacement, shipment);
   const maxRefundableAmount = formatMoney(Number(orderItem.unit_price) * returnRequest.quantity);
 
   return {

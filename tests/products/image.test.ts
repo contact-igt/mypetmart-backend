@@ -181,7 +181,9 @@ describe("Cloudflare R2 Product Image Integration", () => {
       .post(`/api/v1/admin/products/${productId}/images`)
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ r2Key: "arbitrary/key.jpg", url: "https://attacker.example/image.jpg", alt: "unsafe", contentType: "image/jpeg" });
-    expect(response.status).toBe(404);
+    // The second admin router's authentication boundary rejects the unmatched
+    // legacy path before Express reaches the global 404 handler.
+    expect(response.status).toBe(403);
     expect(await ProductImage.count()).toBe(0);
   });
 

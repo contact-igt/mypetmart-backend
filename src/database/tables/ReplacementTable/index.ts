@@ -7,6 +7,7 @@ import type { OrderItem } from "../OrderItemTable/index.js";
 import type { Product } from "../ProductTable/index.js";
 import type { ProductVariant } from "../ProductVariantTable/index.js";
 import type { ReturnRequest } from "../ReturnRequestTable/index.js";
+import type { Shipment } from "../ShipmentTable/index.js";
 import type { User } from "../UserTable/index.js";
 
 export class Replacement extends Model<InferAttributes<Replacement>, InferCreationAttributes<Replacement>> {
@@ -26,6 +27,7 @@ export class Replacement extends Model<InferAttributes<Replacement>, InferCreati
   declare updated_at: CreationOptional<Date>;
 
   declare returnRequest?: NonAttribute<ReturnRequest>;
+  declare shipment?: NonAttribute<Shipment>;
 }
 
 export function initializeReplacementTable(sequelize: Sequelize): typeof Replacement {

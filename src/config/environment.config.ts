@@ -14,6 +14,8 @@ const SECRET_FIELD_NAMES = [
   "PAYMENT_WEBHOOK_SECRET",
   "SHIPPING_API_KEY",
   "SHIPPING_WEBHOOK_SECRET",
+  "ITHINK_ACCESS_TOKEN",
+  "ITHINK_SECRET_KEY",
   "DB_PASSWORD"
 ] as const;
 
@@ -33,6 +35,8 @@ const R2_REQUIRED_FIELDS = [
   "R2_PUBLIC_BASE_URL",
   "R2_UPLOAD_INTENT_SECRET"
 ] as const;
+
+const ITHINK_REQUIRED_FIELDS = ["ITHINK_ACCESS_TOKEN", "ITHINK_SECRET_KEY", "ITHINK_PICKUP_ADDRESS_ID", "ITHINK_RETURN_ADDRESS_ID", "ITHINK_ORIGIN_PINCODE"] as const;
 
 function loadLocalEnvironmentFile(): void {
   if (existsSync(".env")) {
@@ -124,26 +128,11 @@ const environmentSchema = z
     STOREFRONT_ORIGIN: requiredString("STOREFRONT_ORIGIN"),
     ADMIN_ORIGIN: requiredString("ADMIN_ORIGIN"),
 
-    DB_HOST: z.preprocess(
-      (val) => (typeof val === "string" && val.trim().length > 0 ? val.trim() : process.env.PRODUCTION_DB_HOST ?? val),
-      z.string({ error: "DB_HOST is required." }).min(1, "DB_HOST is required.")
-    ),
-    DB_PORT: z.preprocess(
-      (val) => (val !== undefined && val !== "" ? Number(val) : process.env.PRODUCTION_DB_PORT ? Number(process.env.PRODUCTION_DB_PORT) : val),
-      z.number({ error: "DB_PORT must be a number." }).int().min(1).max(65535)
-    ),
-    DB_NAME: z.preprocess(
-      (val) => (typeof val === "string" && val.trim().length > 0 ? val.trim() : process.env.PRODUCTION_DB_NAME ?? val),
-      z.string().default("mypetmart")
-    ),
-    DB_USER: z.preprocess(
-      (val) => (typeof val === "string" && val.trim().length > 0 ? val.trim() : process.env.PRODUCTION_DB_USER ?? val),
-      z.string({ error: "DB_USER is required." }).min(1, "DB_USER is required.")
-    ),
-    DB_PASSWORD: z.preprocess(
-      (val) => (typeof val === "string" ? val : process.env.PRODUCTION_DB_PASSWORD ?? ""),
-      z.string().default("")
-    ),
+    DB_HOST: requiredString("DB_HOST"),
+    DB_PORT: integerFromString("DB_PORT", 1, 65535),
+    DB_NAME: requiredString("DB_NAME").default("mypetmart"),
+    DB_USER: requiredString("DB_USER"),
+    DB_PASSWORD: z.string().default(""),
     DB_LOGGING: booleanFromString("DB_LOGGING").default(false),
     DB_POOL_MAX: integerFromString("DB_POOL_MAX", 1, 100).default(10),
     DB_POOL_MIN: integerFromString("DB_POOL_MIN", 0, 100).default(0),
@@ -226,9 +215,17 @@ const environmentSchema = z
     // commerce store) — revisit once the client confirms the real policy.
     RETURN_WINDOW_DAYS: integerFromString("RETURN_WINDOW_DAYS", 1, 365).default(7),
 
-    SHIPPING_PROVIDER: optionalTrimmedStringSchema,
+    SHIPPING_PROVIDER: z.preprocess(optionalString, z.literal("ithink").optional()),
     SHIPPING_API_KEY: optionalTrimmedStringSchema,
-    SHIPPING_WEBHOOK_SECRET: optionalTrimmedStringSchema
+    SHIPPING_WEBHOOK_SECRET: optionalTrimmedStringSchema,
+    ITHINK_ACCESS_TOKEN: optionalTrimmedStringSchema,
+    ITHINK_SECRET_KEY: optionalTrimmedStringSchema,
+    ITHINK_API_BASE_URL: z.preprocess(optionalString, z.url("ITHINK_API_BASE_URL must be a valid URL.").optional()),
+    ITHINK_TRACKING_BASE_URL: z.preprocess(optionalString, z.url("ITHINK_TRACKING_BASE_URL must be a valid URL.").optional()),
+    ITHINK_PICKUP_ADDRESS_ID: optionalTrimmedStringSchema,
+    ITHINK_RETURN_ADDRESS_ID: optionalTrimmedStringSchema,
+    ITHINK_ORIGIN_PINCODE: z.preprocess(optionalString, z.string().regex(/^\d{6}$/u, "ITHINK_ORIGIN_PINCODE must contain exactly 6 digits.").optional()),
+    ITHINK_TIMEOUT_MS: integerFromString("ITHINK_TIMEOUT_MS", 1000, 60000).default(30000)
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV === "production" && !value.PRODUCT_SAFE_TRASH_CUTOFF) {
@@ -267,6 +264,15 @@ const environmentSchema = z
       }
     }
 
+    const configuredIThinkFields = ITHINK_REQUIRED_FIELDS.filter((fieldName) => value[fieldName] !== undefined);
+    if (configuredIThinkFields.length > 0 && configuredIThinkFields.length < ITHINK_REQUIRED_FIELDS.length) {
+      for (const fieldName of ITHINK_REQUIRED_FIELDS) {
+        if (value[fieldName] === undefined) {
+          context.addIssue({ code: "custom", path: [fieldName], message: `${fieldName} is required when iThink Logistics is configured.` });
+        }
+      }
+    }
+
     if (value.NODE_ENV === "production") {
       for (const fieldName of SECRET_FIELD_NAMES) {
         const secretValue = value[fieldName];
@@ -299,7 +305,15 @@ function sanitizeIssueMessage(issue: z.ZodIssue): string {
 }
 
 export function parseEnvironmentConfig(environment: NodeJS.ProcessEnv): EnvironmentConfig {
-  const parsedEnvironment = environmentSchema.safeParse(environment);
+  const normalizedEnvironment = {
+    ...environment,
+    DB_HOST: optionalString(environment.DB_HOST) ?? optionalString(environment.PRODUCTION_DB_HOST),
+    DB_PORT: optionalString(environment.DB_PORT) ?? optionalString(environment.PRODUCTION_DB_PORT),
+    DB_NAME: optionalString(environment.DB_NAME) ?? optionalString(environment.PRODUCTION_DB_NAME),
+    DB_USER: optionalString(environment.DB_USER) ?? optionalString(environment.PRODUCTION_DB_USER),
+    DB_PASSWORD: environment.DB_PASSWORD ?? environment.PRODUCTION_DB_PASSWORD
+  };
+  const parsedEnvironment = environmentSchema.safeParse(normalizedEnvironment);
 
   if (!parsedEnvironment.success) {
     throw new EnvironmentValidationError(parsedEnvironment.error.issues.map(sanitizeIssueMessage));

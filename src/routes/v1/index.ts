@@ -22,6 +22,7 @@ import { storefrontReturnRouter } from "../../models/ReturnModels/storefront-ret
 import { adminReturnRouter } from "../../models/ReturnModels/admin-return.routes.js";
 import { adminRefundRouter } from "../../models/RefundModels/admin-refund.routes.js";
 import { payuRefundWebhookRouter } from "../../models/RefundModels/payu-refund-webhook.routes.js";
+import { adminShipmentRouter } from "../../models/ShipmentModels/admin-shipment.routes.js";
 
 export const v1Router = Router();
 
@@ -46,6 +47,7 @@ v1Router.use("/payments/payu", payuWebhookRouter);
 v1Router.use("/storefront/returns", storefrontReturnRouter);
 v1Router.use("/admin/returns", adminReturnRouter);
 v1Router.use("/admin", adminRefundRouter);
+v1Router.use("/admin/shipments", adminShipmentRouter);
 v1Router.use("/payments/payu", payuRefundWebhookRouter);
 
 

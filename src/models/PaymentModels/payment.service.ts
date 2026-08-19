@@ -116,11 +116,7 @@ export const PaymentService = {
     } catch (error) {
       if (error instanceof PaymentAttemptAlreadyActiveError) {
         const existing = await Payment.findOne({ where: { order_id: orderId, status: "pending" } });
-        if (existing) {
-          existing.provider_order_id = `${buildBusinessReference("payment", existing.id)}-${Date.now()}`;
-          await existing.save();
-          return existing;
-        }
+        if (existing) return existing;
       }
       throw error;
     }

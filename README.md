@@ -13,23 +13,23 @@ MyPetMart backend is the standalone Node.js and Express API for the customer sto
 - Image storage target: Cloudflare R2
 - API base path: `/api/v1`
 
-## Stage 6 Capabilities
+## Current Capabilities
 
 - Express application foundation with versioned `/api/v1` routing
 - Liveness and readiness health endpoints
 - Typed environment validation with Zod
 - CORS allowlist for storefront and admin origins
 - One central Sequelize/MySQL connection
-- Eighteen registered Sequelize model classes and associations
+- Sequelize models and associations for catalog, carts, Orders, Payments, Returns, Refunds, Replacements, Shipments, and tracking events
 - Explicit Umzug migration runner using SequelizeStorage table `SequelizeMeta`
-- Eighteen initial MySQL migrations for the approved business tables
+- Ordered, verified MySQL migrations for the current business tables
 - Read-only schema verifier for tables, columns, indexes, FKs, checks, generated helper columns, pending migrations, and optional seeder metadata
 - MySQL advisory migration lock: `mypetmart_schema_migrations`
 - Local migration rollback drill command with production block and required confirmation flag
 - Secure bootstrap admin seeder using ignored environment values, bcrypt hashing, Umzug metadata table `SequelizeSeedMeta`, and MySQL advisory seeder lock `mypetmart_data_seeders`
 - Seeder status, up, down, and local down-all commands with production rollback blocks
 - No automatic schema synchronization, startup migrations, or startup seeders
-- No catalog seed data, auth APIs, business APIs, R2, payment, shipping, or Swagger/OpenAPI yet
+- Customer/admin authentication, catalog and commerce APIs, R2 product images, PayU payment/refund flows, and iThink V3 forward fulfilment
 
 ## Registered Tables
 
@@ -47,10 +47,16 @@ MyPetMart backend is the standalone Node.js and Express API for the customer sto
 12. order_notes
 13. payments
 14. shipments
-15. return_requests
-16. return_notes
-17. contact_enquiries
-18. store_settings
+15. shipment_tracking_events
+16. return_requests
+17. return_notes
+18. contact_enquiries
+19. store_settings
+20. auth_challenges
+21. password_reset_tokens
+22. wishlists
+23. refunds
+24. replacements
 
 Seeder metadata uses `SequelizeSeedMeta`; migration metadata uses `SequelizeMeta`.
 
@@ -201,11 +207,8 @@ src/database/
 ## Current Limitations
 
 - Live local bootstrap admin seed has not been applied until ignored `.env` contains `SEED_ADMIN_NAME`, `SEED_ADMIN_EMAIL`, and `SEED_ADMIN_PASSWORD`.
-- Authentication is not implemented yet.
-- Cloudflare R2 is not implemented yet.
-- Payment and shipping providers are not implemented yet.
+- Valid iThink staging credentials and warehouse IDs are required before external shipping acceptance can be performed.
 - Swagger/OpenAPI is not implemented yet.
-- Category/product/cart/order/return/contact/settings APIs are not implemented yet.
 - Catalog/product/order demo seed data is not implemented yet.
 
 ## Next Stage
