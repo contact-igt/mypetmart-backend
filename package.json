@@ -22,6 +22,7 @@
     "db:truncate:table": "tsx src/scripts/truncate-table.ts",
     "db:drop:all": "tsx src/scripts/drop-all-tables.ts",
     "db:add-super-admin": "tsx src/scripts/add-super-admin.ts",
+    "db:update-super-admin": "tsx src/scripts/update-super-admin.ts",
     "db:migrate": "tsx src/database/commands/migrate.ts",
     "db:migrate:status": "tsx src/database/commands/migrate-status.ts",
     "db:migrate:down": "tsx src/database/commands/migrate-down.ts",
