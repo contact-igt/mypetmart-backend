@@ -13,8 +13,11 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   orderNotes: "order_notes",
   payments: "payments",
   shipments: "shipments",
+  shipmentTrackingEvents: "shipment_tracking_events",
   returnRequests: "return_requests",
   returnNotes: "return_notes",
+  refunds: "refunds",
+  replacements: "replacements",
   contactEnquiries: "contact_enquiries",
   storeSettings: "store_settings",
   authChallenges: "auth_challenges",
@@ -46,7 +49,12 @@ export type CartStatus = (typeof CART_STATUS_VALUES)[number];
 export const ORDER_STATUS_VALUES = ["pending", "confirmed", "processing", "shipped", "delivered", "cancelled", "return_requested"] as const;
 export type OrderStatus = (typeof ORDER_STATUS_VALUES)[number];
 
-export const PAYMENT_STATUS_VALUES = ["pending", "paid", "failed", "refunded", "cancelled"] as const;
+// "partially_refunded" added for the Returns + Refunds feature: a Payment
+// stays "paid" (never overwritten) as one or more successful, item-level
+// Refund records are created against it; this value distinguishes "some but
+// not all of this payment has been refunded" from "refunded" (the full
+// captured amount has now been returned) — see RefundFinalizationService.
+export const PAYMENT_STATUS_VALUES = ["pending", "paid", "failed", "refunded", "cancelled", "partially_refunded"] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUS_VALUES)[number];
 
 export const FULFILMENT_STATUS_VALUES = ["unfulfilled", "processing", "packed", "shipped", "delivered"] as const;
@@ -70,7 +78,27 @@ export type OrderCommerceException = (typeof ORDER_COMMERCE_EXCEPTION_VALUES)[nu
 export const SHIPPING_METHOD_VALUES = ["standard", "express"] as const;
 export type ShippingMethod = (typeof SHIPPING_METHOD_VALUES)[number];
 
-export const SHIPMENT_STATUS_VALUES = ["pending", "processing", "shipped", "delivered", "failed", "cancelled"] as const;
+export const SHIPMENT_SOURCE_TYPE_VALUES = ["order", "replacement"] as const;
+export type ShipmentSourceType = (typeof SHIPMENT_SOURCE_TYPE_VALUES)[number];
+
+export const SHIPMENT_STATUS_VALUES = [
+  "pending",
+  "provider_status_unknown",
+  "created",
+  "awb_assigned",
+  "pickup_pending",
+  "picked_up",
+  "in_transit",
+  "out_for_delivery",
+  "delivered",
+  "delivery_exception",
+  "ndr",
+  "rto_initiated",
+  "rto_in_transit",
+  "rto_delivered",
+  "cancelled",
+  "failed"
+] as const;
 export type ShipmentStatus = (typeof SHIPMENT_STATUS_VALUES)[number];
 
 export const RETURN_TYPE_VALUES = ["return", "replacement"] as const;
@@ -78,6 +106,19 @@ export type ReturnType = (typeof RETURN_TYPE_VALUES)[number];
 
 export const RETURN_STATUS_VALUES = ["requested", "approved", "rejected", "resolved"] as const;
 export type ReturnStatus = (typeof RETURN_STATUS_VALUES)[number];
+
+// Refund financial state is deliberately separate from ReturnRequest.status
+// (the return *process* state) — a Return can be "approved" while its linked
+// Refund cycles through pending/processing before landing on succeeded/failed.
+// See RefundFinalizationService: pending -> succeeded|failed only, terminal
+// once reached (mirrors TERMINAL_PAYMENT_STATUSES' monotonicity guarantee).
+export const REFUND_STATUS_VALUES = ["pending", "processing", "succeeded", "failed"] as const;
+export type RefundStatus = (typeof REFUND_STATUS_VALUES)[number];
+
+// Shipping/AWB automation does not exist yet. Replacement therefore tracks
+// only inventory allocation and the manual operational completion boundary.
+export const REPLACEMENT_STATUS_VALUES = ["stock_unavailable", "processing", "completed"] as const;
+export type ReplacementStatus = (typeof REPLACEMENT_STATUS_VALUES)[number];
 
 export const CONTACT_ENQUIRY_STATUS_VALUES = ["new", "in_progress", "resolved", "closed"] as const;
 export type ContactEnquiryStatus = (typeof CONTACT_ENQUIRY_STATUS_VALUES)[number];

@@ -8,6 +8,10 @@ process.env.DB_NAME = "mypetmart_test";
 process.env.PAYMENT_PROVIDER = process.env.PAYMENT_PROVIDER || "payu";
 process.env.PAYMENT_KEY_ID = process.env.PAYMENT_KEY_ID || "test_payu_merchant_key";
 process.env.PAYMENT_KEY_SECRET = process.env.PAYMENT_KEY_SECRET || "test_payu_merchant_salt_do_not_use_in_prod";
+// Refund initiation additionally requires a public callback origin (see
+// payment.config.ts's refundReady/refundWebhookUrl) — deterministic test
+// value, never a real reachable address.
+process.env.BACKEND_PUBLIC_ORIGIN = process.env.BACKEND_PUBLIC_ORIGIN || "https://backend.test.example.com";
 
 export default defineConfig({
   test: {

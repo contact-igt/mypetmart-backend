@@ -3,6 +3,7 @@ import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAtt
 import { DATABASE_TABLE_NAMES, DEFAULT_CURRENCY_CODE, MONEY_PRECISION, MONEY_SCALE, PAYMENT_STATUS_VALUES, type PaymentStatus } from "../../../constants/database.constants.js";
 import { isModelInitialized, isNonNegativeDecimal, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { Order } from "../OrderTable/index.js";
+import type { Refund } from "../RefundTable/index.js";
 
 export class Payment extends Model<InferAttributes<Payment>, InferCreationAttributes<Payment>> {
   declare id: CreationOptional<number>;
@@ -22,6 +23,7 @@ export class Payment extends Model<InferAttributes<Payment>, InferCreationAttrib
   declare updated_at: CreationOptional<Date>;
 
   declare order?: NonAttribute<Order>;
+  declare refunds?: NonAttribute<Refund[]>;
 }
 
 export function initializePaymentTable(sequelize: Sequelize): typeof Payment {

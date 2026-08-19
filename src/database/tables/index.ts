@@ -15,9 +15,12 @@ import { Payment, initializePaymentTable } from "./PaymentTable/index.js";
 import { Product, initializeProductTable } from "./ProductTable/index.js";
 import { ProductImage, initializeProductImageTable } from "./ProductImageTable/index.js";
 import { ProductVariant, initializeProductVariantTable } from "./ProductVariantTable/index.js";
+import { Replacement, initializeReplacementTable } from "./ReplacementTable/index.js";
+import { Refund, initializeRefundTable } from "./RefundTable/index.js";
 import { ReturnNote, initializeReturnNoteTable } from "./ReturnNoteTable/index.js";
 import { ReturnRequest, initializeReturnRequestTable } from "./ReturnRequestTable/index.js";
 import { Shipment, initializeShipmentTable } from "./ShipmentTable/index.js";
+import { ShipmentTrackingEvent, initializeShipmentTrackingEventTable } from "./ShipmentTrackingEventTable/index.js";
 import { StoreSetting, initializeStoreSettingTable } from "./StoreSettingTable/index.js";
 import { User, initializeUserTable } from "./UserTable/index.js";
 import { Wishlist, initializeWishlistTable } from "./WishlistTable/index.js";
@@ -38,9 +41,12 @@ export {
   Product,
   ProductImage,
   ProductVariant,
+  Replacement,
+  Refund,
   ReturnNote,
   ReturnRequest,
   Shipment,
+  ShipmentTrackingEvent,
   StoreSetting,
   User,
   Wishlist
@@ -61,8 +67,11 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "OrderNote",
   "Payment",
   "Shipment",
+  "ShipmentTrackingEvent",
   "ReturnRequest",
   "ReturnNote",
+  "Refund",
+  "Replacement",
   "ContactEnquiry",
   "StoreSetting",
   "AuthChallenge",
@@ -87,8 +96,11 @@ export type DatabaseModelRegistry = Readonly<{
   OrderNote: typeof OrderNote;
   Payment: typeof Payment;
   Shipment: typeof Shipment;
+  ShipmentTrackingEvent: typeof ShipmentTrackingEvent;
   ReturnRequest: typeof ReturnRequest;
   ReturnNote: typeof ReturnNote;
+  Refund: typeof Refund;
+  Replacement: typeof Replacement;
   ContactEnquiry: typeof ContactEnquiry;
   StoreSetting: typeof StoreSetting;
   AuthChallenge: typeof AuthChallenge;
@@ -117,8 +129,11 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeOrderNoteTable(sequelize);
   initializePaymentTable(sequelize);
   initializeShipmentTable(sequelize);
+  initializeShipmentTrackingEventTable(sequelize);
   initializeReturnRequestTable(sequelize);
   initializeReturnNoteTable(sequelize);
+  initializeRefundTable(sequelize);
+  initializeReplacementTable(sequelize);
   initializeContactEnquiryTable(sequelize);
   initializeStoreSettingTable(sequelize);
   initializeAuthChallengeTable(sequelize);
@@ -140,8 +155,11 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     OrderNote,
     Payment,
     Shipment,
+    ShipmentTrackingEvent,
     ReturnRequest,
     ReturnNote,
+    Refund,
+    Replacement,
     ContactEnquiry,
     StoreSetting,
     AuthChallenge,

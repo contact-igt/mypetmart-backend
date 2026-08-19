@@ -428,7 +428,7 @@ describe("Payment Initiation (PayU Hosted Checkout)", () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data.fields.firstname).toBe("Jordan");
-      expect(res.body.data.fields.phone).toBe("+91 98765 43210");
+      expect(res.body.data.fields.phone).toBe("9876543210");
     });
   });
 

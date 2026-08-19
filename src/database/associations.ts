@@ -22,9 +22,12 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
     Product,
     ProductImage,
     ProductVariant,
+    Replacement,
+    Refund,
     ReturnNote,
     ReturnRequest,
     Shipment,
+    ShipmentTrackingEvent,
     User,
     Wishlist
   } = models;
@@ -88,6 +91,10 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
 
   Order.hasMany(Shipment, { foreignKey: "order_id", as: "shipments" });
   Shipment.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+  Replacement.hasOne(Shipment, { foreignKey: "replacement_id", as: "shipment" });
+  Shipment.belongsTo(Replacement, { foreignKey: "replacement_id", as: "replacement" });
+  Shipment.hasMany(ShipmentTrackingEvent, { foreignKey: "shipment_id", as: "trackingEvents" });
+  ShipmentTrackingEvent.belongsTo(Shipment, { foreignKey: "shipment_id", as: "shipment" });
 
   Order.hasMany(ReturnRequest, { foreignKey: "order_id", as: "returns" });
   ReturnRequest.belongsTo(Order, { foreignKey: "order_id", as: "order" });
@@ -103,6 +110,31 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
 
   User.hasMany(ReturnNote, { foreignKey: "admin_id", as: "authoredReturnNotes" });
   ReturnNote.belongsTo(User, { foreignKey: "admin_id", as: "author" });
+
+  Order.hasMany(Refund, { foreignKey: "order_id", as: "refunds" });
+  Refund.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+
+  Payment.hasMany(Refund, { foreignKey: "payment_id", as: "refunds" });
+  Refund.belongsTo(Payment, { foreignKey: "payment_id", as: "payment" });
+
+  ReturnRequest.hasMany(Refund, { foreignKey: "return_request_id", as: "refunds" });
+  Refund.belongsTo(ReturnRequest, { foreignKey: "return_request_id", as: "returnRequest" });
+
+  User.hasMany(Refund, { foreignKey: "initiated_by_admin_id", as: "initiatedRefunds" });
+  Refund.belongsTo(User, { foreignKey: "initiated_by_admin_id", as: "initiatedBy" });
+
+  ReturnRequest.hasOne(Replacement, { foreignKey: "return_request_id", as: "replacement" });
+  Replacement.belongsTo(ReturnRequest, { foreignKey: "return_request_id", as: "returnRequest" });
+  Order.hasMany(Replacement, { foreignKey: "order_id", as: "replacements" });
+  Replacement.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+  OrderItem.hasMany(Replacement, { foreignKey: "order_item_id", as: "replacements" });
+  Replacement.belongsTo(OrderItem, { foreignKey: "order_item_id", as: "orderItem" });
+  Product.hasMany(Replacement, { foreignKey: "product_id", as: "replacements" });
+  Replacement.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+  ProductVariant.hasMany(Replacement, { foreignKey: "product_variant_id", as: "replacements" });
+  Replacement.belongsTo(ProductVariant, { foreignKey: "product_variant_id", as: "variant" });
+  User.hasMany(Replacement, { foreignKey: "approved_by_admin_id", as: "approvedReplacements" });
+  Replacement.belongsTo(User, { foreignKey: "approved_by_admin_id", as: "approvedBy" });
 
   User.hasMany(Wishlist, { foreignKey: "user_id", as: "wishlistItems" });
   Wishlist.belongsTo(User, { foreignKey: "user_id", as: "user" });

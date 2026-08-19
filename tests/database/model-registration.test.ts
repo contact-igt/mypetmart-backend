@@ -20,8 +20,11 @@ const expectedTables = [
   DATABASE_TABLE_NAMES.orderNotes,
   DATABASE_TABLE_NAMES.payments,
   DATABASE_TABLE_NAMES.shipments,
+  DATABASE_TABLE_NAMES.shipmentTrackingEvents,
   DATABASE_TABLE_NAMES.returnRequests,
   DATABASE_TABLE_NAMES.returnNotes,
+  DATABASE_TABLE_NAMES.refunds,
+  DATABASE_TABLE_NAMES.replacements,
   DATABASE_TABLE_NAMES.contactEnquiries,
   DATABASE_TABLE_NAMES.storeSettings,
   DATABASE_TABLE_NAMES.authChallenges,
@@ -32,7 +35,7 @@ const expectedTables = [
 describe("database model registration", () => {
   it("registers all expected models with explicit table names", () => {
     expect(Object.keys(databaseModels)).toEqual([...EXPECTED_DATABASE_MODEL_NAMES]);
-    expect(sequelize.modelManager.models).toHaveLength(21);
+    expect(sequelize.modelManager.models).toHaveLength(24);
 
     const modelNames = getModelList(databaseModels).map((model) => model.name);
     const tableNames = getModelList(databaseModels).map((model) => model.tableName);

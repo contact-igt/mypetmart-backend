@@ -7,6 +7,7 @@ import type { AuthSession } from "../AuthSessionTable/index.js";
 import type { Cart } from "../CartTable/index.js";
 import type { OrderNote } from "../OrderNoteTable/index.js";
 import type { Order } from "../OrderTable/index.js";
+import type { Refund } from "../RefundTable/index.js";
 import type { ReturnNote } from "../ReturnNoteTable/index.js";
 import type { ReturnRequest } from "../ReturnRequestTable/index.js";
 
@@ -32,6 +33,7 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   declare returnRequests?: NonAttribute<ReturnRequest[]>;
   declare authoredOrderNotes?: NonAttribute<OrderNote[]>;
   declare authoredReturnNotes?: NonAttribute<ReturnNote[]>;
+  declare initiatedRefunds?: NonAttribute<Refund[]>;
 
   override toJSON(): SerializedModel {
     return removeSensitiveFields(this, ["password_hash"]);

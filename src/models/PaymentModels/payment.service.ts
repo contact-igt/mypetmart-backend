@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 import { paymentConfig } from "../../config/payment.config.js";
 import { sequelize } from "../../database/index.js";
 import { Order } from "../../database/tables/OrderTable/index.js";
@@ -7,7 +9,6 @@ import { IdSequenceService } from "../../database/sequences/id-sequence.service.
 import { TokenService } from "../../services/auth/token.service.js";
 import { logger } from "../../utils/logger.js";
 import { formatMoney } from "../../utils/product-money.js";
-import { buildBusinessReference } from "../../utils/reference-generator.js";
 import { OrderNotFoundError } from "../OrderModels/order.errors.js";
 import {
   OrderAlreadyPaidError,
@@ -29,6 +30,24 @@ import type {
   PaymentInitiationResultJSON,
   PaymentStatusResultJSON
 } from "./payment.types.js";
+
+/**
+ * Generates the PayU merchant transaction id (txnid) for a Payment Attempt.
+ * Unlike buildBusinessReference (used for ORD-/CUS-/ADM- style internal
+ * display codes, which are fine being deterministic from an auto-increment
+ * id), PayU requires txnid to be globally unique for the merchant key
+ * forever — not just unique within this database. A purely id-derived value
+ * like "PAY-000001" collides the moment the payments table is reseeded or
+ * restored (the id sequence restarts from 1), reusing a txnid PayU's test
+ * or live environment already captured previously, which PayU then rejects
+ * outright ("This txnid has been used previously or was successfully
+ * captured."). The payment id is kept as a prefix for support traceability;
+ * the random suffix is what actually guarantees uniqueness across resets.
+ */
+function generatePayuTxnId(paymentId: number): string {
+  const random = randomBytes(5).toString("hex");
+  return `PAY-${String(paymentId).padStart(6, "0")}-${random}`;
+}
 
 export const PaymentService = {
   /**
@@ -146,7 +165,7 @@ export const PaymentService = {
       if (payment.provider_order_id) {
         return payment;
       }
-      payment.provider_order_id = buildBusinessReference("payment", payment.id);
+      payment.provider_order_id = generatePayuTxnId(payment.id);
       await payment.save({ transaction: t });
       return payment;
     });
@@ -230,15 +249,16 @@ export const PaymentService = {
     }
 
     const [firstNameRaw, ...restName] = order.ship_recipient_name.trim().split(/\s+/);
-    const firstname = (firstNameRaw || "Customer").replace(/\|/g, " ");
+    const firstname = (firstNameRaw || "Customer").replace(/[^a-zA-Z0-9]/g, "") || "Customer";
     void restName;
 
     const amount = formatMoney(payment.amount);
     const txnid = payment.provider_order_id;
-    const email = order.contact_email ?? "";
-    const phone = order.ship_phone;
+    const email = order.contact_email?.trim() || "customer@example.com";
+    const rawPhone = order.ship_phone ? order.ship_phone.replace(/\D/g, "") : "";
+    const phone = rawPhone.length >= 10 ? rawPhone.slice(-10) : "9999999999";
     const udf1 = String(order.id);
-    const sanitizedProductInfo = productinfo.replace(/\|/g, " ").slice(0, 255);
+    const sanitizedProductInfo = productinfo.replace(/[^a-zA-Z0-9\s-]/g, " ").trim().slice(0, 255) || "Order Purchase";
 
     const hash = buildPayuRequestHash(
       {
@@ -253,22 +273,25 @@ export const PaymentService = {
       paymentConfig.payuSalt
     );
 
+    const resFields = {
+      key: paymentConfig.payuKey,
+      txnid,
+      amount,
+      productinfo: sanitizedProductInfo,
+      firstname,
+      email,
+      phone,
+      surl: paymentConfig.successReturnUrl,
+      furl: paymentConfig.failureReturnUrl,
+      udf1,
+      hash,
+      service_provider: "payu_paisa"
+    };
+
     return {
       provider: "payu",
       gatewayUrl: paymentConfig.gatewayUrl,
-      fields: {
-        key: paymentConfig.payuKey,
-        txnid,
-        amount,
-        productinfo: sanitizedProductInfo,
-        firstname,
-        email,
-        phone,
-        surl: paymentConfig.successReturnUrl,
-        furl: paymentConfig.failureReturnUrl,
-        udf1,
-        hash
-      }
+      fields: resFields
     };
   },
 

@@ -17,6 +17,7 @@
     "clean": "node -e \"const fs=require('node:fs'); for (const path of ['dist','coverage']) fs.rmSync(path,{recursive:true,force:true});\"",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
     "db:check": "tsx src/scripts/db-check.ts",
+    "db:create": "tsx src/scripts/db-create.ts",
     "db:truncate:all": "tsx src/scripts/truncate-all-data.ts",
     "db:truncate:table": "tsx src/scripts/truncate-table.ts",
     "db:drop:all": "tsx src/scripts/drop-all-tables.ts",

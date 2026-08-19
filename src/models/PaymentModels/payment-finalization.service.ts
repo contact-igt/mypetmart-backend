@@ -11,7 +11,14 @@ import { CartService } from "../CartModels/cart.service.js";
 import { isValidOrderStatusTransition } from "../OrderModels/order.constants.js";
 import type { FinalizationOutcome, NormalizedPaymentResult } from "./payment.types.js";
 
-const TERMINAL_PAYMENT_STATUSES = new Set(["paid", "failed", "refunded", "cancelled"]);
+// "partially_refunded" is included here even though it isn't in this
+// module's own vocabulary — RefundFinalizationService can move a Payment
+// there once a partial Refund succeeds (see RefundModels/refund-finalization.service.ts),
+// and once that has happened this module must never again treat a
+// replayed/duplicate/stale payment-success signal as something still safe
+// to (re-)finalize (which would re-run the SUCCESS path, including a second
+// stock decrement).
+const TERMINAL_PAYMENT_STATUSES = new Set(["paid", "failed", "refunded", "cancelled", "partially_refunded"]);
 
 type LockedLine = {
   item: OrderItem;

@@ -36,6 +36,7 @@ export type PayuHostedCheckoutFieldsJSON = {
   furl: string;
   udf1: string;
   hash: string;
+  service_provider?: string;
 };
 
 export type PaymentInitiationResultJSON = {
