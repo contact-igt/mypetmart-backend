@@ -115,3 +115,21 @@ export class OrderInvalidStatusTransitionError extends OrderError {
     this.name = "OrderInvalidStatusTransitionError";
   }
 }
+
+// Cancelling an already-paid Order now triggers a real refund (see
+// order.service.ts restoreStockForCancelledOrder / RefundService
+// .createPendingCancellationRefund) — the same real-money guard already
+// applied to Return-flow refund initiation (admin-refund.routes.ts requires
+// super_admin) must also apply here. Cancelling an unpaid Order is unaffected
+// and remains available to any admin.
+export class OrderCancelRequiresSuperAdminError extends OrderError {
+  public constructor(orderId: number) {
+    super(
+      "ORDER_CANCEL_REQUIRES_SUPER_ADMIN",
+      `Order '${orderId}' has already been paid — cancelling it triggers a refund and requires a super admin.`,
+      403,
+      { orderId }
+    );
+    this.name = "OrderCancelRequiresSuperAdminError";
+  }
+}

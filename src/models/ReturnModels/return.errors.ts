@@ -66,3 +66,37 @@ export class ReturnNotApprovedError extends ReturnError {
     this.name = "ReturnNotApprovedError";
   }
 }
+
+// The gap this closes: without this check, a refund (return type) or a
+// replacement (replacement type) could be triggered off a customer photo +
+// admin approval alone, with no record the physical item ever came back.
+export class ReturnItemNotReceivedError extends ReturnError {
+  public constructor(returnId: number) {
+    super(
+      "RETURN_ITEM_NOT_RECEIVED",
+      `Return request '${returnId}' has not been confirmed as physically received back yet — mark it received before approving a replacement or initiating a refund.`,
+      422,
+      { returnId }
+    );
+    this.name = "ReturnItemNotReceivedError";
+  }
+}
+
+export class ReturnItemAlreadyReceivedError extends ReturnError {
+  public constructor(returnId: number) {
+    super("RETURN_ITEM_ALREADY_RECEIVED", `Return request '${returnId}' has already been marked as received.`, 409, { returnId });
+    this.name = "ReturnItemAlreadyReceivedError";
+  }
+}
+
+export class ReturnItemReceiptNotApplicableError extends ReturnError {
+  public constructor(status: string) {
+    super(
+      "RETURN_ITEM_RECEIPT_NOT_APPLICABLE",
+      `Return request cannot be marked received in its current state ('${status}') — it has already been rejected or resolved.`,
+      422,
+      { status }
+    );
+    this.name = "ReturnItemReceiptNotApplicableError";
+  }
+}

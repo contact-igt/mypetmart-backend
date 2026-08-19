@@ -13,15 +13,34 @@ const PAYU_LIVE_GATEWAY_URL = "https://secure.payu.in/_payment";
 const PAYU_TEST_VERIFY_API_URL = "https://test.payu.in/merchant/postservice.php?form=2";
 const PAYU_LIVE_VERIFY_API_URL = "https://info.payu.in/merchant/postservice.php?form=2";
 
+// Single source of truth for "am I talking to PayU's live environment right
+// now" — resolveGatewayUrl and resolveVerifyApiUrl must never answer this
+// question independently again. Previously resolveVerifyApiUrl only checked
+// NODE_ENV, so overriding PAYMENT_GATEWAY_URL to the live gateway (e.g. for
+// a deliberate live smoke test from a non-production NODE_ENV) sent real
+// live-mode payments out correctly but silently routed every Verify
+// Payment / Refund Status / Refund Initiation call to PayU's TEST
+// postservice endpoint using live credentials — PayU rejects that
+// combination with a generic "Invalid Hash", and the failure was logged and
+// swallowed (by design, for network-failure resilience), so reconciliation
+// silently never completed. Confirmed by testing: the same request against
+// the live postservice endpoint succeeds immediately.
+function isLiveModeConfigured(): boolean {
+  if (environmentConfig.PAYMENT_GATEWAY_URL) {
+    return environmentConfig.PAYMENT_GATEWAY_URL === PAYU_LIVE_GATEWAY_URL;
+  }
+  return environmentConfig.NODE_ENV === "production";
+}
+
 function resolveGatewayUrl(): string {
   if (environmentConfig.PAYMENT_GATEWAY_URL) {
     return environmentConfig.PAYMENT_GATEWAY_URL;
   }
-  return environmentConfig.NODE_ENV === "production" ? PAYU_LIVE_GATEWAY_URL : PAYU_TEST_GATEWAY_URL;
+  return isLiveModeConfigured() ? PAYU_LIVE_GATEWAY_URL : PAYU_TEST_GATEWAY_URL;
 }
 
 function resolveVerifyApiUrl(): string {
-  return environmentConfig.NODE_ENV === "production" ? PAYU_LIVE_VERIFY_API_URL : PAYU_TEST_VERIFY_API_URL;
+  return isLiveModeConfigured() ? PAYU_LIVE_VERIFY_API_URL : PAYU_TEST_VERIFY_API_URL;
 }
 
 export const paymentConfig = Object.freeze({

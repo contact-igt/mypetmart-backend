@@ -1,11 +1,14 @@
+import type { Transaction } from "sequelize";
+
 import { paymentConfig } from "../../config/payment.config.js";
 import { sequelize } from "../../database/index.js";
+import type { Order } from "../../database/tables/OrderTable/index.js";
 import { OrderItem, Payment, Refund, ReturnRequest } from "../../database/tables/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
 import { buildBusinessReference } from "../../utils/reference-generator.js";
 import { formatMoney, parseMoneyToPaise } from "../../utils/product-money.js";
 import { logger } from "../../utils/logger.js";
-import { ReturnRequestNotFoundError } from "../ReturnModels/return.errors.js";
+import { ReturnItemNotReceivedError, ReturnRequestNotFoundError } from "../ReturnModels/return.errors.js";
 import { PayuRefundClient } from "./payu-refund.client.js";
 import { normalizeInitiateResponse, normalizeStatusApiResponse } from "./refund-result-normalizer.js";
 import { RefundFinalizationService } from "./refund-finalization.service.js";
@@ -31,6 +34,38 @@ const ACTIVE_REFUND_STATUSES = ["pending", "processing", "succeeded"] as const;
 async function loadRefundedTotalPaise(paymentId: number): Promise<number> {
   const total = (await Refund.sum("amount", { where: { payment_id: paymentId, status: "succeeded" } })) ?? 0;
   return parseMoneyToPaise(total);
+}
+
+/**
+ * Calls PayU to actually move the money for an already-committed, still-
+ * "pending" Refund row, then converges the result through the same
+ * finalization path every other refund signal (webhook, manual recheck)
+ * uses. Deliberately outside any DB transaction — the Refund row (and its
+ * stable provider_refund_token) must already be durably committed before
+ * this runs, so a network retry or duplicate call can never produce two
+ * provider requests for the same logical action. A network/transport
+ * failure here is NOT the same as PayU rejecting the request — the Refund
+ * simply stays "pending" for later reconciliation (recheck or webhook).
+ */
+async function dispatchRefund(refundId: number): Promise<void> {
+  const refund = await Refund.findByPk(refundId);
+  if (!refund) {
+    throw new Error(`Refund '${refundId}' was expected to already exist (created in an earlier committed transaction) but was not found.`);
+  }
+  const payment = await Payment.findByPk(refund.payment_id);
+  if (!payment?.provider_payment_id || !paymentConfig.refundWebhookUrl) {
+    // Invariant violation — both were already validated at Refund-creation
+    // time and refundReady guarantees a webhook URL exists.
+    throw new Error(`Refund '${refund.id}' is missing its Payment provider id or refund webhook URL at call time.`);
+  }
+
+  try {
+    const raw = await PayuRefundClient.initiateRefund(payment.provider_payment_id, refund.provider_refund_token, refund.amount, paymentConfig.refundWebhookUrl);
+    const normalized = normalizeInitiateResponse(refund.provider_refund_token, raw);
+    await RefundFinalizationService.processVerifiedRefundResult(normalized);
+  } catch (error) {
+    logger.warn({ err: error, refundId: refund.id }, "refund initiation: PayU network call failed, Refund remains pending for later reconciliation");
+  }
 }
 
 export const RefundService = {
@@ -59,6 +94,13 @@ export const RefundService = {
       }
       if (returnRequest.type !== "return") {
         throw new RefundResolutionMismatchError();
+      }
+      // The item-received gate: closes the same trust gap for a refund that
+      // adminReviewReturn closes for a replacement, just one step later in
+      // this flow — approving a "return" only makes it refund-eligible,
+      // this initiation call is the actual money-moving trigger.
+      if (returnRequest.item_received_at === null) {
+        throw new ReturnItemNotReceivedError(returnRequest.id);
       }
 
       const existingActive = await Refund.findOne({
@@ -130,24 +172,7 @@ export const RefundService = {
     // row (and its token) is already durably committed, matching the same
     // "commit first, call the provider after" discipline PayuVerifyClient's
     // callers already follow.
-    const payment = await Payment.findByPk(refund.payment_id);
-    if (!payment?.provider_payment_id || !paymentConfig.refundWebhookUrl) {
-      // Invariant violation — both were already validated inside the
-      // transaction above and refundReady guarantees a webhook URL exists.
-      throw new Error(`Refund '${refund.id}' is missing its Payment provider id or refund webhook URL at call time.`);
-    }
-
-    try {
-      const raw = await PayuRefundClient.initiateRefund(payment.provider_payment_id, refund.provider_refund_token, refund.amount, paymentConfig.refundWebhookUrl);
-      const normalized = normalizeInitiateResponse(refund.provider_refund_token, raw);
-      await RefundFinalizationService.processVerifiedRefundResult(normalized);
-    } catch (error) {
-      // A network/transport failure talking to PayU is NOT the same as PayU
-      // rejecting the request — the Refund row stays "pending" so a later
-      // status re-check or Admin retry can still resolve it, mirroring
-      // getPaymentStatus's "log + swallow, return last-known state" pattern.
-      logger.warn({ err: error, refundId: refund.id }, "refund initiation: PayU network call failed, Refund remains pending for later reconciliation");
-    }
+    await dispatchRefund(refund.id);
 
     const refreshed = await Refund.findByPk(refund.id);
     const finalRefund = refreshed ?? refund;
@@ -159,6 +184,84 @@ export const RefundService = {
       currency: finalRefund.currency
     };
   },
+
+  /**
+   * Creates (but does not yet dispatch to PayU) a Refund row for a paid
+   * Order being cancelled — the order-cancellation counterpart to
+   * initiateRefund's Return-flow path, sharing the same Refund table and
+   * finalization logic but with no ReturnRequest involved (return_request_id
+   * is nullable for exactly this reason). Called by OrderModels/order.service.ts
+   * from WITHIN the same transaction that flips the Order to "cancelled" and
+   * restores stock, so cancellation, stock-restore and refund-row-creation
+   * commit together as one atomic unit. The caller is responsible for
+   * calling dispatchRefund(refund.id) AFTER that transaction commits — the
+   * PayU network call must never happen inside an open DB transaction.
+   */
+  async createPendingCancellationRefund(adminId: number, order: Order, transaction: Transaction): Promise<Refund> {
+    if (!paymentConfig.refundReady) {
+      throw new RefundProviderNotConfiguredError();
+    }
+
+    // Most recent paid Payment for this Order — never a client-supplied
+    // Payment id. Locked so a concurrent cancellation attempt (shouldn't be
+    // possible once the Order's own row is locked by the caller, but this
+    // keeps the guarantee local to this function too) can't race it.
+    const payment = await Payment.findOne({
+      where: { order_id: order.id, status: "paid" },
+      order: [["id", "DESC"]],
+      transaction,
+      lock: transaction.LOCK.UPDATE
+    });
+    if (!payment) {
+      throw new RefundNoPaidPaymentFoundError(order.id);
+    }
+    if (!payment.provider_payment_id) {
+      throw new RefundPaymentMissingProviderIdError(payment.id);
+    }
+
+    const existingActive = await Refund.findOne({
+      where: { payment_id: payment.id, status: ACTIVE_REFUND_STATUSES as unknown as string[] },
+      transaction
+    });
+    if (existingActive) {
+      // Cancellation is a one-way, one-time transition (isValidOrderStatusTransition
+      // never allows re-entering "cancelled"), so this only guards an
+      // otherwise-impossible race rather than normal operation.
+      return existingActive;
+    }
+
+    // A cancelled Order was never delivered and never went through the
+    // Return flow, so nothing could have been refunded against this Payment
+    // yet — the full captured amount is refundable.
+    const amount = payment.amount;
+    const refundId = await IdSequenceService.allocateNextId("refunds", transaction);
+    const refundNumber = buildBusinessReference("refund", refundId);
+    return Refund.create(
+      {
+        id: refundId,
+        refund_number: refundNumber,
+        order_id: order.id,
+        payment_id: payment.id,
+        return_request_id: null,
+        provider: "payu",
+        provider_refund_token: refundNumber,
+        provider_request_id: null,
+        provider_refund_id: null,
+        provider_status: null,
+        status: "pending",
+        amount,
+        currency: payment.currency,
+        failure_code: null,
+        failure_message: null,
+        initiated_by_admin_id: adminId,
+        raw_payload: null
+      },
+      { transaction }
+    );
+  },
+
+  /** Exposed so OrderModels/order.service.ts can dispatch a cancellation-triggered Refund once its own transaction has committed. */
+  dispatchRefund,
 
   /**
    * Admin-triggered manual re-check ("Check Again") for a Refund still

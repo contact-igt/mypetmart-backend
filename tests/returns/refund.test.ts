@@ -124,6 +124,10 @@ async function createApprovedReturn(
     .set("Authorization", `Bearer ${customerToken}`)
     .send({ orderId, orderItemId: orderItem!.id, quantity: overrides.returnQuantity ?? quantity, reason: "Defective" });
   const returnId = created.body.data.id;
+  // Refund initiation now requires the item to be confirmed physically
+  // received back first (RETURN_ITEM_NOT_RECEIVED gate) — approval alone is
+  // no longer sufficient for a "return" (refund) type request.
+  await request(app).post(`${ADMIN_RETURNS_URL}/${returnId}/receive`).set("Authorization", `Bearer ${adminToken}`).send({});
   await request(app).patch(`${ADMIN_RETURNS_URL}/${returnId}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "approve" });
 
   return { orderId, orderItemId: orderItem!.id, returnId, productId: product.id, unitPrice };

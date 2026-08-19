@@ -50,6 +50,7 @@ export type ReturnRequestJSON = {
   resolutionNote: string | null;
   requestedAt: string;
   resolvedAt: string | null;
+  itemReceivedAt: string | null;
   refunds: ReturnRefundSummaryJSON[];
   replacement: ReplacementJSON | null;
 };

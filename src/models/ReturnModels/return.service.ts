@@ -20,6 +20,9 @@ import { ReplacementService } from "../ReplacementModels/replacement.service.js"
 import { ShipmentService } from "../ShipmentModels/shipment.service.js";
 import {
   ReturnAlreadyReviewedError,
+  ReturnItemAlreadyReceivedError,
+  ReturnItemNotReceivedError,
+  ReturnItemReceiptNotApplicableError,
   ReturnNotEligibleError,
   ReturnOrderItemNotFoundError,
   ReturnQuantityExceedsAvailableError,
@@ -59,6 +62,7 @@ function toJSON(returnRequest: ReturnRequest, order: Order, orderItem: OrderItem
     resolutionNote: returnRequest.resolution_note,
     requestedAt: returnRequest.requested_at.toISOString(),
     resolvedAt: returnRequest.resolved_at ? returnRequest.resolved_at.toISOString() : null,
+    itemReceivedAt: returnRequest.item_received_at ? returnRequest.item_received_at.toISOString() : null,
     refunds: refunds.map((refund) => ({
       id: refund.id,
       refundNumber: refund.refund_number,
@@ -250,6 +254,16 @@ export const ReturnService = {
         throw new ReturnAlreadyReviewedError(returnRequest.status);
       }
 
+      // A "replacement" approval immediately consumes stock and readies a
+      // new item to ship (see below) — unlike a "return" approval, which
+      // only makes the request refund-eligible and leaves the actual money
+      // movement to a separate, later initiateRefund call. That later call
+      // gets its own item-received gate (RefundService.initiateRefund);
+      // here, approval itself IS the trigger, so the gate has to sit here.
+      if (input.action === "approve" && returnRequest.type === "replacement" && returnRequest.item_received_at === null) {
+        throw new ReturnItemNotReceivedError(returnRequest.id);
+      }
+
       if (input.action === "approve") {
         returnRequest.status = "approved";
       } else {
@@ -281,6 +295,39 @@ export const ReturnService = {
     }
     const noteId = await sequelize.transaction((t) => IdSequenceService.allocateNextId("return_notes", t));
     await ReturnNote.create({ id: noteId, return_request_id: returnId, admin_id: adminId, message });
+    return this.getAdminReturn(returnId);
+  },
+
+  /**
+   * Warehouse-side confirmation that the physical item is actually back —
+   * an operational fact, not a money movement, so any admin can record it
+   * (unlike refund initiation, which stays super_admin-only). Deliberately
+   * separate from approve/reject: it can be recorded before OR after
+   * approval for a "return" (refund initiation checks it independently,
+   * whenever it happens), but must happen BEFORE approval for a
+   * "replacement" (approval itself consumes stock — see adminReviewReturn).
+   * Allowed only while the request is still open ("requested" or
+   * "approved") — a rejected or already-resolved request has nothing left
+   * for this confirmation to gate.
+   */
+  async markItemReceived(adminId: number, returnId: number): Promise<ReturnRequestDetailJSON> {
+    await sequelize.transaction(async (t) => {
+      const returnRequest = await ReturnRequest.findByPk(returnId, { transaction: t, lock: t.LOCK.UPDATE });
+      if (!returnRequest) {
+        throw new ReturnRequestNotFoundError(returnId);
+      }
+      if (returnRequest.status !== "requested" && returnRequest.status !== "approved") {
+        throw new ReturnItemReceiptNotApplicableError(returnRequest.status);
+      }
+      if (returnRequest.item_received_at !== null) {
+        throw new ReturnItemAlreadyReceivedError(returnId);
+      }
+
+      returnRequest.item_received_at = new Date();
+      returnRequest.item_received_by_admin_id = adminId;
+      await returnRequest.save({ transaction: t });
+    });
+
     return this.getAdminReturn(returnId);
   }
 };
