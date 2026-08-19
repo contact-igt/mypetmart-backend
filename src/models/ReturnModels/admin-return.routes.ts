@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 import { authenticate } from "../../middlewares/auth/authenticate.middleware.js";
-import { handleAdminAddReturnNote, handleAdminGetReturn, handleAdminListReturns, handleAdminReviewReturn, handleAdminUpdateReplacement } from "./admin-return.controller.js";
+import { handleAdminAddReturnNote, handleAdminGetReturn, handleAdminListReturns, handleAdminMarkItemReceived, handleAdminReviewReturn, handleAdminUpdateReplacement } from "./admin-return.controller.js";
 
 export const adminReturnRouter = Router();
 
@@ -24,6 +24,13 @@ adminReturnRouter.patch("/:returnId/review", (req, res, next) => {
 
 adminReturnRouter.post("/:returnId/notes", (req, res, next) => {
   void handleAdminAddReturnNote(req, res, next);
+});
+
+// Warehouse-side confirmation that the physical item is back — an
+// operational fact, not a money movement, so open to any admin (unlike
+// refund initiation under RefundModels, which stays super_admin-only).
+adminReturnRouter.post("/:returnId/receive", (req, res, next) => {
+  void handleAdminMarkItemReceived(req, res, next);
 });
 
 adminReturnRouter.patch("/:returnId/replacement", (req, res, next) => {

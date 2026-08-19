@@ -1,9 +1,10 @@
 /* eslint-disable */
 import crypto from "node:crypto";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { app } from "../../src/app.js";
+import { paymentConfig } from "../../src/config/payment.config.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
 import { ProductVariant } from "../../src/database/tables/ProductVariantTable/index.js";
@@ -15,6 +16,7 @@ import { Order } from "../../src/database/tables/OrderTable/index.js";
 import { OrderItem } from "../../src/database/tables/OrderItemTable/index.js";
 import { OrderNote } from "../../src/database/tables/OrderNoteTable/index.js";
 import { Payment } from "../../src/database/tables/PaymentTable/index.js";
+import { Refund } from "../../src/database/tables/RefundTable/index.js";
 import { User } from "../../src/database/tables/UserTable/index.js";
 import { AuthSession } from "../../src/database/tables/AuthSessionTable/index.js";
 import { IdSequenceService } from "../../src/database/sequences/id-sequence.service.js";
@@ -22,12 +24,15 @@ import { connectDatabase, disconnectDatabase, sequelize } from "../../src/databa
 import { PasswordService } from "../../src/services/auth/password.service.js";
 import { SessionService } from "../../src/services/auth/session.service.js";
 import { TokenService } from "../../src/services/auth/token.service.js";
+import { buildPayuResponseHash } from "../../src/models/PaymentModels/payu-hash.util.js";
 
 const CART_URL = "/api/v1/storefront/cart";
 const ADDRESS_URL = "/api/v1/storefront/addresses";
 const ORDERS_URL = "/api/v1/storefront/orders";
 const ADMIN_ORDERS_URL = "/api/v1/admin/orders";
 const CHECKOUT_URL = "/api/v1/storefront/checkout/preview";
+const INITIATE_URL = "/api/v1/storefront/payments/initiate";
+const WEBHOOK_URL = "/api/v1/payments/payu/webhook";
 
 let categoryId: number;
 let skuCounter = 0;
@@ -177,6 +182,26 @@ async function mintAdminToken(id: number, email: string): Promise<string> {
   });
 }
 
+async function mintSuperAdminToken(id: number, email: string): Promise<string> {
+  const pwdHash = await PasswordService.hash("TestPass123!@#");
+  const admin = await User.create({
+    id,
+    name: `Order Test Super Admin ${id}`,
+    email,
+    password_hash: pwdHash,
+    role: "super_admin",
+    status: "active",
+    reference_code: `SUP-${id}`
+  });
+  const { session } = await SessionService.createSession(admin.id, "admin", null, null);
+  return TokenService.generateAccessToken({
+    sub: String(admin.id),
+    sessionId: String(session.id),
+    role: "super_admin",
+    sessionType: "admin"
+  });
+}
+
 /** Adds a Simple Product to the customer's Cart and returns a saved-address-ready payload id. */
 async function addSimpleItemAndCreateAddress(
   token: string,
@@ -189,18 +214,61 @@ async function addSimpleItemAndCreateAddress(
   return { product, addressId: address.body.data.id };
 }
 
+/** Places, initiates payment for, and confirms (via the PayU webhook) an Order — leaves it "confirmed" / paid, stock already decremented. */
+async function createPaidOrder(
+  customerToken: string,
+  overrides: { stock?: number; price?: string; quantity?: number } = {}
+): Promise<{ orderId: number; productId: number; amount: string }> {
+  const product = await createSimpleProduct({ stock: overrides.stock ?? 10, price: overrides.price ?? "500.00" });
+  const quantity = overrides.quantity ?? 1;
+  await request(app).post(`${CART_URL}/items`).set("Authorization", `Bearer ${customerToken}`).send({ productId: product.id, quantity });
+  const address = await request(app).post(ADDRESS_URL).set("Authorization", `Bearer ${customerToken}`).send(validAddressPayload());
+  const orderRes = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerToken}`).send({ savedAddressId: address.body.data.id });
+  const orderId = orderRes.body.data.id;
+
+  const initRes = await request(app).post(INITIATE_URL).set("Authorization", `Bearer ${customerToken}`).send({ orderId });
+  const fields = initRes.body.data.fields;
+  const hash = buildPayuResponseHash(
+    { key: fields.key, txnid: fields.txnid, amount: fields.amount, productinfo: fields.productinfo, firstname: fields.firstname, email: fields.email, udf1: fields.udf1, status: "success" },
+    paymentConfig.payuSalt as string
+  );
+  await request(app)
+    .post(WEBHOOK_URL)
+    .type("form")
+    .send({
+      status: "success",
+      txnid: fields.txnid,
+      amount: fields.amount,
+      productinfo: fields.productinfo,
+      firstname: fields.firstname,
+      email: fields.email,
+      udf1: fields.udf1,
+      mihpayid: `mihpay_${fields.txnid}`,
+      mode: "UPI",
+      hash
+    });
+
+  return { orderId, productId: product.id, amount: fields.amount };
+}
+
+function jsonResponse(body: unknown, ok = true): Response {
+  return { ok, status: ok ? 200 : 500, json: () => Promise.resolve(body) } as Response;
+}
+
 describe("Order Backend Integration Tests", () => {
   let customerAToken: string;
   let customerBToken: string;
   let adminToken: string;
+  let superAdminToken: string;
   const CUSTOMER_A_ID = 99601;
   const CUSTOMER_B_ID = 99602;
   const ADMIN_ID = 99603;
+  const SUPER_ADMIN_ID = 99604;
 
   beforeAll(async () => {
     await connectDatabase();
 
-    for (const id of [CUSTOMER_A_ID, CUSTOMER_B_ID, ADMIN_ID]) {
+    for (const id of [CUSTOMER_A_ID, CUSTOMER_B_ID, ADMIN_ID, SUPER_ADMIN_ID]) {
       const existing = await User.findOne({ where: { id }, paranoid: false });
       if (existing) {
         await AuthSession.destroy({ where: { user_id: existing.id }, force: true });
@@ -211,9 +279,11 @@ describe("Order Backend Integration Tests", () => {
     customerAToken = await mintCustomerToken(CUSTOMER_A_ID, "order-test-customer-a@example.com");
     customerBToken = await mintCustomerToken(CUSTOMER_B_ID, "order-test-customer-b@example.com");
     adminToken = await mintAdminToken(ADMIN_ID, "order-test-admin@example.com");
+    superAdminToken = await mintSuperAdminToken(SUPER_ADMIN_ID, "order-test-super-admin@example.com");
   });
 
   afterAll(async () => {
+    await Refund.destroy({ where: {}, truncate: false, force: true });
     await Payment.destroy({ where: {}, truncate: false, force: true });
     await OrderNote.destroy({ where: {}, truncate: false, force: true });
     await OrderItem.destroy({ where: {}, truncate: false, force: true });
@@ -225,12 +295,13 @@ describe("Order Backend Integration Tests", () => {
     await ProductVariant.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
-    await AuthSession.destroy({ where: { user_id: [CUSTOMER_A_ID, CUSTOMER_B_ID, ADMIN_ID] }, force: true });
-    await User.destroy({ where: { id: [CUSTOMER_A_ID, CUSTOMER_B_ID, ADMIN_ID] }, force: true });
+    await AuthSession.destroy({ where: { user_id: [CUSTOMER_A_ID, CUSTOMER_B_ID, ADMIN_ID, SUPER_ADMIN_ID] }, force: true });
+    await User.destroy({ where: { id: [CUSTOMER_A_ID, CUSTOMER_B_ID, ADMIN_ID, SUPER_ADMIN_ID] }, force: true });
     await disconnectDatabase();
   });
 
   beforeEach(async () => {
+    await Refund.destroy({ where: {}, truncate: false, force: true });
     await OrderNote.destroy({ where: {}, truncate: false, force: true });
     await OrderItem.destroy({ where: {}, truncate: false, force: true });
     await Payment.destroy({ where: {}, truncate: false, force: true });
@@ -739,7 +810,7 @@ describe("Order Backend Integration Tests", () => {
       expect(reloaded?.cancelled_at).not.toBeNull();
     });
 
-    it("does NOT restore stock, refund, or cancel a shipment on cancellation (no such side effects exist yet)", async () => {
+    it("cancelling an UNPAID Order never touches stock (nothing was decremented for it yet) — see 'Paid Order Cancellation' below for the paid case", async () => {
       const { product, addressId } = await addSimpleItemAndCreateAddress(customerAToken, { stock: 10 }, 3);
       const created = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: addressId });
 
@@ -769,6 +840,128 @@ describe("Order Backend Integration Tests", () => {
         .set("Authorization", `Bearer ${customerAToken}`)
         .send({ status: "confirmed" });
       expect(res.status).toBe(401);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Paid Order Cancellation — auto stock-restore + auto refund trigger
+  // ---------------------------------------------------------------------
+  describe("Paid Order Cancellation (stock restore + refund)", () => {
+    beforeEach(() => {
+      vi.stubGlobal("fetch", vi.fn());
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    });
+
+    it("rejects a plain admin cancelling a paid Order — super_admin is required once money is involved", async () => {
+      const { orderId, productId } = await createPaidOrder(customerAToken, { stock: 10, quantity: 3 });
+      expect((await Product.findByPk(productId))!.stock).toBe(7); // decremented on payment confirmation
+
+      const res = await request(app).patch(`${ADMIN_ORDERS_URL}/${orderId}/status`).set("Authorization", `Bearer ${adminToken}`).send({ status: "cancelled" });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe("ORDER_CANCEL_REQUIRES_SUPER_ADMIN");
+
+      const order = await Order.findByPk(orderId);
+      expect(order!.status).toBe("confirmed"); // unchanged — the cancellation itself was rejected
+      expect((await Product.findByPk(productId))!.stock).toBe(7); // unchanged
+      expect(fetch).not.toHaveBeenCalled(); // no refund was ever attempted
+    });
+
+    it("a super_admin cancelling a paid Order restores stock and creates a pending Refund for the full captured amount", async () => {
+      vi.mocked(fetch).mockResolvedValue(jsonResponse({ status: 1, request_id: "req_cancel_1" }));
+      const { orderId, productId } = await createPaidOrder(customerAToken, { stock: 10, price: "500.00", quantity: 3 });
+      expect((await Product.findByPk(productId))!.stock).toBe(7);
+
+      const res = await request(app).patch(`${ADMIN_ORDERS_URL}/${orderId}/status`).set("Authorization", `Bearer ${superAdminToken}`).send({ status: "cancelled" });
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe("cancelled");
+
+      expect((await Product.findByPk(productId))!.stock).toBe(10); // fully restored
+
+      const refund = await Refund.findOne({ where: { order_id: orderId } });
+      expect(refund).not.toBeNull();
+      expect(refund!.amount).toBe("1500.00"); // 500.00 x 3 — the full captured Payment amount
+      expect(refund!.return_request_id).toBeNull(); // no Return involved — cancellation-triggered
+      expect(["pending", "processing"]).toContain(refund!.status);
+      expect(fetch).toHaveBeenCalledTimes(1); // refund was actually dispatched to PayU
+    });
+
+    it("a genuine SUCCESS from PayU rolls the cancelled Order's payment status up to 'refunded'", async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ status: 1, request_id: "req_cancel_2" }));
+      const { orderId } = await createPaidOrder(customerAToken, { stock: 10, price: "500.00", quantity: 1 });
+
+      await request(app).patch(`${ADMIN_ORDERS_URL}/${orderId}/status`).set("Authorization", `Bearer ${superAdminToken}`).send({ status: "cancelled" });
+      const refund = await Refund.findOne({ where: { order_id: orderId } });
+
+      vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ status: 1, transaction_details: { req_cancel_2: { status: "SUCCESS", amt: "500.00", mihpayid: "mihpay1" } } }));
+      await request(app).post(`/api/v1/admin/refunds/${refund!.id}/recheck`).set("Authorization", `Bearer ${superAdminToken}`).send({});
+
+      const order = await Order.findByPk(orderId);
+      expect(order!.status).toBe("cancelled"); // order status itself is untouched by refund finalization
+      expect(order!.payment_status).toBe("refunded");
+
+      const payment = await Payment.findOne({ where: { order_id: orderId } });
+      expect(payment!.status).toBe("refunded");
+    });
+
+    it("does not create a second refund or call PayU twice for the same cancelled Order", async () => {
+      vi.mocked(fetch).mockResolvedValue(jsonResponse({ status: 1, request_id: "req_cancel_3" }));
+      const { orderId } = await createPaidOrder(customerAToken, { stock: 10, quantity: 1 });
+
+      await request(app).patch(`${ADMIN_ORDERS_URL}/${orderId}/status`).set("Authorization", `Bearer ${superAdminToken}`).send({ status: "cancelled" });
+      // cancelled is terminal — a second attempt must be rejected before any refund/stock logic re-runs.
+      const second = await request(app).patch(`${ADMIN_ORDERS_URL}/${orderId}/status`).set("Authorization", `Bearer ${superAdminToken}`).send({ status: "cancelled" });
+      expect(second.status).toBe(422);
+      expect(second.body.error.code).toBe("ORDER_INVALID_STATUS_TRANSITION");
+
+      const refundCount = await Refund.count({ where: { order_id: orderId } });
+      expect(refundCount).toBe(1);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("bulk-cancel skips a paid Order for a plain admin but still cancels an unpaid one in the same batch", async () => {
+      const { orderId: paidOrderId, productId } = await createPaidOrder(customerAToken, { stock: 10, quantity: 2 });
+      const a = await addSimpleItemAndCreateAddress(customerAToken, { stock: 5 });
+      const unpaidOrderRes = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: a.addressId });
+      const unpaidOrderId = unpaidOrderRes.body.data.id;
+
+      const res = await request(app)
+        .patch(`${ADMIN_ORDERS_URL}/bulk-status`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ ids: [paidOrderId, unpaidOrderId], status: "cancelled" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({ updated: 1, skipped: 1 });
+
+      const paidOrder = await Order.findByPk(paidOrderId);
+      expect(paidOrder!.status).toBe("confirmed"); // skipped, still requires super_admin
+      expect((await Product.findByPk(productId))!.stock).toBe(8); // untouched
+
+      const unpaidOrder = await Order.findByPk(unpaidOrderId);
+      expect(unpaidOrder!.status).toBe("cancelled");
+      expect(fetch).not.toHaveBeenCalled(); // no refund was ever eligible in this batch
+    });
+
+    it("bulk-cancel by a super_admin restores stock and creates a Refund for every paid Order in the batch", async () => {
+      vi.mocked(fetch).mockResolvedValue(jsonResponse({ status: 1, request_id: "req_cancel_bulk" }));
+      const first = await createPaidOrder(customerAToken, { stock: 10, price: "500.00", quantity: 1 });
+      const second = await createPaidOrder(customerBToken, { stock: 10, price: "500.00", quantity: 1 });
+
+      const res = await request(app)
+        .patch(`${ADMIN_ORDERS_URL}/bulk-status`)
+        .set("Authorization", `Bearer ${superAdminToken}`)
+        .send({ ids: [first.orderId, second.orderId], status: "cancelled" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({ updated: 2, skipped: 0 });
+
+      expect((await Product.findByPk(first.productId))!.stock).toBe(10);
+      expect((await Product.findByPk(second.productId))!.stock).toBe(10);
+      expect(await Refund.count()).toBe(2);
+      expect(fetch).toHaveBeenCalledTimes(2);
     });
   });
 

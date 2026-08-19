@@ -328,6 +328,7 @@ describe("Returns", () => {
       expect(created.status).toBe(201);
       expect(created.body.data.resolution).toBe("replacement");
 
+      await request(app).post(`${ADMIN_RETURNS_URL}/${created.body.data.id}/receive`).set("Authorization", `Bearer ${adminToken}`).send({});
       const approved = await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "approve" });
       expect(approved.status).toBe(200);
       expect(approved.body.data.replacement.status).toBe("processing");
@@ -343,6 +344,7 @@ describe("Returns", () => {
       const product = (await Product.findByPk(orderItem.product_id!))!;
       const stockBefore = product.stock;
       const created = await request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "Damaged", resolution: "replacement" });
+      await request(app).post(`${ADMIN_RETURNS_URL}/${created.body.data.id}/receive`).set("Authorization", `Bearer ${adminToken}`).send({});
 
       const first = await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "approve" });
       const second = await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "approve" });
@@ -359,6 +361,7 @@ describe("Returns", () => {
       product.stock = 0;
       await product.save();
       const created = await request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "Damaged", resolution: "replacement" });
+      await request(app).post(`${ADMIN_RETURNS_URL}/${created.body.data.id}/receive`).set("Authorization", `Bearer ${adminToken}`).send({});
 
       const approved = await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "approve" });
       expect(approved.status).toBe(200);
@@ -378,6 +381,10 @@ describe("Returns", () => {
         request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "B", resolution: "replacement" })
       ]);
 
+      await Promise.all([
+        request(app).post(`${ADMIN_RETURNS_URL}/${a.body.data.id}/receive`).set("Authorization", `Bearer ${adminToken}`).send({}),
+        request(app).post(`${ADMIN_RETURNS_URL}/${b.body.data.id}/receive`).set("Authorization", `Bearer ${adminToken}`).send({})
+      ]);
       const [approvalA, approvalB] = await Promise.all([
         request(app).patch(`${ADMIN_RETURNS_URL}/${a.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "approve" }),
         request(app).patch(`${ADMIN_RETURNS_URL}/${b.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "approve" })
@@ -391,6 +398,7 @@ describe("Returns", () => {
     it("prevents a replacement quantity from entering the refund path", async () => {
       const { orderId, orderItemId } = await createDeliveredPaidOrder(customerAToken, adminToken);
       const created = await request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "Damaged", resolution: "replacement" });
+      await request(app).post(`${ADMIN_RETURNS_URL}/${created.body.data.id}/receive`).set("Authorization", `Bearer ${adminToken}`).send({});
       await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "approve" });
 
       const refund = await request(app).post(`/api/v1/admin/returns/${created.body.data.id}/refunds`).set("Authorization", `Bearer ${superAdminToken}`).send({});
@@ -402,12 +410,102 @@ describe("Returns", () => {
     it("rejects manual completion before provider-verified replacement delivery", async () => {
       const { orderId, orderItemId } = await createDeliveredPaidOrder(customerAToken, adminToken);
       const created = await request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "Damaged", resolution: "replacement" });
+      await request(app).post(`${ADMIN_RETURNS_URL}/${created.body.data.id}/receive`).set("Authorization", `Bearer ${adminToken}`).send({});
       await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "approve" });
 
       const first = await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/replacement`).set("Authorization", `Bearer ${adminToken}`).send({ status: "completed" });
       expect(first.status).toBe(400);
       expect((await ReturnRequest.findByPk(created.body.data.id))!.status).toBe("approved");
       expect((await Replacement.findOne({ where: { return_request_id: created.body.data.id } }))!.status).toBe("processing");
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Item Received confirmation — the Option 1 gap-closer: refund
+  // initiation (refund type) and approval (replacement type) must not be
+  // able to move money/stock before an admin confirms the physical item is
+  // actually back.
+  // -------------------------------------------------------------------
+  describe("Item Received confirmation", () => {
+    it("blocks refund initiation for a 'refund' type return until the item is marked received", async () => {
+      const { orderId, orderItemId } = await createDeliveredPaidOrder(customerAToken, adminToken);
+      const created = await request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "Damaged" });
+      const reviewed = await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "approve" });
+      expect(reviewed.status).toBe(200); // approving a refund-type return itself never required receipt
+
+      const refund = await request(app).post(`/api/v1/admin/returns/${created.body.data.id}/refunds`).set("Authorization", `Bearer ${superAdminToken}`).send({});
+      expect(refund.status).toBe(422);
+      expect(refund.body.error.code).toBe("RETURN_ITEM_NOT_RECEIVED");
+      expect(await Refund.count({ where: { return_request_id: created.body.data.id } })).toBe(0);
+
+      await request(app).post(`${ADMIN_RETURNS_URL}/${created.body.data.id}/receive`).set("Authorization", `Bearer ${adminToken}`).send({});
+      const retried = await request(app).post(`/api/v1/admin/returns/${created.body.data.id}/refunds`).set("Authorization", `Bearer ${superAdminToken}`).send({});
+      expect(retried.status).toBe(201); // unblocked once received
+    });
+
+    it("blocks approving a 'replacement' type return until the item is marked received", async () => {
+      const { orderId, orderItemId } = await createDeliveredPaidOrder(customerAToken, adminToken);
+      const created = await request(app)
+        .post(RETURNS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ orderId, orderItemId, quantity: 1, reason: "Damaged", resolution: "replacement" });
+
+      const reviewed = await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "approve" });
+      expect(reviewed.status).toBe(422);
+      expect(reviewed.body.error.code).toBe("RETURN_ITEM_NOT_RECEIVED");
+      expect(await Replacement.count({ where: { return_request_id: created.body.data.id } })).toBe(0);
+      expect((await ReturnRequest.findByPk(created.body.data.id))!.status).toBe("requested"); // never advanced past requested
+
+      await request(app).post(`${ADMIN_RETURNS_URL}/${created.body.data.id}/receive`).set("Authorization", `Bearer ${adminToken}`).send({});
+      const retried = await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "approve" });
+      expect(retried.status).toBe(200); // unblocked once received
+      expect(retried.body.data.replacement.status).toBe("processing");
+    });
+
+    it("does NOT require item-received to reject a return (rejection never moves money or stock)", async () => {
+      const { orderId, orderItemId } = await createDeliveredPaidOrder(customerAToken, adminToken);
+      const created = await request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "Damaged" });
+      const rejected = await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "reject" });
+      expect(rejected.status).toBe(200);
+    });
+
+    it("lets any admin (not just super_admin) mark an item received — it's operational, not a money movement", async () => {
+      const { orderId, orderItemId } = await createDeliveredPaidOrder(customerAToken, adminToken);
+      const created = await request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "Damaged" });
+      const res = await request(app).post(`${ADMIN_RETURNS_URL}/${created.body.data.id}/receive`).set("Authorization", `Bearer ${adminToken}`).send({});
+      expect(res.status).toBe(200);
+      expect(res.body.data.itemReceivedAt).not.toBeNull();
+
+      const stored = await ReturnRequest.findByPk(created.body.data.id);
+      expect(stored!.item_received_at).not.toBeNull();
+      expect(stored!.item_received_by_admin_id).toBe(ADMIN_ID);
+    });
+
+    it("rejects marking the same return received twice", async () => {
+      const { orderId, orderItemId } = await createDeliveredPaidOrder(customerAToken, adminToken);
+      const created = await request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "Damaged" });
+      await request(app).post(`${ADMIN_RETURNS_URL}/${created.body.data.id}/receive`).set("Authorization", `Bearer ${adminToken}`).send({});
+
+      const second = await request(app).post(`${ADMIN_RETURNS_URL}/${created.body.data.id}/receive`).set("Authorization", `Bearer ${adminToken}`).send({});
+      expect(second.status).toBe(409);
+      expect(second.body.error.code).toBe("RETURN_ITEM_ALREADY_RECEIVED");
+    });
+
+    it("rejects marking a rejected return as received (nothing left for it to gate)", async () => {
+      const { orderId, orderItemId } = await createDeliveredPaidOrder(customerAToken, adminToken);
+      const created = await request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "Damaged" });
+      await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "reject" });
+
+      const res = await request(app).post(`${ADMIN_RETURNS_URL}/${created.body.data.id}/receive`).set("Authorization", `Bearer ${adminToken}`).send({});
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe("RETURN_ITEM_RECEIPT_NOT_APPLICABLE");
+    });
+
+    it("rejects a customer trying to mark their own return received", async () => {
+      const { orderId, orderItemId } = await createDeliveredPaidOrder(customerAToken, adminToken);
+      const created = await request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "Damaged" });
+      const res = await request(app).post(`${ADMIN_RETURNS_URL}/${created.body.data.id}/receive`).set("Authorization", `Bearer ${customerAToken}`).send({});
+      expect(res.status).toBe(401);
     });
   });
 });

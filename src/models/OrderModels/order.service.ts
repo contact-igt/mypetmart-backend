@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 import { Op, QueryTypes, col, fn, type Transaction } from "sequelize";
 
-import { DATABASE_TABLE_NAMES, DEFAULT_COUNTRY_CODE, V1_FREE_SHIPPING_FEE, type OrderStatus } from "../../constants/database.constants.js";
+import { DATABASE_TABLE_NAMES, DEFAULT_COUNTRY_CODE, V1_FREE_SHIPPING_FEE, type OrderStatus, type UserRole } from "../../constants/database.constants.js";
 import { sequelize } from "../../database/index.js";
 import { TokenService } from "../../services/auth/token.service.js";
 import {
@@ -26,6 +26,7 @@ import { buildBusinessReference } from "../../utils/reference-generator.js";
 import { formatMoney, formatPaiseAsMoney, parseMoneyToPaise } from "../../utils/product-money.js";
 import type { CartIdentity } from "../CartModels/cart.types.js";
 import type { InlineAddressInput } from "../CheckoutModels/checkout.types.js";
+import { RefundService } from "../RefundModels/refund.service.js";
 import { ShipmentService } from "../ShipmentModels/shipment.service.js";
 import type { ShipmentJSON } from "../ShipmentModels/shipment.types.js";
 import { getValidNextOrderStatuses, isValidOrderStatusTransition } from "./order.constants.js";
@@ -34,6 +35,7 @@ import {
   OrderAddressNotFoundError,
   OrderAddressRequiredError,
   OrderAlreadyPendingError,
+  OrderCancelRequiresSuperAdminError,
   OrderCartEmptyError,
   OrderEmailRequiredError,
   OrderInsufficientStockError,
@@ -716,6 +718,43 @@ async function loadAdminOrderDetail(orderId: number, transaction?: Transaction):
   };
 }
 
+/**
+ * Restores stock for every line of a paid Order that is being cancelled —
+ * the counterpart to PaymentFinalizationService's stock decrement on
+ * confirmation. Locks Product/Variant rows in the same deterministic
+ * (product_id, product_variant_id) order that decrement uses, to avoid
+ * cross-transaction deadlocks when two Orders touch the same product line.
+ * A product or variant deleted since the Order was placed is left alone
+ * (paranoid: false so a soft-deleted row is still found and restored —
+ * matches ReplacementModels/replacement.service.ts's lockInventory
+ * precedent); a hard-missing row has nothing left to restore against and is
+ * silently skipped rather than blocking the cancellation itself.
+ */
+async function restoreStockForCancelledOrder(orderId: number, transaction: Transaction): Promise<void> {
+  const orderItems = await OrderItem.findAll({ where: { order_id: orderId }, transaction });
+  const sortedItems = [...orderItems].sort((a, b) => {
+    const productDelta = (a.product_id ?? 0) - (b.product_id ?? 0);
+    if (productDelta !== 0) return productDelta;
+    return (a.product_variant_id ?? 0) - (b.product_variant_id ?? 0);
+  });
+
+  for (const item of sortedItems) {
+    if (item.product_id === null) continue;
+    const product = await Product.findByPk(item.product_id, { transaction, lock: transaction.LOCK.UPDATE, paranoid: false });
+    if (!product) continue;
+
+    if (item.product_variant_id !== null) {
+      const variant = await ProductVariant.findByPk(item.product_variant_id, { transaction, lock: transaction.LOCK.UPDATE, paranoid: false });
+      if (!variant) continue;
+      variant.stock += item.quantity;
+      await variant.save({ transaction });
+    } else {
+      product.stock += item.quantity;
+      await product.save({ transaction });
+    }
+  }
+}
+
 export const AdminOrderService = {
   async getSummary(): Promise<AdminOrderSummaryJSON> {
     const rows = (await Order.findAll({
@@ -811,8 +850,8 @@ export const AdminOrderService = {
     return loadAdminOrderDetail(orderId);
   },
 
-  async updateStatus(orderId: number, nextStatus: OrderStatus): Promise<AdminOrderDetailJSON> {
-    return sequelize.transaction(async (t) => {
+  async updateStatus(orderId: number, nextStatus: OrderStatus, admin: { id: number; role: UserRole }): Promise<AdminOrderDetailJSON> {
+    const { detail, pendingRefundId } = await sequelize.transaction(async (t) => {
       const order = await Order.findByPk(orderId, { transaction: t, lock: t.LOCK.UPDATE });
       if (!order) {
         throw new OrderNotFoundError(orderId);
@@ -821,25 +860,60 @@ export const AdminOrderService = {
         throw new OrderInvalidStatusTransitionError(order.status, nextStatus);
       }
 
+      // Cancelling an Order that was never paid is a pure status change (no
+      // money or stock ever moved for it) and stays open to any admin.
+      // Cancelling a PAID Order now restores stock and triggers a real
+      // refund — the same real-money action the Return flow already
+      // restricts to super_admin (admin-refund.routes.ts) — so it gets the
+      // same restriction here.
+      const isPaidCancellation = nextStatus === "cancelled" && order.payment_status === "paid";
+      if (isPaidCancellation && admin.role !== "super_admin") {
+        throw new OrderCancelRequiresSuperAdminError(order.id);
+      }
+
       order.status = nextStatus;
       if (nextStatus === "cancelled") {
         order.cancelled_at = new Date();
       }
-      // Deliberately payment_status/fulfilment_status/stock/Cart/shipment are
-      // never touched here — those are independent state machines and belong
-      // to the future Payment/Shipping stages (V1 locked rule).
+      // fulfilment_status/shipment are still never touched here — those
+      // remain independent state machines (V1 locked rule). payment_status
+      // is likewise never hand-set directly; when isPaidCancellation is
+      // true it instead moves later, through the same PayU-verified refund
+      // finalization path the Return flow already uses.
+
+      let pendingRefundId: number | null = null;
+      if (isPaidCancellation) {
+        await restoreStockForCancelledOrder(order.id, t);
+        const refund = await RefundService.createPendingCancellationRefund(admin.id, order, t);
+        pendingRefundId = refund.id;
+      }
+
       await order.save({ transaction: t });
 
       // Read back within the SAME transaction — a separate un-transacted read
       // here would run on a different connection and could see the
       // pre-commit snapshot, returning stale data even though the write
       // itself succeeded.
-      return loadAdminOrderDetail(order.id, t);
+      return { detail: await loadAdminOrderDetail(order.id, t), pendingRefundId };
     });
+
+    if (pendingRefundId === null) {
+      return detail;
+    }
+
+    // PayU call deliberately outside the transaction above — the Refund row
+    // is already durably committed alongside the cancellation and stock
+    // restore. Re-read after dispatch so the response reflects whatever the
+    // dispatch could determine synchronously (usually "processing"; a
+    // definitive "refunded" only lands once PayU's webhook/recheck confirms).
+    await RefundService.dispatchRefund(pendingRefundId);
+    return loadAdminOrderDetail(orderId);
   },
 
-  async bulkUpdateStatus(ids: number[], nextStatus: OrderStatus): Promise<BulkUpdateOrderStatusResult> {
-    return sequelize.transaction(async (t) => {
+  async bulkUpdateStatus(ids: number[], nextStatus: OrderStatus, admin: { id: number; role: UserRole }): Promise<BulkUpdateOrderStatusResult> {
+    const pendingRefundIds: number[] = [];
+
+    const result = await sequelize.transaction(async (t) => {
       let updated = 0;
       let skipped = 0;
       const uniqueIds = Array.from(new Set(ids));
@@ -850,16 +924,40 @@ export const AdminOrderService = {
           skipped += 1;
           continue;
         }
+
+        const isPaidCancellation = nextStatus === "cancelled" && order.payment_status === "paid";
+        if (isPaidCancellation && admin.role !== "super_admin") {
+          // Skip rather than fail the whole batch — matches the existing
+          // "skip invalid, keep processing the rest" bulk semantics above.
+          skipped += 1;
+          continue;
+        }
+
         order.status = nextStatus;
         if (nextStatus === "cancelled") {
           order.cancelled_at = new Date();
         }
+
+        if (isPaidCancellation) {
+          await restoreStockForCancelledOrder(order.id, t);
+          const refund = await RefundService.createPendingCancellationRefund(admin.id, order, t);
+          pendingRefundIds.push(refund.id);
+        }
+
         await order.save({ transaction: t });
         updated += 1;
       }
 
       return { updated, skipped };
     });
+
+    // Sequential, after the transaction has committed — same "commit first,
+    // call the provider after" rule as the single-order path above.
+    for (const refundId of pendingRefundIds) {
+      await RefundService.dispatchRefund(refundId);
+    }
+
+    return result;
   },
 
   async addNote(orderId: number, admin: { id: number; name: string }, input: AddOrderNoteInput): Promise<AdminOrderNoteJSON> {

@@ -47,6 +47,16 @@ export async function handleAdminReviewReturn(req: Request, res: Response, next:
   }
 }
 
+export async function handleAdminMarkItemReceived(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const returnId = parseReturnId(req.params.returnId);
+    const result = await ReturnService.markItemReceived(requireAdmin(req).id, returnId);
+    sendSuccess(res, 200, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function handleAdminAddReturnNote(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const returnId = parseReturnId(req.params.returnId);

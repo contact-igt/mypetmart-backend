@@ -22,6 +22,8 @@ export class ReturnRequest extends Model<InferAttributes<ReturnRequest>, InferCr
   declare resolution_note: string | null;
   declare evidence_image_key: string | null;
   declare evidence_image_url: string | null;
+  declare item_received_at: Date | null;
+  declare item_received_by_admin_id: ForeignKey<User["id"]> | null;
   declare requested_at: CreationOptional<Date>;
   declare resolved_at: Date | null;
   declare created_at: CreationOptional<Date>;
@@ -64,6 +66,8 @@ export function initializeReturnRequestTable(sequelize: Sequelize): typeof Retur
       resolution_note: { type: DataTypes.TEXT, allowNull: true },
       evidence_image_key: { type: DataTypes.STRING(512), allowNull: true, validate: { len: [0, 512] } },
       evidence_image_url: { type: DataTypes.STRING(1000), allowNull: true, validate: { len: [0, 1000] } },
+      item_received_at: { type: DataTypes.DATE, allowNull: true },
+      item_received_by_admin_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
       requested_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
       resolved_at: { type: DataTypes.DATE, allowNull: true },
       created_at: DataTypes.DATE,
@@ -77,7 +81,8 @@ export function initializeReturnRequestTable(sequelize: Sequelize): typeof Retur
         { fields: ["status", "requested_at"], name: "return_requests_status_requested_at_idx" },
         { fields: ["order_id"], name: "return_requests_order_id_idx" },
         { fields: ["order_item_id"], name: "return_requests_order_item_id_idx" },
-        { fields: ["user_id"], name: "return_requests_user_id_idx" }
+        { fields: ["user_id"], name: "return_requests_user_id_idx" },
+        { fields: ["item_received_by_admin_id"], name: "return_requests_item_received_by_admin_id_idx" }
       ]
     }
   );
