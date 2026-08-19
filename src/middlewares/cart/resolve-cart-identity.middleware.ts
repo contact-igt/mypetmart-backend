@@ -23,7 +23,7 @@ function mintGuestCookie(res: Response): string {
   res.cookie(cartConfig.guestCookieName, rawToken, {
     httpOnly: true,
     secure: isProduction,
-    sameSite: "lax",
+    sameSite: isProduction ? "none" : "lax",
     path: CART_GUEST_COOKIE_PATH,
     maxAge: CART_GUEST_COOKIE_MAX_AGE_MS
   });
@@ -49,7 +49,7 @@ export function clearGuestCartCookie(res: Response): void {
   res.clearCookie(cartConfig.guestCookieName, {
     httpOnly: true,
     secure: isProduction,
-    sameSite: "lax",
+    sameSite: isProduction ? "none" : "lax",
     path: CART_GUEST_COOKIE_PATH
   });
 }

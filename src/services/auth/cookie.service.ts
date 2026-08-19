@@ -25,7 +25,7 @@ export const CookieService = {
     res.cookie(cookieName, token, {
       httpOnly: true,
       secure: isProduction,
-      sameSite: "lax",
+      sameSite: isProduction ? "none" : "lax",
       path,
       maxAge
     });
@@ -39,7 +39,7 @@ export const CookieService = {
     res.clearCookie(cookieName, {
       httpOnly: true,
       secure: isProduction,
-      sameSite: "lax",
+      sameSite: isProduction ? "none" : "lax",
       path
     });
   },
@@ -53,7 +53,7 @@ export const CookieService = {
     res.cookie(cookieName, token, {
       httpOnly: true,
       secure: isProduction,
-      sameSite: "lax",
+      sameSite: isProduction ? "none" : "lax",
       path,
       maxAge
     });
@@ -67,7 +67,7 @@ export const CookieService = {
     res.clearCookie(cookieName, {
       httpOnly: true,
       secure: isProduction,
-      sameSite: "lax",
+      sameSite: isProduction ? "none" : "lax",
       path
     });
   },
@@ -81,7 +81,7 @@ export const CookieService = {
     res.cookie(cookieName, token, {
       httpOnly: true,
       secure: isProduction,
-      sameSite: "lax",
+      sameSite: isProduction ? "none" : "lax",
       path,
       maxAge
     });
@@ -95,7 +95,7 @@ export const CookieService = {
     res.clearCookie(cookieName, {
       httpOnly: true,
       secure: isProduction,
-      sameSite: "lax",
+      sameSite: isProduction ? "none" : "lax",
       path
     });
   }
