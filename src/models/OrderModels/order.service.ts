@@ -26,6 +26,7 @@ import { buildBusinessReference } from "../../utils/reference-generator.js";
 import { formatMoney, formatPaiseAsMoney, parseMoneyToPaise } from "../../utils/product-money.js";
 import type { CartIdentity } from "../CartModels/cart.types.js";
 import type { InlineAddressInput } from "../CheckoutModels/checkout.types.js";
+import { PaymentService } from "../PaymentModels/payment.service.js";
 import { RefundService } from "../RefundModels/refund.service.js";
 import { ShipmentService } from "../ShipmentModels/shipment.service.js";
 import type { ShipmentJSON } from "../ShipmentModels/shipment.types.js";
@@ -306,6 +307,36 @@ async function getItemCountsByOrderId(orderIds: number[]): Promise<Map<number, n
   return map;
 }
 
+/**
+ * Reconciles an existing "pending" Order's most recent Payment with PayU
+ * BEFORE createOrder decides whether that Order still blocks a new one.
+ * Deliberately runs outside any transaction (a PayU network call must never
+ * happen inside an open DB transaction — same rule PaymentService follows)
+ * and BEFORE createOrder's own transaction opens. Closes the gap where a
+ * customer/guest could be stuck unable to place a new Order because an old
+ * one still looks "pending" locally even though PayU actually captured
+ * payment for it — this is exactly the scenario reconcilePendingAttempt
+ * exists to catch, just triggered from the "place a new Order" entry point
+ * instead of the payment ones. A reconciliation failure (network/provider
+ * issue) is swallowed by reconcilePendingAttempt itself; createOrder simply
+ * proceeds with whatever the last-known local state is, same as before this
+ * existed.
+ */
+async function reconcileExistingPendingOrderPayment(identity: CartIdentity): Promise<void> {
+  const where = identity.type === "customer" ? { user_id: identity.userId, status: "pending" as const } : { guest_identity_hash: identity.tokenHash, status: "pending" as const };
+  const pendingOrder = await Order.findOne({ where });
+  if (!pendingOrder) {
+    return;
+  }
+
+  const payment = await Payment.findOne({ where: { order_id: pendingOrder.id, status: "pending" }, order: [["id", "DESC"]] });
+  if (!payment) {
+    return;
+  }
+
+  await PaymentService.reconcilePendingAttempt(payment);
+}
+
 export const OrderService = {
   /**
    * Creates a pending Order from the caller's current active Cart — customer
@@ -341,6 +372,8 @@ export const OrderService = {
    * back on if the original response never arrived.
    */
   async createOrder(identity: CartIdentity, input: CreateOrderInput): Promise<CreateOrderResultJSON> {
+    await reconcileExistingPendingOrderPayment(identity);
+
     return sequelize.transaction(async (t) => {
       let cart: Cart | null = null;
       let contactEmail: string;
