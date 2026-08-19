@@ -13,6 +13,7 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   orderNotes: "order_notes",
   payments: "payments",
   shipments: "shipments",
+  shipmentTrackingEvents: "shipment_tracking_events",
   returnRequests: "return_requests",
   returnNotes: "return_notes",
   refunds: "refunds",
@@ -77,7 +78,27 @@ export type OrderCommerceException = (typeof ORDER_COMMERCE_EXCEPTION_VALUES)[nu
 export const SHIPPING_METHOD_VALUES = ["standard", "express"] as const;
 export type ShippingMethod = (typeof SHIPPING_METHOD_VALUES)[number];
 
-export const SHIPMENT_STATUS_VALUES = ["pending", "processing", "shipped", "delivered", "failed", "cancelled"] as const;
+export const SHIPMENT_SOURCE_TYPE_VALUES = ["order", "replacement"] as const;
+export type ShipmentSourceType = (typeof SHIPMENT_SOURCE_TYPE_VALUES)[number];
+
+export const SHIPMENT_STATUS_VALUES = [
+  "pending",
+  "provider_status_unknown",
+  "created",
+  "awb_assigned",
+  "pickup_pending",
+  "picked_up",
+  "in_transit",
+  "out_for_delivery",
+  "delivered",
+  "delivery_exception",
+  "ndr",
+  "rto_initiated",
+  "rto_in_transit",
+  "rto_delivered",
+  "cancelled",
+  "failed"
+] as const;
 export type ShipmentStatus = (typeof SHIPMENT_STATUS_VALUES)[number];
 
 export const RETURN_TYPE_VALUES = ["return", "replacement"] as const;

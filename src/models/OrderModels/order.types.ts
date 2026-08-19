@@ -1,5 +1,6 @@
 import type { FulfilmentStatus, OrderStatus, PaymentStatus } from "../../constants/database.constants.js";
 import type { InlineAddressInput } from "../CheckoutModels/checkout.types.js";
+import type { ShipmentJSON } from "../ShipmentModels/shipment.types.js";
 
 // Exactly one of the two must be present — enforced by createOrderSchema's
 // Zod refine, not by this type. savedAddressId is customer-only (an
@@ -61,6 +62,7 @@ export type OrderDetailJSON = OrderListItemJSON & {
   cancelledAt: string | null;
   createdAt: string;
   updatedAt: string;
+  shipment?: ShipmentJSON;
 };
 
 // Additive-only wrapper around OrderDetailJSON used solely by Order Creation's
@@ -158,16 +160,7 @@ export type AdminOrderPaymentJSON = {
   createdAt: string;
 };
 
-export type AdminOrderShipmentJSON = {
-  id: number;
-  method: string;
-  carrier: string | null;
-  trackingNumber: string | null;
-  status: string;
-  shippedAt: string | null;
-  deliveredAt: string | null;
-  createdAt: string;
-};
+export type AdminOrderShipmentJSON = ShipmentJSON;
 
 export type AdminOrderNoteJSON = {
   id: number;

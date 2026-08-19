@@ -1,7 +1,7 @@
 /**
  * Centralized business reference code generator.
  */
-export function buildBusinessReference(type: "customer" | "admin" | "super_admin" | "order" | "return" | "enquiry" | "payment" | "refund" | "replacement", id: number): string {
+export function buildBusinessReference(type: "customer" | "admin" | "super_admin" | "order" | "return" | "enquiry" | "payment" | "refund" | "replacement" | "shipment", id: number): string {
   let prefix: string;
   switch (type) {
     case "customer":
@@ -30,6 +30,9 @@ export function buildBusinessReference(type: "customer" | "admin" | "super_admin
       break;
     case "replacement":
       prefix = "RPL";
+      break;
+    case "shipment":
+      prefix = "SHP";
       break;
     default:
       throw new Error(`Unsupported business reference type: ${type as string}`);

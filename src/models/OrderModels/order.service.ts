@@ -18,6 +18,7 @@ import {
   ProductVariant,
   ReturnRequest,
   Shipment,
+  ShipmentTrackingEvent,
   User
 } from "../../database/tables/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
@@ -25,6 +26,8 @@ import { buildBusinessReference } from "../../utils/reference-generator.js";
 import { formatMoney, formatPaiseAsMoney, parseMoneyToPaise } from "../../utils/product-money.js";
 import type { CartIdentity } from "../CartModels/cart.types.js";
 import type { InlineAddressInput } from "../CheckoutModels/checkout.types.js";
+import { ShipmentService } from "../ShipmentModels/shipment.service.js";
+import type { ShipmentJSON } from "../ShipmentModels/shipment.types.js";
 import { getValidNextOrderStatuses, isValidOrderStatusTransition } from "./order.constants.js";
 import {
   GuestOrderNotFoundError,
@@ -217,8 +220,8 @@ function generateGuestAccessToken(): { rawToken: string; tokenHash: string } {
 // The guest-facing lookup response strips shipping coordinates — a public,
 // unauthenticated recovery link should not carry precise geolocation, unlike
 // the authenticated customer/admin detail views.
-function toGuestOrderDetailJSON(order: Order, items: OrderItem[]): GuestOrderDetailJSON {
-  const detail = toOrderDetailJSON(order, items);
+function toGuestOrderDetailJSON(order: Order, items: OrderItem[], shipment: ShipmentJSON | null): GuestOrderDetailJSON {
+  const detail = toOrderDetailJSON(order, items, shipment);
   const { latitude: _latitude, longitude: _longitude, ...shippingAddress } = detail.shippingAddress;
   return { ...detail, shippingAddress };
 }
@@ -270,7 +273,7 @@ function toOrderListItemJSON(order: Order, itemCount: number): OrderListItemJSON
   };
 }
 
-function toOrderDetailJSON(order: Order, items: OrderItem[]): OrderDetailJSON {
+function toOrderDetailJSON(order: Order, items: OrderItem[], shipment: ShipmentJSON | null = null): OrderDetailJSON {
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
   return {
     ...toOrderListItemJSON(order, itemCount),
@@ -279,7 +282,8 @@ function toOrderDetailJSON(order: Order, items: OrderItem[]): OrderDetailJSON {
     items: items.map(toOrderItemJSON),
     cancelledAt: order.cancelled_at ? order.cancelled_at.toISOString() : null,
     createdAt: order.created_at.toISOString(),
-    updatedAt: order.updated_at.toISOString()
+    updatedAt: order.updated_at.toISOString(),
+    ...(shipment ? { shipment } : {})
   };
 }
 
@@ -544,8 +548,11 @@ export const OrderService = {
     if (!order) {
       throw new GuestOrderNotFoundError();
     }
-    const items = await OrderItem.findAll({ where: { order_id: order.id }, order: [["id", "ASC"]] });
-    return toGuestOrderDetailJSON(order, items);
+    const [items, shipment] = await Promise.all([
+      OrderItem.findAll({ where: { order_id: order.id }, order: [["id", "ASC"]] }),
+      ShipmentService.getForOrder(order.id)
+    ]);
+    return toGuestOrderDetailJSON(order, items, shipment);
   },
 
   async listCustomerOrders(userId: number, query: CustomerOrderListQuery): Promise<CustomerOrderListResult> {
@@ -579,8 +586,11 @@ export const OrderService = {
     if (!order) {
       throw new OrderNotFoundError(orderId);
     }
-    const items = await OrderItem.findAll({ where: { order_id: order.id }, order: [["id", "ASC"]] });
-    return toOrderDetailJSON(order, items);
+    const [items, shipment] = await Promise.all([
+      OrderItem.findAll({ where: { order_id: order.id }, order: [["id", "ASC"]] }),
+      ShipmentService.getForOrder(order.id)
+    ]);
+    return toOrderDetailJSON(order, items, shipment);
   }
 };
 
@@ -625,16 +635,7 @@ function toAdminOrderPaymentJSON(payment: Payment): AdminOrderPaymentJSON {
 }
 
 function toAdminOrderShipmentJSON(shipment: Shipment): AdminOrderShipmentJSON {
-  return {
-    id: shipment.id,
-    method: shipment.method,
-    carrier: shipment.carrier,
-    trackingNumber: shipment.tracking_number,
-    status: shipment.status,
-    shippedAt: shipment.shipped_at ? shipment.shipped_at.toISOString() : null,
-    deliveredAt: shipment.delivered_at ? shipment.delivered_at.toISOString() : null,
-    createdAt: shipment.created_at.toISOString()
-  };
+  return ShipmentService.toJSON(shipment);
 }
 
 function toAdminOrderNoteJSON(note: OrderNote): AdminOrderNoteJSON {
@@ -685,7 +686,7 @@ async function loadAdminOrderDetail(orderId: number, transaction?: Transaction):
       { model: User, as: "user" },
       { model: OrderItem, as: "items" },
       { model: Payment, as: "payments" },
-      { model: Shipment, as: "shipments" },
+      { model: Shipment, as: "shipments", include: [{ model: ShipmentTrackingEvent, as: "trackingEvents" }] },
       { model: OrderNote, as: "notes", include: [{ model: User, as: "author" }] },
       { model: ReturnRequest, as: "returns" }
     ],
@@ -700,7 +701,8 @@ async function loadAdminOrderDetail(orderId: number, transaction?: Transaction):
   }
 
   const items = order.items ?? [];
-  const base = toOrderDetailJSON(order, items);
+  const normalShipment = (order.shipments ?? []).find((shipment) => shipment.source_type === "order") ?? null;
+  const base = toOrderDetailJSON(order, items, normalShipment ? ShipmentService.toJSON(normalShipment) : null);
 
   return {
     ...base,

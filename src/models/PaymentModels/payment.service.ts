@@ -135,9 +135,13 @@ export const PaymentService = {
     } catch (error) {
       if (error instanceof PaymentAttemptAlreadyActiveError) {
         const existing = await Payment.findOne({ where: { order_id: orderId, status: "pending" } });
+<<<<<<< HEAD
         if (existing) {
           return existing;
         }
+=======
+        if (existing) return existing;
+>>>>>>> 0f43ef2a241aba508192045040178fdac57a7b3f
       }
       throw error;
     }

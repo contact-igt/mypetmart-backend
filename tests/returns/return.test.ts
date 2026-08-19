@@ -399,16 +399,15 @@ describe("Returns", () => {
       expect(await Refund.count({ where: { return_request_id: created.body.data.id } })).toBe(0);
     });
 
-    it("completes once and keeps repeated status updates idempotent", async () => {
+    it("rejects manual completion before provider-verified replacement delivery", async () => {
       const { orderId, orderItemId } = await createDeliveredPaidOrder(customerAToken, adminToken);
       const created = await request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "Damaged", resolution: "replacement" });
       await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/review`).set("Authorization", `Bearer ${adminToken}`).send({ action: "approve" });
 
       const first = await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/replacement`).set("Authorization", `Bearer ${adminToken}`).send({ status: "completed" });
-      const second = await request(app).patch(`${ADMIN_RETURNS_URL}/${created.body.data.id}/replacement`).set("Authorization", `Bearer ${adminToken}`).send({ status: "completed" });
-      expect(first.status).toBe(200);
-      expect(second.status).toBe(200);
-      expect((await ReturnRequest.findByPk(created.body.data.id))!.status).toBe("resolved");
+      expect(first.status).toBe(400);
+      expect((await ReturnRequest.findByPk(created.body.data.id))!.status).toBe("approved");
+      expect((await Replacement.findOne({ where: { return_request_id: created.body.data.id } }))!.status).toBe("processing");
     });
   });
 });

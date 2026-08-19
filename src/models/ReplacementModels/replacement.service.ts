@@ -14,8 +14,9 @@ import {
   ReplacementStockUnavailableError
 } from "./replacement.errors.js";
 import type { ReplacementJSON, UpdateReplacementInput } from "./replacement.types.js";
+import type { ShipmentJSON } from "../ShipmentModels/shipment.types.js";
 
-function toJSON(replacement: Replacement): ReplacementJSON {
+function toJSON(replacement: Replacement, shipment: ShipmentJSON | null = null): ReplacementJSON {
   return {
     id: replacement.id,
     replacementNumber: replacement.replacement_number,
@@ -25,7 +26,8 @@ function toJSON(replacement: Replacement): ReplacementJSON {
     quantity: replacement.quantity,
     stockConsumedAt: replacement.stock_consumed_at?.toISOString() ?? null,
     completedAt: replacement.completed_at?.toISOString() ?? null,
-    createdAt: replacement.created_at.toISOString()
+    createdAt: replacement.created_at.toISOString(),
+    ...(shipment ? { shipment } : {})
   };
 }
 
@@ -129,13 +131,6 @@ export const ReplacementService = {
         if (!(await consumeStock(replacement, transaction))) throw new ReplacementStockUnavailableError();
         replacement.status = "processing";
         await addAuditNote(returnRequest.id, adminId, "Replacement inventory allocated; processing started.", transaction);
-      } else if (replacement.status === "processing" && input.status === "completed") {
-        replacement.status = "completed";
-        replacement.completed_at = new Date();
-        returnRequest.status = "resolved";
-        returnRequest.resolved_at = replacement.completed_at;
-        await returnRequest.save({ transaction });
-        await addAuditNote(returnRequest.id, adminId, "Replacement completed.", transaction);
       } else {
         throw new ReplacementInvalidStatusTransitionError(replacement.status, input.status);
       }

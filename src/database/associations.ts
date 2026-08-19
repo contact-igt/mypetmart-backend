@@ -27,6 +27,7 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
     ReturnNote,
     ReturnRequest,
     Shipment,
+    ShipmentTrackingEvent,
     User,
     Wishlist
   } = models;
@@ -90,6 +91,10 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
 
   Order.hasMany(Shipment, { foreignKey: "order_id", as: "shipments" });
   Shipment.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+  Replacement.hasOne(Shipment, { foreignKey: "replacement_id", as: "shipment" });
+  Shipment.belongsTo(Replacement, { foreignKey: "replacement_id", as: "replacement" });
+  Shipment.hasMany(ShipmentTrackingEvent, { foreignKey: "shipment_id", as: "trackingEvents" });
+  ShipmentTrackingEvent.belongsTo(Shipment, { foreignKey: "shipment_id", as: "shipment" });
 
   Order.hasMany(ReturnRequest, { foreignKey: "order_id", as: "returns" });
   ReturnRequest.belongsTo(Order, { foreignKey: "order_id", as: "order" });

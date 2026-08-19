@@ -1,4 +1,5 @@
 import type { ReplacementStatus } from "../../constants/database.constants.js";
+import type { ShipmentJSON } from "../ShipmentModels/shipment.types.js";
 
 export type ReplacementJSON = {
   id: number;
@@ -10,8 +11,7 @@ export type ReplacementJSON = {
   stockConsumedAt: string | null;
   completedAt: string | null;
   createdAt: string;
+  shipment?: ShipmentJSON;
 };
 
-export type UpdateReplacementInput = {
-  status: "processing" | "completed";
-};
+export type UpdateReplacementInput = { status: "processing" };
