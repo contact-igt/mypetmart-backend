@@ -340,7 +340,7 @@ describe("Returns", () => {
     it("decrements replacement stock exactly once and blocks duplicate approval", async () => {
       const { orderId, orderItemId } = await createDeliveredPaidOrder(customerAToken, adminToken);
       const orderItem = (await OrderItem.findByPk(orderItemId))!;
-      const product = (await Product.findByPk(orderItem.product_id))!;
+      const product = (await Product.findByPk(orderItem.product_id!))!;
       const stockBefore = product.stock;
       const created = await request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "Damaged", resolution: "replacement" });
 
@@ -355,7 +355,7 @@ describe("Returns", () => {
     it("records stock_unavailable without decrementing or auto-refunding", async () => {
       const { orderId, orderItemId } = await createDeliveredPaidOrder(customerAToken, adminToken);
       const orderItem = (await OrderItem.findByPk(orderItemId))!;
-      const product = (await Product.findByPk(orderItem.product_id))!;
+      const product = (await Product.findByPk(orderItem.product_id!))!;
       product.stock = 0;
       await product.save();
       const created = await request(app).post(RETURNS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId, orderItemId, quantity: 1, reason: "Damaged", resolution: "replacement" });
@@ -370,7 +370,7 @@ describe("Returns", () => {
     it("serializes last-stock approvals so stock never becomes negative", async () => {
       const { orderId, orderItemId } = await createDeliveredPaidOrder(customerAToken, adminToken, { quantity: 2 });
       const orderItem = (await OrderItem.findByPk(orderItemId))!;
-      const product = (await Product.findByPk(orderItem.product_id))!;
+      const product = (await Product.findByPk(orderItem.product_id!))!;
       product.stock = 1;
       await product.save();
       const [a, b] = await Promise.all([

@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 import { paymentConfig } from "../../config/payment.config.js";
 import { sequelize } from "../../database/index.js";
 import { Order } from "../../database/tables/OrderTable/index.js";
@@ -7,7 +9,6 @@ import { IdSequenceService } from "../../database/sequences/id-sequence.service.
 import { TokenService } from "../../services/auth/token.service.js";
 import { logger } from "../../utils/logger.js";
 import { formatMoney } from "../../utils/product-money.js";
-import { buildBusinessReference } from "../../utils/reference-generator.js";
 import { OrderNotFoundError } from "../OrderModels/order.errors.js";
 import {
   OrderAlreadyPaidError,
@@ -29,6 +30,24 @@ import type {
   PaymentInitiationResultJSON,
   PaymentStatusResultJSON
 } from "./payment.types.js";
+
+/**
+ * Generates the PayU merchant transaction id (txnid) for a Payment Attempt.
+ * Unlike buildBusinessReference (used for ORD-/CUS-/ADM- style internal
+ * display codes, which are fine being deterministic from an auto-increment
+ * id), PayU requires txnid to be globally unique for the merchant key
+ * forever — not just unique within this database. A purely id-derived value
+ * like "PAY-000001" collides the moment the payments table is reseeded or
+ * restored (the id sequence restarts from 1), reusing a txnid PayU's test
+ * or live environment already captured previously, which PayU then rejects
+ * outright ("This txnid has been used previously or was successfully
+ * captured."). The payment id is kept as a prefix for support traceability;
+ * the random suffix is what actually guarantees uniqueness across resets.
+ */
+function generatePayuTxnId(paymentId: number): string {
+  const random = randomBytes(5).toString("hex");
+  return `PAY-${String(paymentId).padStart(6, "0")}-${random}`;
+}
 
 export const PaymentService = {
   /**
@@ -117,8 +136,6 @@ export const PaymentService = {
       if (error instanceof PaymentAttemptAlreadyActiveError) {
         const existing = await Payment.findOne({ where: { order_id: orderId, status: "pending" } });
         if (existing) {
-          existing.provider_order_id = `${buildBusinessReference("payment", existing.id)}-${Date.now()}`;
-          await existing.save();
           return existing;
         }
       }
@@ -148,7 +165,7 @@ export const PaymentService = {
       if (payment.provider_order_id) {
         return payment;
       }
-      payment.provider_order_id = `${buildBusinessReference("payment", payment.id)}-${Date.now()}`;
+      payment.provider_order_id = generatePayuTxnId(payment.id);
       await payment.save({ transaction: t });
       return payment;
     });
