@@ -171,6 +171,8 @@ const environmentSchema = z
 
     CART_GUEST_COOKIE_NAME: requiredString("CART_GUEST_COOKIE_NAME").default("mypetmart_guest_cart"),
 
+    NEWSLETTER_VERIFICATION_TTL_HOURS: integerFromString("NEWSLETTER_VERIFICATION_TTL_HOURS", 1, 720).default(48),
+
     SMTP_HOST: optionalTrimmedStringSchema,
     SMTP_PORT: integerFromString("SMTP_PORT", 1, 65535).default(587),
     SMTP_SECURE: booleanFromString("SMTP_SECURE").default(false),

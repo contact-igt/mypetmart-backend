@@ -1,7 +1,7 @@
 import nodemailer, { type Transporter, type SentMessageInfo } from "nodemailer";
 import { environmentConfig } from "../../config/environment.config.js";
 import { logger } from "../../utils/logger.js";
-import { getEmailVerificationTemplate, getPasswordResetTemplate, getPasswordChangedTemplate } from "./email.templates.js";
+import { getEmailVerificationTemplate, getPasswordResetTemplate, getPasswordChangedTemplate, getNewsletterVerificationTemplate } from "./email.templates.js";
 import { maskEmail } from "../auth-challenge/auth-challenge.service.js";
 
 export type EmailSendOptions = {
@@ -123,6 +123,16 @@ export class EmailService {
 
   public async sendPasswordResetOTP(email: string, otp: string, ttlMinutes: number): Promise<boolean> {
     const template = getPasswordResetTemplate(otp, ttlMinutes);
+    return await this.sendEmail({
+      to: email,
+      subject: template.subject,
+      text: template.text,
+      html: template.html
+    });
+  }
+
+  public async sendNewsletterVerification(email: string, verifyUrl: string, ttlHours: number): Promise<boolean> {
+    const template = getNewsletterVerificationTemplate(verifyUrl, ttlHours);
     return await this.sendEmail({
       to: email,
       subject: template.subject,
