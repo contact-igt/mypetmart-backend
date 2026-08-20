@@ -25,6 +25,8 @@ import { adminReturnRouter } from "../../models/ReturnModels/admin-return.routes
 import { adminRefundRouter } from "../../models/RefundModels/admin-refund.routes.js";
 import { payuRefundWebhookRouter } from "../../models/RefundModels/payu-refund-webhook.routes.js";
 import { adminShipmentRouter } from "../../models/ShipmentModels/admin-shipment.routes.js";
+import { storefrontNewsletterRouter } from "../../models/NewsletterModels/storefront-newsletter.routes.js";
+import { adminNewsletterRouter } from "../../models/NewsletterModels/admin-newsletter.routes.js";
 
 export const v1Router = Router();
 
@@ -50,6 +52,11 @@ v1Router.use("/storefront/payments", storefrontPaymentRouter);
 v1Router.use("/payments/payu", payuWebhookRouter);
 v1Router.use("/storefront/returns", storefrontReturnRouter);
 v1Router.use("/admin/returns", adminReturnRouter);
+v1Router.use("/storefront/newsletter", storefrontNewsletterRouter);
+// Registered ahead of adminRefundRouter (mounted broadly at "/admin", gated to
+// super_admin) so /admin/newsletter/* is matched here first instead of falling
+// through into that router's super_admin-only gate.
+v1Router.use("/admin/newsletter", adminNewsletterRouter);
 v1Router.use("/admin", adminRefundRouter);
 v1Router.use("/admin/shipments", adminShipmentRouter);
 v1Router.use("/payments/payu", payuRefundWebhookRouter);

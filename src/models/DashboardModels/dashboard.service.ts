@@ -146,10 +146,11 @@ function fillSeries(buckets: Bucket[], orders: Order[]): DashboardTimeSeriesPoin
       const t = o.placed_at.getTime();
       return t >= b.start.getTime() && t <= b.end.getTime();
     });
+    const paidInBucket = inBucket.filter((o) => o.payment_status === "paid");
     return {
       date: b.key,
       label: b.label,
-      sales: sumBy(inBucket, (o) => Number(o.total)),
+      sales: sumBy(paidInBucket, (o) => Number(o.total)),
       orders: inBucket.length,
       units: sumBy(inBucket, (o) => sumBy(o.items ?? [], (i) => i.quantity))
     };
@@ -453,8 +454,8 @@ export const DashboardService = {
     const prevRangeForSeries = query.compare ? resolvePreviousRange(from, to) : null;
 
     const timeSeries: DashboardSummaryJSON["timeSeries"] = {
-      current: fillSeries(buildBuckets(from, to, groupBy), current.paidOrders),
-      previous: previous && prevRangeForSeries ? fillSeries(buildBuckets(prevRangeForSeries.from, prevRangeForSeries.to, groupBy), previous.paidOrders) : [],
+      current: fillSeries(buildBuckets(from, to, groupBy), current.revenueOrders),
+      previous: previous && prevRangeForSeries ? fillSeries(buildBuckets(prevRangeForSeries.from, prevRangeForSeries.to, groupBy), previous.revenueOrders) : [],
       groupBy
     };
 

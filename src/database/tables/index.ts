@@ -11,6 +11,7 @@ import { Order, initializeOrderTable } from "./OrderTable/index.js";
 import { OrderItem, initializeOrderItemTable } from "./OrderItemTable/index.js";
 import { OrderNote, initializeOrderNoteTable } from "./OrderNoteTable/index.js";
 import { MediaAsset, initializeMediaAssetTable } from "./MediaAssetTable/index.js";
+import { NewsletterSubscriber, initializeNewsletterSubscriberTable } from "./NewsletterSubscriberTable/index.js";
 import { PasswordResetToken, initializePasswordResetTokenTable } from "./PasswordResetTokenTable/index.js";
 import { Payment, initializePaymentTable } from "./PaymentTable/index.js";
 import { Product, initializeProductTable } from "./ProductTable/index.js";
@@ -35,6 +36,7 @@ export {
   Category,
   ContactEnquiry,
   MediaAsset,
+  NewsletterSubscriber,
   Order,
   OrderItem,
   OrderNote,
@@ -79,7 +81,8 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "StoreSetting",
   "AuthChallenge",
   "PasswordResetToken",
-  "Wishlist"
+  "Wishlist",
+  "NewsletterSubscriber"
 ] as const;
 
 export type DatabaseModelName = (typeof EXPECTED_DATABASE_MODEL_NAMES)[number];
@@ -110,6 +113,7 @@ export type DatabaseModelRegistry = Readonly<{
   AuthChallenge: typeof AuthChallenge;
   PasswordResetToken: typeof PasswordResetToken;
   Wishlist: typeof Wishlist;
+  NewsletterSubscriber: typeof NewsletterSubscriber;
 }>;
 
 let initializedRegistry: DatabaseModelRegistry | undefined;
@@ -144,6 +148,7 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeAuthChallengeTable(sequelize);
   initializePasswordResetTokenTable(sequelize);
   initializeWishlistTable(sequelize);
+  initializeNewsletterSubscriberTable(sequelize);
 
   initializedRegistry = Object.freeze({
     User,
@@ -170,7 +175,8 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     StoreSetting,
     AuthChallenge,
     PasswordResetToken,
-    Wishlist
+    Wishlist,
+    NewsletterSubscriber
   });
 
   return initializedRegistry;

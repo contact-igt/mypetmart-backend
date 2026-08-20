@@ -36,6 +36,26 @@ export function getPasswordResetTemplate(otp: string, ttlMinutes: number): { sub
   return { subject, text, html };
 }
 
+export function getNewsletterVerificationTemplate(verifyUrl: string, ttlHours: number): { subject: string; text: string; html: string } {
+  const subject = "Confirm your MyPetMart newsletter subscription";
+  const text = `Confirm your subscription\n\nClick the link below to start receiving the MyPetMart newsletter:\n\n${verifyUrl}\n\nThis link expires in ${ttlHours} hours.\n\nIf you did not request this, you can safely ignore this email.`;
+  const html = `
+    <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; background: #fff5e9; border-radius: 16px; color: #35221b;">
+      <h2 style="color: #d65e2a; margin-top: 0; font-family: 'Baloo 2', sans-serif;">MyPetMart</h2>
+      <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Confirm your subscription</p>
+      <p style="font-size: 14px; line-height: 1.5; color: #35221b;">Click the button below to start receiving the MyPetMart newsletter.</p>
+      <div style="text-align: center; margin: 24px 0;">
+        <a href="${verifyUrl}" style="display: inline-block; background: #d65e2a; color: #ffffff; font-weight: bold; text-decoration: none; padding: 12px 28px; border-radius: 999px; font-size: 14px;">Confirm subscription</a>
+      </div>
+      <p style="font-size: 12px; color: #888; word-break: break-all;">Or paste this link into your browser: ${verifyUrl}</p>
+      <p style="font-size: 14px; color: #35221b;">This link expires in ${ttlHours} hours.</p>
+      <hr style="border: 0; border-top: 1px solid #e5d5c5; margin: 24px 0;" />
+      <p style="font-size: 12px; color: #888;">If you did not request this, you can safely ignore this email.</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 export function getPasswordChangedTemplate(): { subject: string; text: string; html: string } {
   const subject = "Your MyPetMart password was changed";
   const text = `Your MyPetMart account password was successfully changed.\n\nIf you made this change, no action is required.\n\nIf you did not make this change, contact MyPetMart support immediately.`;

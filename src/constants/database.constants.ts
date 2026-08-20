@@ -23,7 +23,8 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   authChallenges: "auth_challenges",
   passwordResetTokens: "password_reset_tokens",
   wishlists: "wishlists",
-  mediaAssets: "media_assets"
+  mediaAssets: "media_assets",
+  newsletterSubscribers: "newsletter_subscribers"
 });
 
 export const AUTH_CHALLENGE_PURPOSE_VALUES = ["email_verification", "password_reset"] as const;
@@ -123,6 +124,13 @@ export type ReplacementStatus = (typeof REPLACEMENT_STATUS_VALUES)[number];
 
 export const CONTACT_ENQUIRY_STATUS_VALUES = ["new", "in_progress", "resolved", "closed"] as const;
 export type ContactEnquiryStatus = (typeof CONTACT_ENQUIRY_STATUS_VALUES)[number];
+
+// V1: capture + double opt-in only (subscribe -> verification email -> confirm
+// link -> unsubscribe link). No campaign-sending/worker states — "pending" is
+// re-used on every fresh subscribe attempt, including a resubscribe after
+// "unsubscribed", so there is only ever one verification flow to reason about.
+export const NEWSLETTER_SUBSCRIBER_STATUS_VALUES = ["pending", "subscribed", "unsubscribed"] as const;
+export type NewsletterSubscriberStatus = (typeof NEWSLETTER_SUBSCRIBER_STATUS_VALUES)[number];
 
 export const DEFAULT_COUNTRY_CODE = "IN";
 export const DEFAULT_CURRENCY_CODE = "INR";

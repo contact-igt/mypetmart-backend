@@ -6,6 +6,7 @@ import {
   DEFAULT_COUNTRY_CODE,
   DEFAULT_CURRENCY_CODE,
   FULFILMENT_STATUS_VALUES,
+  NEWSLETTER_SUBSCRIBER_STATUS_VALUES,
   ORDER_COMMERCE_EXCEPTION_VALUES,
   ORDER_STATUS_VALUES,
   PAYMENT_STATUS_VALUES,
@@ -809,6 +810,32 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         CONSTRAINT \`chk_media_assets_file_size_nonnegative\` CHECK (\`file_size\` >= 0),
         CONSTRAINT \`chk_media_assets_width_nonnegative\` CHECK (\`width\` IS NULL OR \`width\` >= 0),
         CONSTRAINT \`chk_media_assets_height_nonnegative\` CHECK (\`height\` IS NULL OR \`height\` >= 0)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.newsletterSubscribers,
+    migrationName: "044-create-newsletter-subscribers",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.newsletterSubscribers)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`email\` VARCHAR(190) NOT NULL,
+        \`normalized_email\` VARCHAR(190) NOT NULL,
+        \`status\` ${enumSql(NEWSLETTER_SUBSCRIBER_STATUS_VALUES)} NOT NULL DEFAULT 'pending',
+        \`source\` VARCHAR(100) NULL,
+        \`verification_token_hash\` VARCHAR(64) NULL,
+        \`verification_expires_at\` DATETIME NULL,
+        \`verification_sent_at\` DATETIME NULL,
+        \`verified_at\` DATETIME NULL,
+        \`unsubscribe_token_hash\` VARCHAR(64) NULL,
+        \`unsubscribed_at\` DATETIME NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`newsletter_subscribers_normalized_email_unique\` (\`normalized_email\`),
+        UNIQUE KEY \`newsletter_subscribers_verification_token_hash_unique\` (\`verification_token_hash\`),
+        UNIQUE KEY \`newsletter_subscribers_unsubscribe_token_hash_unique\` (\`unsubscribe_token_hash\`),
+        KEY \`newsletter_subscribers_status_idx\` (\`status\`),
+        KEY \`newsletter_subscribers_created_at_idx\` (\`created_at\`)
       ) ${engine};
     `
   }

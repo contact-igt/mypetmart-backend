@@ -152,6 +152,10 @@ describe("Admin Dashboard (real-data)", () => {
     expect(res.body.data.summary.orders.value).toBe(3); // excludes cancelled
     expect(res.body.data.summary.averageOrderValue.value).toBe(400); // 800 / 2 paid orders
     expect(res.body.data.summary.customers.value).toBe(1);
+    expect(res.body.data.timeSeries.current.find((point: { date: string }) => point.date === "2026-06-10")).toMatchObject({
+      orders: 3,
+      sales: 800
+    });
   });
 
   it("returns order status breakdown including cancelled Orders", async () => {
