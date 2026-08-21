@@ -27,6 +27,7 @@ import { payuRefundWebhookRouter } from "../../models/RefundModels/payu-refund-w
 import { adminShipmentRouter } from "../../models/ShipmentModels/admin-shipment.routes.js";
 import { storefrontNewsletterRouter } from "../../models/NewsletterModels/storefront-newsletter.routes.js";
 import { adminNewsletterRouter } from "../../models/NewsletterModels/admin-newsletter.routes.js";
+import { adminSettingsRouter } from "../../models/SettingsModels/admin-settings.routes.js";
 
 export const v1Router = Router();
 
@@ -57,6 +58,9 @@ v1Router.use("/storefront/newsletter", storefrontNewsletterRouter);
 // super_admin) so /admin/newsletter/* is matched here first instead of falling
 // through into that router's super_admin-only gate.
 v1Router.use("/admin/newsletter", adminNewsletterRouter);
+// Same reasoning as /admin/newsletter above — registered ahead of the broad
+// adminRefundRouter mount so /admin/settings/* is matched here first.
+v1Router.use("/admin/settings", adminSettingsRouter);
 v1Router.use("/admin", adminRefundRouter);
 v1Router.use("/admin/shipments", adminShipmentRouter);
 v1Router.use("/payments/payu", payuRefundWebhookRouter);
