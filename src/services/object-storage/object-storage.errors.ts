@@ -28,6 +28,20 @@ export class ImageTooLargeError extends ObjectStorageError {
   }
 }
 
+export class MediaTypeNotAllowedError extends ObjectStorageError {
+  public constructor() {
+    super(415, "MEDIA_TYPE_NOT_ALLOWED", "Only JPEG, PNG, WebP images or MP4 video are allowed in the Media Library.");
+    this.name = "MediaTypeNotAllowedError";
+  }
+}
+
+export class VideoTooLargeError extends ObjectStorageError {
+  public constructor(maximumBytes: number) {
+    super(413, "VIDEO_TOO_LARGE", `Video files must not exceed ${maximumBytes} bytes.`);
+    this.name = "VideoTooLargeError";
+  }
+}
+
 export class InvalidImageUploadIntentError extends ObjectStorageError {
   public constructor() {
     super(400, "INVALID_IMAGE_UPLOAD_INTENT", "The image upload authorization is invalid or expired.");

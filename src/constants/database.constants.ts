@@ -6,6 +6,8 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   products: "products",
   productVariants: "product_variants",
   productImages: "product_images",
+  productFeatures: "product_features",
+  productMediaAssignments: "product_media_assignments",
   carts: "carts",
   cartItems: "cart_items",
   orders: "orders",
@@ -45,6 +47,19 @@ export type PetType = (typeof PET_TYPE_VALUES)[number];
 
 export const PRODUCT_STATUS_VALUES = ["active", "draft", "archived"] as const;
 export type ProductStatus = (typeof PRODUCT_STATUS_VALUES)[number];
+
+// V1 media library types: image (existing) and video (MP4 only — see
+// object-storage.service.ts's MEDIA_LIBRARY_VIDEO_TYPES). Derived server-side
+// from the verified upload's MIME type at MediaAssetService.completeUpload,
+// never trusted from client input.
+export const MEDIA_ASSET_TYPE_VALUES = ["image", "video"] as const;
+export type MediaAssetType = (typeof MEDIA_ASSET_TYPE_VALUES)[number];
+
+// V1 Product<->MediaAsset assignment roles (Phase B). Enhanced Content
+// (future ProductContentBlock) deliberately does not reuse this enum — see
+// product_media_assignments schema comment.
+export const PRODUCT_MEDIA_ROLE_VALUES = ["product_video", "testimonial_video"] as const;
+export type ProductMediaRole = (typeof PRODUCT_MEDIA_ROLE_VALUES)[number];
 
 export const CART_STATUS_VALUES = ["active", "ordered", "abandoned"] as const;
 export type CartStatus = (typeof CART_STATUS_VALUES)[number];

@@ -13,6 +13,8 @@ const expectedTables = [
   DATABASE_TABLE_NAMES.products,
   DATABASE_TABLE_NAMES.productVariants,
   DATABASE_TABLE_NAMES.productImages,
+  DATABASE_TABLE_NAMES.productFeatures,
+  DATABASE_TABLE_NAMES.productMediaAssignments,
   DATABASE_TABLE_NAMES.mediaAssets,
   DATABASE_TABLE_NAMES.carts,
   DATABASE_TABLE_NAMES.cartItems,
@@ -38,7 +40,7 @@ const expectedTables = [
 describe("database model registration", () => {
   it("registers all expected models with explicit table names", () => {
     expect(Object.keys(databaseModels)).toEqual([...EXPECTED_DATABASE_MODEL_NAMES]);
-    expect(sequelize.modelManager.models).toHaveLength(27);
+    expect(sequelize.modelManager.models).toHaveLength(29);
 
     const modelNames = getModelList(databaseModels).map((model) => model.name);
     const tableNames = getModelList(databaseModels).map((model) => model.tableName);

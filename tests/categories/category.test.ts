@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { app } from "../../src/app.js";
 import { connectDatabase, disconnectDatabase, sequelize } from "../../src/database/index.js";
-import { User, AuthSession, Category, Product } from "../../src/database/tables/index.js";
+import { User, AuthSession, Category, Product, ProductFeature, ProductMediaAssignment } from "../../src/database/tables/index.js";
 import { PasswordService } from "../../src/services/auth/password.service.js";
 import { SessionService } from "../../src/services/auth/session.service.js";
 import { TokenService } from "../../src/services/auth/token.service.js";
@@ -101,6 +101,10 @@ describe("Stage 12: Categories Backend Integration Tests", () => {
     const existingCats = await Category.findAll({ where: { slug: testSlugs }, paranoid: false });
     if (existingCats.length > 0) {
       const catIds = existingCats.map((c) => c.id);
+      const existingProducts = await Product.findAll({ where: { category_id: catIds }, paranoid: false });
+      const productIds = existingProducts.map((p) => p.id);
+      await ProductFeature.destroy({ where: { product_id: productIds }, force: true });
+      await ProductMediaAssignment.destroy({ where: { product_id: productIds }, force: true });
       await Product.destroy({ where: { category_id: catIds }, force: true });
       await Category.destroy({ where: { id: catIds }, force: true });
     }
@@ -122,6 +126,10 @@ describe("Stage 12: Categories Backend Integration Tests", () => {
     const existingCats = await Category.findAll({ where: { slug: testSlugs }, paranoid: false });
     if (existingCats.length > 0) {
       const catIds = existingCats.map((c) => c.id);
+      const existingProducts = await Product.findAll({ where: { category_id: catIds }, paranoid: false });
+      const productIds = existingProducts.map((p) => p.id);
+      await ProductFeature.destroy({ where: { product_id: productIds }, force: true });
+      await ProductMediaAssignment.destroy({ where: { product_id: productIds }, force: true });
       await Product.destroy({ where: { category_id: catIds }, force: true });
       await Category.destroy({ where: { id: catIds }, force: true });
     }

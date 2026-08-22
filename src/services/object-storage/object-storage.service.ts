@@ -7,7 +7,9 @@ import {
   ImageUploadNotFoundError,
   ImageUploadVerificationFailedError,
   InvalidImageUploadIntentError,
-  R2NotConfiguredError
+  MediaTypeNotAllowedError,
+  R2NotConfiguredError,
+  VideoTooLargeError
 } from "./object-storage.errors.js";
 import { R2ObjectStorageProvider } from "./r2-object-storage.provider.js";
 import type {
@@ -24,10 +26,24 @@ const PRODUCT_IMAGE_TYPES = Object.freeze({
   "image/webp": "webp"
 } as const);
 
+// Media Library-only: the Product direct-image upload path (presignProductImageUpload
+// / verifyProductImageUpload / isAuthorizedProductImageKey) intentionally keeps using
+// PRODUCT_IMAGE_TYPES above and never this superset, so a video can never be attached
+// as a Product's directly-uploaded image.
+const MEDIA_LIBRARY_VIDEO_TYPES = Object.freeze({
+  "video/mp4": "mp4"
+} as const);
+
+const MEDIA_LIBRARY_TYPES = Object.freeze({
+  ...PRODUCT_IMAGE_TYPES,
+  ...MEDIA_LIBRARY_VIDEO_TYPES
+} as const);
+
 const NEW_PRODUCT_IMAGE_KEY_PATTERN = /^products\/(\d+)\/uploads\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f-]{36})\.(jpg|png|webp)$/;
-const MEDIA_ASSET_KEY_PATTERN = /^media\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f-]{36})\.(jpg|png|webp)$/;
+const MEDIA_ASSET_KEY_PATTERN = /^media\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f-]{36})\.(jpg|png|webp|mp4)$/;
 
 type SupportedProductImageType = keyof typeof PRODUCT_IMAGE_TYPES;
+type SupportedMediaLibraryType = keyof typeof MEDIA_LIBRARY_TYPES;
 
 type ProductImageUploadIntent = {
   version: 1;
@@ -47,7 +63,7 @@ type MediaAssetUploadIntent = {
   version: 1;
   scope: "media_asset";
   r2Key: string;
-  contentType: SupportedProductImageType;
+  contentType: SupportedMediaLibraryType;
   sizeBytes: number;
   expiresAtEpochSeconds: number;
 };
@@ -60,6 +76,7 @@ export type ObjectStorageRuntimeConfig = {
   uploadIntentSecret: string | undefined;
   uploadUrlExpirySeconds: number;
   maxImageSizeBytes: number;
+  maxVideoSizeBytes: number;
   orphanGraceHours: number;
 };
 
@@ -74,6 +91,14 @@ function normalizeContentType(value: string): string {
 
 function isSupportedProductImageType(value: string): value is SupportedProductImageType {
   return Object.hasOwn(PRODUCT_IMAGE_TYPES, value);
+}
+
+function isSupportedMediaLibraryType(value: string): value is SupportedMediaLibraryType {
+  return Object.hasOwn(MEDIA_LIBRARY_TYPES, value);
+}
+
+function isMediaLibraryVideoType(value: string): value is keyof typeof MEDIA_LIBRARY_VIDEO_TYPES {
+  return Object.hasOwn(MEDIA_LIBRARY_VIDEO_TYPES, value);
 }
 
 function isSafeProductImageKey(productId: number, key: string): boolean {
@@ -189,12 +214,16 @@ export class ObjectStorageService {
 
   public async presignMediaAssetUpload(input: { contentType: string; sizeBytes: number }): Promise<MediaAssetUploadAuthorization> {
     const contentType = normalizeContentType(input.contentType);
-    if (!isSupportedProductImageType(contentType)) throw new ImageTypeNotAllowedError();
-    if (input.sizeBytes > this.#config.maxImageSizeBytes) throw new ImageTooLargeError(this.#config.maxImageSizeBytes);
+    if (!isSupportedMediaLibraryType(contentType)) throw new MediaTypeNotAllowedError();
+    const isVideo = isMediaLibraryVideoType(contentType);
+    const maxAllowedBytes = isVideo ? this.#config.maxVideoSizeBytes : this.#config.maxImageSizeBytes;
+    if (input.sizeBytes > maxAllowedBytes) {
+      throw isVideo ? new VideoTooLargeError(maxAllowedBytes) : new ImageTooLargeError(maxAllowedBytes);
+    }
     this.ensureConfigured();
 
     const now = new Date();
-    const extension = PRODUCT_IMAGE_TYPES[contentType];
+    const extension = MEDIA_LIBRARY_TYPES[contentType];
     const key = [
       "media",
       String(now.getUTCFullYear()),
@@ -239,12 +268,16 @@ export class ObjectStorageService {
     if (!object) throw new ImageUploadNotFoundError();
     const actualContentType = object.contentType ? normalizeContentType(object.contentType) : "";
     if (actualContentType !== intent.contentType) {
-      throw new ImageUploadVerificationFailedError("The uploaded image content type does not match its authorization.");
+      throw new ImageUploadVerificationFailedError("The uploaded media file's content type does not match its authorization.");
     }
     if (object.sizeBytes === undefined || object.sizeBytes !== intent.sizeBytes) {
-      throw new ImageUploadVerificationFailedError("The uploaded image size does not match its authorization.");
+      throw new ImageUploadVerificationFailedError("The uploaded media file's size does not match its authorization.");
     }
-    if (object.sizeBytes > this.#config.maxImageSizeBytes) throw new ImageTooLargeError(this.#config.maxImageSizeBytes);
+    const isVideo = isMediaLibraryVideoType(intent.contentType);
+    const maxAllowedBytes = isVideo ? this.#config.maxVideoSizeBytes : this.#config.maxImageSizeBytes;
+    if (object.sizeBytes > maxAllowedBytes) {
+      throw isVideo ? new VideoTooLargeError(maxAllowedBytes) : new ImageTooLargeError(maxAllowedBytes);
+    }
 
     return {
       r2Key: intent.r2Key,
@@ -322,7 +355,6 @@ export class ObjectStorageService {
         candidate.version !== 1 ||
         typeof candidate.r2Key !== "string" ||
         typeof candidate.contentType !== "string" ||
-        !isSupportedProductImageType(candidate.contentType) ||
         !Number.isSafeInteger(candidate.sizeBytes) ||
         (candidate.sizeBytes ?? 0) <= 0 ||
         !Number.isSafeInteger(candidate.expiresAtEpochSeconds) ||
@@ -332,13 +364,22 @@ export class ObjectStorageService {
       }
 
       if (candidate.scope === "product_image") {
-        if (!Number.isSafeInteger(candidate.productId) || (candidate.productId as number) <= 0) {
+        if (
+          !isSupportedProductImageType(candidate.contentType) ||
+          !Number.isSafeInteger(candidate.productId) ||
+          (candidate.productId as number) <= 0
+        ) {
           throw new Error("Invalid claims");
         }
         return candidate as ProductImageUploadIntent;
       }
 
+      // Media Library intents accept the wider image+video allow-list — this is the
+      // ONLY scope that may carry a video contentType (see MEDIA_LIBRARY_TYPES comment).
       if (candidate.scope === "media_asset") {
+        if (!isSupportedMediaLibraryType(candidate.contentType)) {
+          throw new Error("Invalid claims");
+        }
         return candidate as MediaAssetUploadIntent;
       }
 

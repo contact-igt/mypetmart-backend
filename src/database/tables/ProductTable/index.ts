@@ -5,7 +5,9 @@ import { assertNullableCompareAtPrice, isModelInitialized, timestampModelOptions
 import type { CartItem } from "../CartItemTable/index.js";
 import type { Category } from "../CategoryTable/index.js";
 import type { OrderItem } from "../OrderItemTable/index.js";
+import type { ProductFeature } from "../ProductFeatureTable/index.js";
 import type { ProductImage } from "../ProductImageTable/index.js";
+import type { ProductMediaAssignment } from "../ProductMediaAssignmentTable/index.js";
 import type { ProductVariant } from "../ProductVariantTable/index.js";
 
 export class Product extends Model<InferAttributes<Product>, InferCreationAttributes<Product>> {
@@ -37,6 +39,8 @@ export class Product extends Model<InferAttributes<Product>, InferCreationAttrib
   declare category?: NonAttribute<Category>;
   declare variants?: NonAttribute<ProductVariant[]>;
   declare images?: NonAttribute<ProductImage[]>;
+  declare features?: NonAttribute<ProductFeature[]>;
+  declare mediaAssignments?: NonAttribute<ProductMediaAssignment[]>;
   declare cartItems?: NonAttribute<CartItem[]>;
   declare orderItems?: NonAttribute<OrderItem[]>;
 }

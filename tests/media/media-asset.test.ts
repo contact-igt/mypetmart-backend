@@ -11,6 +11,8 @@ import { Category } from "../../src/database/tables/CategoryTable/index.js";
 import { MediaAsset } from "../../src/database/tables/MediaAssetTable/index.js";
 import { ProductImage } from "../../src/database/tables/ProductImageTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
+import { ProductFeature } from "../../src/database/tables/ProductFeatureTable/index.js";
+import { ProductMediaAssignment } from "../../src/database/tables/ProductMediaAssignmentTable/index.js";
 import { ProductVariant } from "../../src/database/tables/ProductVariantTable/index.js";
 import { User } from "../../src/database/tables/UserTable/index.js";
 import { PasswordService } from "../../src/services/auth/password.service.js";
@@ -64,6 +66,8 @@ describe("Media Gallery Integration", () => {
     vi.restoreAllMocks();
     await ProductImage.destroy({ where: {}, truncate: false, force: true });
     await ProductVariant.destroy({ where: {}, truncate: false, force: true });
+    await ProductFeature.destroy({ where: {}, truncate: false, force: true });
+    await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     await MediaAsset.destroy({ where: {}, truncate: false, force: true });
@@ -90,8 +94,8 @@ describe("Media Gallery Integration", () => {
     productBId = productB.body.data.id;
   });
 
-  function verifiedUpload(key: string, sizeBytes = 2048) {
-    return { r2Key: key, publicUrl: `https://images.mypetmart.test/${key}`, contentType: "image/jpeg", sizeBytes };
+  function verifiedUpload(key: string, sizeBytes = 2048, contentType = "image/jpeg") {
+    return { r2Key: key, publicUrl: `https://images.mypetmart.test/${key}`, contentType, sizeBytes };
   }
 
   async function uploadMediaAsset(key = `media/2026/08/10/${randomUUID()}.jpg`) {
@@ -100,6 +104,15 @@ describe("Media Gallery Integration", () => {
       .post("/api/v1/admin/media/uploads/complete")
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ uploadToken: "opaque-signed-upload-token-that-is-long-enough", originalFilename: "banner.jpg", altText: "Banner", title: "Hero banner" });
+    return response;
+  }
+
+  async function uploadVideoAsset(key = `media/2026/08/10/${randomUUID()}.mp4`, sizeBytes = 10 * 1024 * 1024) {
+    vi.spyOn(objectStorageService, "verifyMediaAssetUpload").mockResolvedValueOnce(verifiedUpload(key, sizeBytes, "video/mp4"));
+    const response = await request(app)
+      .post("/api/v1/admin/media/uploads/complete")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ uploadToken: "opaque-signed-video-upload-token-that-is-long-enough", originalFilename: "demo.mp4", altText: "Demo video" });
     return response;
   }
 
@@ -131,7 +144,10 @@ describe("Media Gallery Integration", () => {
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ originalFilename: "banner.gif", contentType: "image/gif", sizeBytes: 2048 });
     expect(response.status).toBe(415);
-    expect(response.body.error.code).toBe("IMAGE_TYPE_NOT_ALLOWED");
+    // Media Library presign now uses the wider image+video allow-list, so an
+    // unsupported type surfaces as MEDIA_TYPE_NOT_ALLOWED (not the Product-image-only
+    // IMAGE_TYPE_NOT_ALLOWED, which remains reserved for the Product direct-upload path).
+    expect(response.body.error.code).toBe("MEDIA_TYPE_NOT_ALLOWED");
   });
 
   it("blocks an unauthenticated request from presigning or listing", async () => {
@@ -275,5 +291,80 @@ describe("Media Gallery Integration", () => {
     expect(await ProductImage.findByPk(attached.body.data.id)).toBeNull();
     // The Media Asset itself, and the Product image slot it can still fill for another Product, survive.
     expect(await MediaAsset.findByPk(mediaAssetId)).not.toBeNull();
+  });
+
+  it("completes an MP4 upload with mediaType=video", async () => {
+    const response = await uploadVideoAsset();
+
+    expect(response.status).toBe(201);
+    expect(response.body.data).toMatchObject({ mimeType: "video/mp4", mediaType: "video", originalName: "demo.mp4" });
+  });
+
+  it("completes an image upload with mediaType=image", async () => {
+    const response = await uploadMediaAsset();
+
+    expect(response.status).toBe(201);
+    expect(response.body.data).toMatchObject({ mimeType: "image/jpeg", mediaType: "image" });
+  });
+
+  it("lists both images and videos when no type filter is given", async () => {
+    await uploadMediaAsset();
+    await uploadVideoAsset();
+
+    const all = await request(app).get("/api/v1/admin/media").set("Authorization", `Bearer ${adminToken}`);
+    expect(all.status).toBe(200);
+    expect(all.body.data.total).toBe(2);
+  });
+
+  it("filters the Media Library to images only with ?type=image", async () => {
+    await uploadMediaAsset();
+    await uploadVideoAsset();
+
+    const response = await request(app).get("/api/v1/admin/media?type=image").set("Authorization", `Bearer ${adminToken}`);
+    expect(response.status).toBe(200);
+    expect(response.body.data.total).toBe(1);
+    expect(response.body.data.items[0].mediaType).toBe("image");
+  });
+
+  it("filters the Media Library to videos only with ?type=video", async () => {
+    await uploadMediaAsset();
+    await uploadVideoAsset();
+
+    const response = await request(app).get("/api/v1/admin/media?type=video").set("Authorization", `Bearer ${adminToken}`);
+    expect(response.status).toBe(200);
+    expect(response.body.data.total).toBe(1);
+    expect(response.body.data.items[0].mediaType).toBe("video");
+  });
+
+  it("rejects an invalid ?type filter value with the standard validation error", async () => {
+    const response = await request(app).get("/api/v1/admin/media?type=audio").set("Authorization", `Bearer ${adminToken}`);
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects attaching a video Media Asset to a Product as a ProductImage", async () => {
+    const uploaded = await uploadVideoAsset();
+    const mediaAssetId = uploaded.body.data.id;
+
+    const attached = await request(app)
+      .post(`/api/v1/admin/products/${productAId}/images/attach-from-gallery`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ mediaAssetId });
+
+    expect(attached.status).toBe(422);
+    expect(attached.body.error.code).toBe("PRODUCT_IMAGE_MEDIA_TYPE_NOT_ALLOWED");
+    expect(await ProductImage.count({ where: { media_asset_id: mediaAssetId } })).toBe(0);
+  });
+
+  it("still attaches an image Media Asset to a Product as a ProductImage (regression)", async () => {
+    const uploaded = await uploadMediaAsset();
+    const mediaAssetId = uploaded.body.data.id;
+
+    const attached = await request(app)
+      .post(`/api/v1/admin/products/${productAId}/images/attach-from-gallery`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ mediaAssetId });
+
+    expect(attached.status).toBe(201);
+    expect(attached.body.data.mediaAssetId).toBe(mediaAssetId);
   });
 });

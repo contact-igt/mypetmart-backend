@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { PET_TYPE_VALUES, PRODUCT_STATUS_VALUES } from "../../constants/database.constants.js";
+import { PET_TYPE_VALUES, PRODUCT_MEDIA_ROLE_VALUES, PRODUCT_STATUS_VALUES } from "../../constants/database.constants.js";
 import { formatMoney, isCompareAtPriceValid } from "../../utils/product-money.js";
 import { SKU_REGEX } from "./catalog-sku.service.js";
-import { InvalidImageIdError, InvalidProductIdError, InvalidVariantIdError } from "./product.errors.js";
+import { InvalidFeatureIdError, InvalidImageIdError, InvalidMediaAssignmentIdError, InvalidProductIdError, InvalidVariantIdError } from "./product.errors.js";
 
 export function slugify(text: string): string {
   return text
@@ -40,6 +40,32 @@ export function parseVariantId(rawId: unknown): number {
     }
   }
   throw new InvalidVariantIdError();
+}
+
+export function parseFeatureId(rawId: unknown): number {
+  if (typeof rawId === "number" && Number.isSafeInteger(rawId) && rawId > 0) {
+    return rawId;
+  }
+  if (typeof rawId === "string" && /^\d+$/.test(rawId.trim())) {
+    const parsed = Number(rawId.trim());
+    if (Number.isSafeInteger(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  throw new InvalidFeatureIdError();
+}
+
+export function parseMediaAssignmentId(rawId: unknown): number {
+  if (typeof rawId === "number" && Number.isSafeInteger(rawId) && rawId > 0) {
+    return rawId;
+  }
+  if (typeof rawId === "string" && /^\d+$/.test(rawId.trim())) {
+    const parsed = Number(rawId.trim());
+    if (Number.isSafeInteger(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  throw new InvalidMediaAssignmentIdError();
 }
 
 export function parseImageId(rawId: unknown): number {
@@ -146,6 +172,37 @@ export const updateVariantSchema = z
     }
   );
 
+export const createFeatureSchema = z.object({
+  label: z.string().trim().min(1, "Feature label is required").max(120, "Feature label max 120 characters"),
+  displayOrder: z.number().int().min(0).optional().default(0)
+});
+
+export const updateFeatureSchema = z.object({
+  label: z.string().trim().min(1, "Feature label is required").max(120, "Feature label max 120 characters").optional(),
+  displayOrder: z.number().int().min(0).optional()
+});
+
+export const createMediaAssignmentSchema = z.object({
+  mediaAssetId: z.number().int().positive("Media asset ID must be positive"),
+  mediaRole: z.enum(PRODUCT_MEDIA_ROLE_VALUES),
+  title: z.string().trim().max(190, "Title max 190 characters").nullable().optional(),
+  caption: z.string().trim().max(500, "Caption max 500 characters").nullable().optional(),
+  displayOrder: z.number().int().min(0).optional().default(0),
+  active: z.boolean().optional().default(true)
+});
+
+export const updateMediaAssignmentSchema = z.object({
+  title: z.string().trim().max(190, "Title max 190 characters").nullable().optional(),
+  caption: z.string().trim().max(500, "Caption max 500 characters").nullable().optional(),
+  displayOrder: z.number().int().min(0).optional(),
+  active: z.boolean().optional()
+});
+
+export const reorderMediaAssignmentsSchema = z.object({
+  mediaRole: z.enum(PRODUCT_MEDIA_ROLE_VALUES),
+  orderedIds: z.array(z.number().int().positive()).min(1).refine((ids) => new Set(ids).size === ids.length, "orderedIds must not contain duplicates")
+});
+
 export const createProductSchema = z
   .object({
     categoryId: z.number().int().positive("Category ID must be positive"),
@@ -168,7 +225,9 @@ export const createProductSchema = z
     lengthCm: shippingMeasurementSchema,
     widthCm: shippingMeasurementSchema,
     heightCm: shippingMeasurementSchema,
-    variants: z.array(createVariantSchema).optional()
+    variants: z.array(createVariantSchema).optional(),
+    features: z.array(createFeatureSchema).optional(),
+    mediaAssignments: z.array(createMediaAssignmentSchema).optional()
   })
   .refine(
     (data) => {

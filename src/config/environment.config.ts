@@ -192,6 +192,7 @@ const environmentSchema = z
     ),
     R2_UPLOAD_URL_EXPIRY_SECONDS: integerFromString("R2_UPLOAD_URL_EXPIRY_SECONDS", 60, 900).default(300),
     R2_MAX_IMAGE_SIZE_BYTES: integerFromString("R2_MAX_IMAGE_SIZE_BYTES", 1, 5 * 1024 * 1024).default(5 * 1024 * 1024),
+    R2_MAX_VIDEO_SIZE_BYTES: integerFromString("R2_MAX_VIDEO_SIZE_BYTES", 1, 50 * 1024 * 1024).default(50 * 1024 * 1024),
     R2_ORPHAN_GRACE_HOURS: integerFromString("R2_ORPHAN_GRACE_HOURS", 1, 168).default(24),
 
     PAYMENT_PROVIDER: optionalTrimmedStringSchema,

@@ -1,6 +1,6 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
-import { DATABASE_TABLE_NAMES } from "../../../constants/database.constants.js";
+import { DATABASE_TABLE_NAMES, MEDIA_ASSET_TYPE_VALUES, type MediaAssetType } from "../../../constants/database.constants.js";
 import { isModelInitialized, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { User } from "../UserTable/index.js";
 
@@ -11,6 +11,7 @@ export class MediaAsset extends Model<InferAttributes<MediaAsset>, InferCreation
   declare storage_key: string;
   declare public_url: string;
   declare mime_type: string;
+  declare media_type: CreationOptional<MediaAssetType>;
   declare file_size: number;
   declare width: number | null;
   declare height: number | null;
@@ -37,6 +38,7 @@ export function initializeMediaAssetTable(sequelize: Sequelize): typeof MediaAss
       storage_key: { type: DataTypes.STRING(512), allowNull: false, unique: true, validate: { notEmpty: true, len: [1, 512] } },
       public_url: { type: DataTypes.STRING(1000), allowNull: false, validate: { notEmpty: true, len: [1, 1000], isUrl: true } },
       mime_type: { type: DataTypes.STRING(100), allowNull: false, validate: { notEmpty: true, len: [1, 100] } },
+      media_type: { type: DataTypes.ENUM(...MEDIA_ASSET_TYPE_VALUES), allowNull: false, defaultValue: "image" },
       file_size: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, validate: { min: 0 } },
       width: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true, validate: { min: 0 } },
       height: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true, validate: { min: 0 } },
@@ -53,6 +55,7 @@ export function initializeMediaAssetTable(sequelize: Sequelize): typeof MediaAss
       indexes: [
         { unique: true, fields: ["storage_key"], name: "media_assets_storage_key_unique" },
         { fields: ["uploaded_by"], name: "media_assets_uploaded_by_idx" },
+        { fields: ["media_type"], name: "media_assets_media_type_idx" },
         { fields: ["created_at"], name: "media_assets_created_at_idx" },
         { fields: ["deleted_at"], name: "media_assets_deleted_at_idx" }
       ]

@@ -19,7 +19,7 @@ import { IThinkClient, IThinkClientError } from "../../src/models/ShipmentModels
 import { canAdvanceShipmentStatus, normalizeIThinkStatus } from "../../src/models/ShipmentModels/shipment.service.js";
 import { ShipmentService } from "../../src/models/ShipmentModels/shipment.service.js";
 import { connectDatabase, disconnectDatabase } from "../../src/database/index.js";
-import { Category, Order, OrderItem, Product, Replacement, ReturnRequest, Shipment, ShipmentTrackingEvent, User } from "../../src/database/tables/index.js";
+import { Category, Order, OrderItem, Product, ProductFeature, ProductMediaAssignment, Replacement, ReturnRequest, Shipment, ShipmentTrackingEvent, User } from "../../src/database/tables/index.js";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -138,6 +138,8 @@ describe("ShipmentService fulfilment invariants", () => {
     await ReturnRequest.destroy({ where: {}, force: true });
     await OrderItem.destroy({ where: {}, force: true });
     await Order.destroy({ where: {}, force: true });
+    await ProductFeature.destroy({ where: {}, force: true });
+    await ProductMediaAssignment.destroy({ where: {}, force: true });
     await Product.destroy({ where: {}, force: true });
     await Category.destroy({ where: {}, force: true });
     await User.destroy({ where: { id: baseId }, force: true });

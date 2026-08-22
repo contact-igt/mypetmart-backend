@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { MEDIA_ASSET_TYPE_VALUES } from "../../constants/database.constants.js";
 import { InvalidMediaAssetIdError } from "./media-asset.errors.js";
 
 export function parseMediaAssetId(rawId: unknown): number {
@@ -28,7 +29,8 @@ const queryPageSize = z.preprocess(
 export const mediaAssetListQuerySchema = z.object({
   page: positiveQueryInteger.optional(),
   pageSize: queryPageSize.optional(),
-  search: z.string().trim().max(190).optional()
+  search: z.string().trim().max(190).optional(),
+  type: z.enum(MEDIA_ASSET_TYPE_VALUES).optional()
 });
 
 export const presignMediaAssetUploadSchema = z.object({

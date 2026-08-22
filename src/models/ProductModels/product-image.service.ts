@@ -7,7 +7,7 @@ import { IdSequenceService } from "../../database/sequences/id-sequence.service.
 import { MediaAssetNotFoundError } from "../MediaModels/media-asset.errors.js";
 import { objectStorageService, type ObjectStorageService } from "../../services/object-storage/object-storage.service.js";
 import { logger } from "../../utils/logger.js";
-import { InvalidProductDataError, ProductImageNotFoundError, ProductNotFoundError } from "./product.errors.js";
+import { InvalidProductDataError, ProductImageMediaTypeNotAllowedError, ProductImageNotFoundError, ProductNotFoundError } from "./product.errors.js";
 import { formatImageDTO } from "./product.service.js";
 import type {
   AttachImageFromMediaAssetInput,
@@ -118,6 +118,11 @@ export class ProductImageService {
     const mediaAsset = await MediaAsset.findByPk(input.mediaAssetId);
     if (!mediaAsset) {
       throw new MediaAssetNotFoundError(input.mediaAssetId);
+    }
+    // ProductImage remains strictly image-only: reject a video Media Asset here
+    // rather than trusting the Admin picker's client-side filtering alone.
+    if (mediaAsset.media_type === "video") {
+      throw new ProductImageMediaTypeNotAllowedError();
     }
 
     return await sequelize.transaction(async (t) => {

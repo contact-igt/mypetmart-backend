@@ -1,4 +1,4 @@
-import type { PetType, ProductStatus } from "../../constants/database.constants.js";
+import type { MediaAssetType, PetType, ProductMediaRole, ProductStatus } from "../../constants/database.constants.js";
 
 export type StorefrontCategorySummaryJSON = {
   id: number;
@@ -39,6 +39,35 @@ export type ProductVariantJSON = {
   updatedAt: string;
 };
 
+export type ProductFeatureJSON = {
+  id: number;
+  productId: number;
+  label: string;
+  displayOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProductMediaAssignmentMediaJSON = {
+  id: number;
+  publicUrl: string;
+  mimeType: string;
+  mediaType: MediaAssetType;
+  title: string | null;
+  originalName: string;
+};
+
+export type ProductMediaAssignmentJSON = {
+  id: number;
+  mediaAssetId: number;
+  mediaRole: ProductMediaRole;
+  title: string | null;
+  caption: string | null;
+  displayOrder: number;
+  active: boolean;
+  media: ProductMediaAssignmentMediaJSON;
+};
+
 export type StorefrontProductListItemJSON = {
   id: number;
   name: string;
@@ -67,6 +96,9 @@ export type StorefrontProductDetailJSON = StorefrontProductListItemJSON & {
   heightCm: string | null;
   variants: ProductVariantJSON[];
   images: ProductImageJSON[];
+  features: ProductFeatureJSON[];
+  productVideos: ProductMediaAssignmentJSON[];
+  testimonialVideos: ProductMediaAssignmentJSON[];
 };
 
 export type AdminProductListItemJSON = {
@@ -104,6 +136,35 @@ export type AdminProductDetailJSON = AdminProductListItemJSON & {
   metaDescription: string | null;
   variants: ProductVariantJSON[];
   images: ProductImageJSON[];
+  features: ProductFeatureJSON[];
+  productVideos: ProductMediaAssignmentJSON[];
+  testimonialVideos: ProductMediaAssignmentJSON[];
+};
+
+export type CreateFeatureInput = {
+  label: string;
+  displayOrder?: number;
+};
+
+export type UpdateFeatureInput = Partial<CreateFeatureInput>;
+
+export type CreateMediaAssignmentInput = {
+  mediaAssetId: number;
+  mediaRole: ProductMediaRole;
+  title?: string | null;
+  caption?: string | null;
+  displayOrder?: number;
+  active?: boolean;
+};
+
+// mediaRole is intentionally immutable after creation — reassigning an existing
+// assignment between product_video/testimonial_video would silently move it
+// between two differently-ordered lists; delete and re-add instead.
+export type UpdateMediaAssignmentInput = {
+  title?: string | null;
+  caption?: string | null;
+  displayOrder?: number;
+  active?: boolean;
 };
 
 export type CreateVariantInput = {
@@ -143,6 +204,8 @@ export type CreateProductInput = {
   widthCm?: string | number | null;
   heightCm?: string | number | null;
   variants?: CreateVariantInput[];
+  features?: CreateFeatureInput[];
+  mediaAssignments?: CreateMediaAssignmentInput[];
 };
 
 export type UpdateProductInput = {

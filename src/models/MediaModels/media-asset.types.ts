@@ -5,6 +5,7 @@ export type MediaAssetJSON = {
   storageKey?: string;
   url: string;
   mimeType: string;
+  mediaType: "image" | "video";
   fileSize: number;
   width: number | null;
   height: number | null;
@@ -20,6 +21,7 @@ export type MediaAssetListQuery = {
   page?: number;
   pageSize?: number;
   search?: string;
+  type?: "image" | "video";
 };
 
 export type MediaAssetListResult = {

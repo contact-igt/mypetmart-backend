@@ -16,7 +16,9 @@ import { NotificationLog, initializeNotificationLogTable } from "./NotificationL
 import { PasswordResetToken, initializePasswordResetTokenTable } from "./PasswordResetTokenTable/index.js";
 import { Payment, initializePaymentTable } from "./PaymentTable/index.js";
 import { Product, initializeProductTable } from "./ProductTable/index.js";
+import { ProductFeature, initializeProductFeatureTable } from "./ProductFeatureTable/index.js";
 import { ProductImage, initializeProductImageTable } from "./ProductImageTable/index.js";
+import { ProductMediaAssignment, initializeProductMediaAssignmentTable } from "./ProductMediaAssignmentTable/index.js";
 import { ProductVariant, initializeProductVariantTable } from "./ProductVariantTable/index.js";
 import { Replacement, initializeReplacementTable } from "./ReplacementTable/index.js";
 import { Refund, initializeRefundTable } from "./RefundTable/index.js";
@@ -45,7 +47,9 @@ export {
   PasswordResetToken,
   Payment,
   Product,
+  ProductFeature,
   ProductImage,
+  ProductMediaAssignment,
   ProductVariant,
   Replacement,
   Refund,
@@ -66,6 +70,8 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "Product",
   "ProductVariant",
   "ProductImage",
+  "ProductFeature",
+  "ProductMediaAssignment",
   "MediaAsset",
   "Cart",
   "CartItem",
@@ -98,6 +104,8 @@ export type DatabaseModelRegistry = Readonly<{
   Product: typeof Product;
   ProductVariant: typeof ProductVariant;
   ProductImage: typeof ProductImage;
+  ProductFeature: typeof ProductFeature;
+  ProductMediaAssignment: typeof ProductMediaAssignment;
   MediaAsset: typeof MediaAsset;
   Cart: typeof Cart;
   CartItem: typeof CartItem;
@@ -134,6 +142,8 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeProductTable(sequelize);
   initializeProductVariantTable(sequelize);
   initializeProductImageTable(sequelize);
+  initializeProductFeatureTable(sequelize);
+  initializeProductMediaAssignmentTable(sequelize);
   initializeMediaAssetTable(sequelize);
   initializeCartTable(sequelize);
   initializeCartItemTable(sequelize);
@@ -163,6 +173,8 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     Product,
     ProductVariant,
     ProductImage,
+    ProductFeature,
+    ProductMediaAssignment,
     MediaAsset,
     Cart,
     CartItem,

@@ -42,6 +42,7 @@ function configuredRuntime(overrides: Partial<ObjectStorageRuntimeConfig> = {}):
     uploadIntentSecret: TEST_INTENT_SECRET,
     uploadUrlExpirySeconds: 300,
     maxImageSizeBytes: 10 * 1024 * 1024,
+    maxVideoSizeBytes: 50 * 1024 * 1024,
     orphanGraceHours: 24,
     ...overrides
   };
@@ -187,5 +188,115 @@ describe("Cloudflare R2 object storage lifecycle", () => {
 
     expect(result).toEqual({ inspected: 3, deleted: 1 });
     expect(provider.deletedKeys).toEqual(["products/42/uploads/2026/01/01/orphan.jpg"]);
+  });
+});
+
+describe("Media Library upload — image + video (Phase A)", () => {
+  it.each([
+    ["image/jpeg", "jpg"],
+    ["image/png", "png"],
+    ["image/webp", "webp"]
+  ])("still presigns existing Media Library %s uploads unchanged", async (contentType, extension) => {
+    const provider = new FakeObjectStorageProvider();
+    const service = new ObjectStorageService(configuredRuntime(), provider);
+
+    const result = await service.presignMediaAssetUpload({ contentType, sizeBytes: 2048 });
+
+    expect(result.method).toBe("PUT");
+    expect(result.requiredHeaders).toEqual({ "Content-Type": contentType });
+    expect(result.r2Key).toMatch(new RegExp(`^media/\\d{4}/\\d{2}/\\d{2}/[0-9a-f-]{36}\\.${extension}$`));
+  });
+
+  it("presigns a video/mp4 Media Library upload", async () => {
+    const provider = new FakeObjectStorageProvider();
+    const service = new ObjectStorageService(configuredRuntime(), provider);
+
+    const result = await service.presignMediaAssetUpload({ contentType: "video/mp4", sizeBytes: 10 * 1024 * 1024 });
+
+    expect(result.method).toBe("PUT");
+    expect(result.requiredHeaders).toEqual({ "Content-Type": "video/mp4" });
+    expect(result.r2Key).toMatch(/^media\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f-]{36}\.mp4$/);
+  });
+
+  it.each(["video/webm", "video/quicktime", "application/pdf"])("rejects unsupported Media Library type %s", async (contentType) => {
+    const service = new ObjectStorageService(configuredRuntime(), new FakeObjectStorageProvider());
+    await expect(service.presignMediaAssetUpload({ contentType, sizeBytes: 100 })).rejects.toMatchObject({
+      code: "MEDIA_TYPE_NOT_ALLOWED",
+      statusCode: 415
+    });
+  });
+
+  it("accepts an MP4 within the configured video size limit", async () => {
+    const provider = new FakeObjectStorageProvider();
+    const service = new ObjectStorageService(configuredRuntime({ maxVideoSizeBytes: 50 * 1024 * 1024 }), provider);
+    await expect(
+      service.presignMediaAssetUpload({ contentType: "video/mp4", sizeBytes: 50 * 1024 * 1024 })
+    ).resolves.toMatchObject({ method: "PUT" });
+  });
+
+  it("rejects an oversized MP4 at presign using the video limit, not the image limit", async () => {
+    const provider = new FakeObjectStorageProvider();
+    const service = new ObjectStorageService(configuredRuntime({ maxImageSizeBytes: 5 * 1024 * 1024, maxVideoSizeBytes: 10 * 1024 * 1024 }), provider);
+    await expect(
+      service.presignMediaAssetUpload({ contentType: "video/mp4", sizeBytes: 10 * 1024 * 1024 + 1 })
+    ).rejects.toMatchObject({ code: "VIDEO_TOO_LARGE", statusCode: 413 });
+    expect(provider.presignedRequest).toBeUndefined();
+  });
+
+  it("accepts a small image while a large video limit is configured (limits stay independent)", async () => {
+    const provider = new FakeObjectStorageProvider();
+    const service = new ObjectStorageService(configuredRuntime({ maxImageSizeBytes: 5 * 1024 * 1024, maxVideoSizeBytes: 50 * 1024 * 1024 }), provider);
+    await expect(
+      service.presignMediaAssetUpload({ contentType: "image/png", sizeBytes: 5 * 1024 * 1024 + 1 })
+    ).rejects.toMatchObject({ code: "IMAGE_TOO_LARGE", statusCode: 413 });
+  });
+
+  it("completes an MP4 upload once R2 confirms matching content type and size", async () => {
+    const provider = new FakeObjectStorageProvider();
+    const service = new ObjectStorageService(configuredRuntime(), provider);
+    const authorization = await service.presignMediaAssetUpload({ contentType: "video/mp4", sizeBytes: 4096 });
+    provider.headResult = { key: authorization.r2Key, contentType: "video/mp4", sizeBytes: 4096, lastModified: new Date() };
+
+    await expect(service.verifyMediaAssetUpload(authorization.uploadToken)).resolves.toEqual({
+      r2Key: authorization.r2Key,
+      publicUrl: `https://images.mypetmart.test/${authorization.r2Key}`,
+      contentType: "video/mp4",
+      sizeBytes: 4096
+    });
+  });
+
+  it("rejects completion when the current video limit has shrunk below the object's authorized size", async () => {
+    const provider = new FakeObjectStorageProvider();
+    // Presign under a generous limit (so the upload itself is authorized)...
+    const presignService = new ObjectStorageService(configuredRuntime({ maxVideoSizeBytes: 50 * 1024 * 1024 }), provider);
+    const authorization = await presignService.presignMediaAssetUpload({ contentType: "video/mp4", sizeBytes: 20 * 1024 * 1024 });
+    provider.headResult = { key: authorization.r2Key, contentType: "video/mp4", sizeBytes: 20 * 1024 * 1024, lastModified: new Date() };
+
+    // ...but verify re-checks the object size against the CURRENT limit independently of the
+    // signed intent, mirroring the existing image behavior — an operator lowering the limit
+    // between presign and verify must not let an already-authorized oversized object through.
+    const verifyService = new ObjectStorageService(configuredRuntime({ maxVideoSizeBytes: 10 * 1024 * 1024 }), provider);
+    await expect(verifyService.verifyMediaAssetUpload(authorization.uploadToken)).rejects.toMatchObject({
+      code: "VIDEO_TOO_LARGE",
+      statusCode: 413
+    });
+  });
+
+  it("rejects a completed upload whose R2 object content type does not match the authorization", async () => {
+    const provider = new FakeObjectStorageProvider();
+    const service = new ObjectStorageService(configuredRuntime(), provider);
+    const authorization = await service.presignMediaAssetUpload({ contentType: "video/mp4", sizeBytes: 4096 });
+    provider.headResult = { key: authorization.r2Key, contentType: "image/png", sizeBytes: 4096, lastModified: new Date() };
+    await expect(service.verifyMediaAssetUpload(authorization.uploadToken)).rejects.toMatchObject({
+      code: "IMAGE_UPLOAD_VERIFICATION_FAILED"
+    });
+  });
+
+  it("never lets the Product direct-image upload path accept video, even though the Media Library now does", async () => {
+    const service = new ObjectStorageService(configuredRuntime(), new FakeObjectStorageProvider());
+    await expect(service.presignProductImageUpload(42, { contentType: "video/mp4", sizeBytes: 1024 })).rejects.toMatchObject({
+      code: "IMAGE_TYPE_NOT_ALLOWED",
+      statusCode: 415
+    });
   });
 });

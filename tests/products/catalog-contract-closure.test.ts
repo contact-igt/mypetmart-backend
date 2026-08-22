@@ -7,7 +7,9 @@ import { connectDatabase, disconnectDatabase, sequelize } from "../../src/databa
 import { IdSequenceService } from "../../src/database/sequences/id-sequence.service.js";
 import { AuthSession } from "../../src/database/tables/AuthSessionTable/index.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
+import { ProductFeature } from "../../src/database/tables/ProductFeatureTable/index.js";
 import { ProductImage } from "../../src/database/tables/ProductImageTable/index.js";
+import { ProductMediaAssignment } from "../../src/database/tables/ProductMediaAssignmentTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
 import { ProductVariant } from "../../src/database/tables/ProductVariantTable/index.js";
 import { User } from "../../src/database/tables/UserTable/index.js";
@@ -55,6 +57,8 @@ describe("Catalog rebaseline contract closure", () => {
   beforeEach(async () => {
     await ProductImage.destroy({ where: {}, force: true });
     await ProductVariant.destroy({ where: {}, force: true });
+    await ProductFeature.destroy({ where: {}, force: true });
+    await ProductMediaAssignment.destroy({ where: {}, force: true });
     await Product.destroy({ where: {}, force: true });
     await Category.destroy({ where: {}, force: true });
     await sequelize.query("DELETE FROM `catalog_sku_reservations`");

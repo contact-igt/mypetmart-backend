@@ -9,6 +9,8 @@ import { Category } from "../../src/database/tables/CategoryTable/index.js";
 import { Order } from "../../src/database/tables/OrderTable/index.js";
 import { OrderItem } from "../../src/database/tables/OrderItemTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
+import { ProductFeature } from "../../src/database/tables/ProductFeatureTable/index.js";
+import { ProductMediaAssignment } from "../../src/database/tables/ProductMediaAssignmentTable/index.js";
 import { ProductImage } from "../../src/database/tables/ProductImageTable/index.js";
 import { ReturnRequest } from "../../src/database/tables/ReturnRequestTable/index.js";
 import { Shipment } from "../../src/database/tables/ShipmentTable/index.js";
@@ -99,6 +101,8 @@ describe("Admin Dashboard (real-data)", () => {
     await OrderItem.destroy({ where: {}, truncate: false, force: true });
     await Order.destroy({ where: {}, truncate: false, force: true });
     await ProductImage.destroy({ where: {}, truncate: false, force: true });
+    await ProductFeature.destroy({ where: {}, truncate: false, force: true });
+    await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     await sequelize.query("DELETE FROM `catalog_sku_reservations`");

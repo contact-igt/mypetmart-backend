@@ -21,7 +21,9 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
     PasswordResetToken,
     Payment,
     Product,
+    ProductFeature,
     ProductImage,
+    ProductMediaAssignment,
     ProductVariant,
     Replacement,
     Refund,
@@ -54,11 +56,20 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
   Product.hasMany(ProductImage, { foreignKey: "product_id", as: "images" });
   ProductImage.belongsTo(Product, { foreignKey: "product_id", as: "product" });
 
+  Product.hasMany(ProductFeature, { foreignKey: "product_id", as: "features" });
+  ProductFeature.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+
   User.hasMany(MediaAsset, { foreignKey: "uploaded_by", as: "uploadedMediaAssets" });
   MediaAsset.belongsTo(User, { foreignKey: "uploaded_by", as: "uploadedBy" });
 
   MediaAsset.hasMany(ProductImage, { foreignKey: "media_asset_id", as: "productImages" });
   ProductImage.belongsTo(MediaAsset, { foreignKey: "media_asset_id", as: "mediaAsset" });
+
+  Product.hasMany(ProductMediaAssignment, { foreignKey: "product_id", as: "mediaAssignments" });
+  ProductMediaAssignment.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+
+  MediaAsset.hasMany(ProductMediaAssignment, { foreignKey: "media_asset_id", as: "productMediaAssignments" });
+  ProductMediaAssignment.belongsTo(MediaAsset, { foreignKey: "media_asset_id", as: "mediaAsset" });
 
   User.hasMany(Cart, { foreignKey: "user_id", as: "carts" });
   Cart.belongsTo(User, { foreignKey: "user_id", as: "user" });
