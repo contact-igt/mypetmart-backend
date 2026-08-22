@@ -12,6 +12,7 @@ import { OrderItem, initializeOrderItemTable } from "./OrderItemTable/index.js";
 import { OrderNote, initializeOrderNoteTable } from "./OrderNoteTable/index.js";
 import { MediaAsset, initializeMediaAssetTable } from "./MediaAssetTable/index.js";
 import { NewsletterSubscriber, initializeNewsletterSubscriberTable } from "./NewsletterSubscriberTable/index.js";
+import { NotificationLog, initializeNotificationLogTable } from "./NotificationLogTable/index.js";
 import { PasswordResetToken, initializePasswordResetTokenTable } from "./PasswordResetTokenTable/index.js";
 import { Payment, initializePaymentTable } from "./PaymentTable/index.js";
 import { Product, initializeProductTable } from "./ProductTable/index.js";
@@ -37,6 +38,7 @@ export {
   ContactEnquiry,
   MediaAsset,
   NewsletterSubscriber,
+  NotificationLog,
   Order,
   OrderItem,
   OrderNote,
@@ -82,7 +84,8 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "AuthChallenge",
   "PasswordResetToken",
   "Wishlist",
-  "NewsletterSubscriber"
+  "NewsletterSubscriber",
+  "NotificationLog"
 ] as const;
 
 export type DatabaseModelName = (typeof EXPECTED_DATABASE_MODEL_NAMES)[number];
@@ -114,6 +117,7 @@ export type DatabaseModelRegistry = Readonly<{
   PasswordResetToken: typeof PasswordResetToken;
   Wishlist: typeof Wishlist;
   NewsletterSubscriber: typeof NewsletterSubscriber;
+  NotificationLog: typeof NotificationLog;
 }>;
 
 let initializedRegistry: DatabaseModelRegistry | undefined;
@@ -149,6 +153,7 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializePasswordResetTokenTable(sequelize);
   initializeWishlistTable(sequelize);
   initializeNewsletterSubscriberTable(sequelize);
+  initializeNotificationLogTable(sequelize);
 
   initializedRegistry = Object.freeze({
     User,
@@ -176,7 +181,8 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     AuthChallenge,
     PasswordResetToken,
     Wishlist,
-    NewsletterSubscriber
+    NewsletterSubscriber,
+    NotificationLog
   });
 
   return initializedRegistry;

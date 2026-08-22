@@ -22,7 +22,6 @@ import {
   ProductRestoreConflictError,
   ProductRestoreSkuConflictError,
   ProductRestoreSlugConflictError,
-  ProductShippingDataInvalidError,
   ProductSkuConflictError,
   ProductSlugConflictError
 } from "./product.errors.js";
@@ -172,7 +171,9 @@ export function validatePetTypeCompatibility(categoryPetType: string, productPet
   }
 }
 
-// Helper: Validate shipping readiness for product activation
+// Helper: Validate sellability (pricing, active variants) for product activation.
+// Shipping measurements are intentionally not required here — they are validated
+// independently at shipment-creation time in ShipmentModels/shipment.service.ts.
 export async function validateShippingReadiness(product: Product, transaction?: Transaction): Promise<void> {
   if (product.has_variants) {
     const activeVariants = await ProductVariant.findAll({
@@ -188,28 +189,10 @@ export async function validateShippingReadiness(product: Product, transaction?: 
       if (parseFloat(variant.price) <= 0) {
         throw new ProductNotSellableError(`Variant '${variant.name}' (SKU: ${variant.sku}) must have a positive selling price before activation.`);
       }
-
-      const weight = variant.weight_grams ?? product.weight_grams;
-      const length = variant.length_cm ?? product.length_cm;
-      const width = variant.width_cm ?? product.width_cm;
-      const height = variant.height_cm ?? product.height_cm;
-
-      if (!weight || weight <= 0 || !length || parseFloat(length) <= 0 || !width || parseFloat(width) <= 0 || !height || parseFloat(height) <= 0) {
-        throw new ProductShippingDataInvalidError(`Variant '${variant.name}' (SKU: ${variant.sku}) is missing required positive shipping measurements.`);
-      }
     }
   } else {
     if (parseFloat(product.price) <= 0) {
       throw new ProductNotSellableError("A simple product must have a positive selling price before activation.");
-    }
-
-    const weight = product.weight_grams;
-    const length = product.length_cm;
-    const width = product.width_cm;
-    const height = product.height_cm;
-
-    if (!weight || weight <= 0 || !length || parseFloat(length) <= 0 || !width || parseFloat(width) <= 0 || !height || parseFloat(height) <= 0) {
-      throw new ProductShippingDataInvalidError("Simple product is missing required positive shipping measurements.");
     }
   }
 }
@@ -286,6 +269,10 @@ export class ProductService {
 
     if (query.petType) {
       whereClause.pet_type = query.petType;
+    }
+
+    if (query.featured) {
+      whereClause.featured = true;
     }
 
     if (query.search) {

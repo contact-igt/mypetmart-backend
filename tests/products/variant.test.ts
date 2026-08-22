@@ -401,7 +401,7 @@ describe("Stage 13 — Product Variants Integration Tests", () => {
     expect((await ProductVariant.findByPk(created.body.data.id))?.price).toBe("100.00");
   });
 
-  it("should roll back an unshippable active Variant created under an active Product", async () => {
+  it("should allow creating a Variant with blank shipping measurements under an active Product", async () => {
     await request(app)
       .patch(`/api/v1/admin/products/${productId}`)
       .set("Authorization", `Bearer ${adminToken}`)
@@ -425,17 +425,19 @@ describe("Stage 13 — Product Variants Integration Tests", () => {
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ status: "active" });
 
+    // Shipping measurements are optional at Product/Variant activation —
+    // this Variant carries none of its own and none from the Product default.
     const createRes = await request(app)
       .post(`/api/v1/admin/products/${productId}/variants`)
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ name: "Unshippable Variant", sku: "WAND-UNSHIPPABLE", price: "149.00" });
+      .send({ name: "Unmeasured Variant", sku: "WAND-UNMEASURED", price: "149.00" });
 
-    expect(createRes.status).toBe(422);
-    expect(createRes.body.error.code).toBe("PRODUCT_NOT_SHIPPING_READY");
-    expect(await ProductVariant.count({ where: { product_id: productId, sku: "WAND-UNSHIPPABLE" } })).toBe(0);
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.data.weightGrams).toBeNull();
+    expect(await ProductVariant.count({ where: { product_id: productId, sku: "WAND-UNMEASURED" } })).toBe(1);
   });
 
-  it("should roll back clearing a required shipping override on an active Variant", async () => {
+  it("should allow clearing a Variant's shipping override while the Product is active", async () => {
     await request(app)
       .patch(`/api/v1/admin/products/${productId}`)
       .set("Authorization", `Bearer ${adminToken}`)
@@ -465,12 +467,11 @@ describe("Stage 13 — Product Variants Integration Tests", () => {
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ weightGrams: null });
 
-    expect(updateRes.status).toBe(422);
-    expect(updateRes.body.error.code).toBe("PRODUCT_NOT_SHIPPING_READY");
-    expect((await ProductVariant.findByPk(variantId))?.weight_grams).toBe(50);
+    expect(updateRes.status).toBe(200);
+    expect((await ProductVariant.findByPk(variantId))?.weight_grams).toBeNull();
   });
 
-  it("should roll back Product default edits required by active Variants", async () => {
+  it("should allow clearing a Product's shipping defaults while active Variants inherit from them", async () => {
     const variantRes = await request(app)
       .post(`/api/v1/admin/products/${productId}/variants`)
       .set("Authorization", `Bearer ${adminToken}`)
@@ -487,9 +488,8 @@ describe("Stage 13 — Product Variants Integration Tests", () => {
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ weightGrams: null });
 
-    expect(updateRes.status).toBe(422);
-    expect(updateRes.body.error.code).toBe("PRODUCT_NOT_SHIPPING_READY");
-    expect((await Product.findByPk(productId))?.weight_grams).toBe(50);
+    expect(updateRes.status).toBe(200);
+    expect((await Product.findByPk(productId))?.weight_grams).toBeNull();
   });
 
   it("should maintain 0.00 price cache for draft product with zero active variants and block activation", async () => {

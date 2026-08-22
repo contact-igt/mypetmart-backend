@@ -31,13 +31,14 @@ const expectedTables = [
   DATABASE_TABLE_NAMES.authChallenges,
   DATABASE_TABLE_NAMES.passwordResetTokens,
   DATABASE_TABLE_NAMES.wishlists,
-  DATABASE_TABLE_NAMES.newsletterSubscribers
+  DATABASE_TABLE_NAMES.newsletterSubscribers,
+  DATABASE_TABLE_NAMES.notificationLog
 ];
 
 describe("database model registration", () => {
   it("registers all expected models with explicit table names", () => {
     expect(Object.keys(databaseModels)).toEqual([...EXPECTED_DATABASE_MODEL_NAMES]);
-    expect(sequelize.modelManager.models).toHaveLength(26);
+    expect(sequelize.modelManager.models).toHaveLength(27);
 
     const modelNames = getModelList(databaseModels).map((model) => model.name);
     const tableNames = getModelList(databaseModels).map((model) => model.tableName);

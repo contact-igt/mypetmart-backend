@@ -22,6 +22,7 @@ export type AdminCategoryItem = {
   petType: PetType;
   active: boolean;
   displayOrder: number;
+  showOnHomepage: boolean;
   imageKey: string | null;
   imageUrl: string | null;
   imageAlt: string | null;
@@ -40,6 +41,7 @@ export type CreateCategoryInput = {
   petType?: PetType | undefined;
   active?: boolean | undefined;
   displayOrder?: number | undefined;
+  showOnHomepage?: boolean | undefined;
   imageKey?: string | null | undefined;
   imageUrl?: string | null | undefined;
   imageAlt?: string | null | undefined;
@@ -50,6 +52,7 @@ export type UpdateCategoryInput = {
   slug?: string | undefined;
   description?: string | null | undefined;
   petType?: PetType | undefined;
+  showOnHomepage?: boolean | undefined;
   imageKey?: string | null | undefined;
   imageUrl?: string | null | undefined;
   imageAlt?: string | null | undefined;
@@ -70,6 +73,7 @@ export type CategoryReorderInput = {
 
 export type ListStorefrontCategoriesQuery = {
   petType?: PetType | undefined;
+  showOnHomepage?: boolean | undefined;
 };
 
 export type ListAdminCategoriesQuery = {

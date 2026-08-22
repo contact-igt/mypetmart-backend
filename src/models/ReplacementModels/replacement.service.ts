@@ -6,6 +6,7 @@ import { OrderItem, Product, ProductVariant, Replacement, ReturnNote, ReturnRequ
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
 import { buildBusinessReference } from "../../utils/reference-generator.js";
 import { ReturnRequestNotFoundError } from "../ReturnModels/return.errors.js";
+import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import {
   ReplacementCatalogUnavailableError,
   ReplacementInvalidStatusTransitionError,
@@ -118,14 +119,14 @@ export const ReplacementService = {
   },
 
   async updateStatus(adminId: number, returnRequestId: number, input: UpdateReplacementInput): Promise<ReplacementJSON> {
-    return sequelize.transaction(async (transaction) => {
+    const result = await sequelize.transaction(async (transaction) => {
       const returnRequest = await ReturnRequest.findByPk(returnRequestId, { transaction, lock: transaction.LOCK.UPDATE });
       if (!returnRequest) throw new ReturnRequestNotFoundError(returnRequestId);
       if (returnRequest.type !== "replacement") throw new ReplacementResolutionMismatchError();
 
       const replacement = await Replacement.findOne({ where: { return_request_id: returnRequest.id }, transaction, lock: transaction.LOCK.UPDATE });
       if (!replacement) throw new ReplacementNotFoundError(returnRequest.id);
-      if (replacement.status === input.status) return toJSON(replacement);
+      if (replacement.status === input.status) return { json: toJSON(replacement), transitioned: false };
 
       if (replacement.status === "stock_unavailable" && input.status === "processing") {
         if (!(await consumeStock(replacement, transaction))) throw new ReplacementStockUnavailableError();
@@ -136,7 +137,17 @@ export const ReplacementService = {
       }
 
       await replacement.save({ transaction });
-      return toJSON(replacement);
+      return { json: toJSON(replacement), transitioned: true };
     });
+
+    // Post-commit — the admin resolving a previously stock_unavailable
+    // Replacement is exactly the REPLACEMENT_APPROVED moment for it (the
+    // customer never got that email at creation time, since it started out
+    // unavailable). No-ops if this call was itself a no-op (status already
+    // matched, `transitioned: false`).
+    if (result.transitioned) {
+      await CommerceNotifications.replacementApproved(result.json.id);
+    }
+    return result.json;
   }
 };

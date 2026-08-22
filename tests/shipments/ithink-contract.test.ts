@@ -187,6 +187,18 @@ describe("ShipmentService fulfilment invariants", () => {
     expect(createSpy).not.toHaveBeenCalled();
   });
 
+  it("rejects shipment creation for a Product left with blank shipping measurements", async () => {
+    // Product-level Create/Edit/Activation intentionally allows null shipping
+    // measurements; ShipmentService must still fail clearly instead of
+    // inventing fallback package dimensions.
+    const { order, product } = await createOrder();
+    await product.update({ weight_grams: null, length_cm: null, width_cm: null, height_cm: null });
+    const createSpy = mockSuccessfulProvider();
+    await expect(ShipmentService.createForOrder(order.id)).rejects.toMatchObject({ code: "SHIPMENT_PACKAGE_DATA_INVALID" });
+    expect(await Shipment.count()).toBe(0);
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
   it("collapses concurrent creation into one local and one provider shipment", async () => {
     const { order } = await createOrder();
     const createSpy = mockSuccessfulProvider();

@@ -12,6 +12,7 @@ import { buildBusinessReference } from "../../utils/reference-generator.js";
 import { formatMoney } from "../../utils/product-money.js";
 import { IThinkClient, IThinkClientError, type IThinkPackageInput, type IThinkTrackingEvent } from "./ithink.client.js";
 import { ShipmentActionNotAllowedError, ShipmentNotEligibleError, ShipmentNotFoundError, ShipmentPackageDataError, ShipmentProviderError, ShipmentProviderNotConfiguredError, ShipmentServiceabilityError } from "./shipment.errors.js";
+import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import type { AdminShipmentListResult, ReattemptInput, RtoInput, ShipmentJSON } from "./shipment.types.js";
 
 const TERMINAL = new Set<ShipmentStatus>(["delivered", "rto_delivered", "cancelled"]);
@@ -302,6 +303,8 @@ async function applyFulfilment(shipment: Shipment, next: ShipmentStatus, transac
 }
 
 async function ingest(shipmentId: number, courier: string | null, currentStatus: string, currentStatusCode: string | null, events: IThinkTrackingEvent[]): Promise<void> {
+  let advancedTo: { sourceType: ShipmentSourceType; next: ShipmentStatus; orderId: number; replacementId: number | null } | null = null;
+
   await sequelize.transaction(async (transaction) => {
     const shipment = await Shipment.findByPk(shipmentId, { transaction, lock: transaction.LOCK.UPDATE });
     if (!shipment) throw new ShipmentNotFoundError(shipmentId);
@@ -324,9 +327,32 @@ async function ingest(shipmentId: number, courier: string | null, currentStatus:
     shipment.provider_status_code = currentStatusCode;
     shipment.carrier = courier ?? shipment.carrier;
     shipment.last_synced_at = new Date();
-    if (canAdvanceShipmentStatus(shipment.status, next)) { shipment.status = next; await applyFulfilment(shipment, next, transaction); }
+    if (canAdvanceShipmentStatus(shipment.status, next)) {
+      shipment.status = next;
+      await applyFulfilment(shipment, next, transaction);
+      advancedTo = { sourceType: shipment.source_type, next, orderId: shipment.order_id, replacementId: shipment.replacement_id };
+    }
     await shipment.save({ transaction });
   });
+
+  // Post-commit notification dispatch — see payment-finalization.service.ts
+  // for why this always happens after the transaction, never inside it.
+  // Each CommerceNotifications call independently re-verifies the actual
+  // persisted state before sending, so attempting a call whose target
+  // milestone this particular sync step didn't reach (e.g. "shipped" is
+  // attempted on every picked_up/in_transit/out_for_delivery advance, not
+  // just the first one) is always safe — it just re-confirms and no-ops.
+  if (advancedTo) {
+    const { sourceType, next, orderId, replacementId } = advancedTo;
+    if (sourceType === "order") {
+      if (["picked_up", "in_transit", "out_for_delivery"].includes(next)) await CommerceNotifications.orderShipped(orderId);
+      if (next === "out_for_delivery") await CommerceNotifications.orderOutForDelivery(shipmentId);
+      if (next === "delivered") await CommerceNotifications.orderDelivered(orderId);
+    } else if (sourceType === "replacement") {
+      if (next === "picked_up") await CommerceNotifications.replacementShipped(shipmentId);
+      if (next === "delivered" && replacementId) await CommerceNotifications.replacementCompleted(replacementId);
+    }
+  }
 }
 
 export const ShipmentService = {

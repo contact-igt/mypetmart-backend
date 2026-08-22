@@ -215,13 +215,16 @@ const queryPageSize = z.preprocess(
   z.number().int().min(1).max(100)
 );
 
+const queryBoolean = z.preprocess((value) => value === "true" || value === true, z.boolean());
+
 export const storefrontProductListQuerySchema = z.object({
   page: positiveQueryInteger.optional(),
   pageSize: queryPageSize.optional(),
   search: z.string().trim().max(190).optional(),
   category: z.string().trim().min(1).max(190).optional(),
   petType: z.enum(PET_TYPE_VALUES).optional(),
-  sort: z.enum(["newest", "price_asc", "price_desc", "name"]).optional()
+  sort: z.enum(["newest", "price_asc", "price_desc", "name"]).optional(),
+  featured: queryBoolean.optional()
 });
 
 export const adminProductListQuerySchema = z.object({

@@ -634,4 +634,172 @@ describe("Stage 12: Categories Backend Integration Tests", () => {
       expect(res.body.success).toBe(false);
     });
   });
+
+  describe("Show on Homepage flag", () => {
+    const cleanupSlugs = ["homepage-default-category", "homepage-opted-in-category", "homepage-toggle-category"];
+
+    afterAll(async () => {
+      const existing = await Category.findAll({ where: { slug: cleanupSlugs }, paranoid: false });
+      if (existing.length > 0) {
+        await Category.destroy({ where: { id: existing.map((c) => c.id) }, force: true });
+      }
+    });
+
+    it("should default showOnHomepage to false when not supplied on create", async () => {
+      const res = await request(app)
+        .post("/api/v1/admin/categories")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ name: "Homepage Default Category", slug: "homepage-default-category" });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.showOnHomepage).toBe(false);
+
+      const row = await Category.findByPk(res.body.data.id);
+      expect(row?.show_on_homepage).toBe(false);
+    });
+
+    it("should create a category with showOnHomepage=true", async () => {
+      const res = await request(app)
+        .post("/api/v1/admin/categories")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ name: "Homepage Opted In Category", slug: "homepage-opted-in-category", showOnHomepage: true });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.showOnHomepage).toBe(true);
+    });
+
+    it("should update showOnHomepage from true to false and back, independently of active", async () => {
+      const createRes = await request(app)
+        .post("/api/v1/admin/categories")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ name: "Homepage Toggle Category", slug: "homepage-toggle-category", active: true, showOnHomepage: true });
+
+      expect(createRes.body.data.showOnHomepage).toBe(true);
+      const categoryId = createRes.body.data.id;
+
+      const updateRes = await request(app)
+        .patch(`/api/v1/admin/categories/${categoryId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ showOnHomepage: false });
+
+      expect(updateRes.status).toBe(200);
+      expect(updateRes.body.data.showOnHomepage).toBe(false);
+      expect(updateRes.body.data.active).toBe(true); // untouched by the showOnHomepage change
+
+      // Deactivating the category must not silently flip showOnHomepage.
+      const deactivateRes = await request(app)
+        .patch(`/api/v1/admin/categories/${categoryId}/status`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ active: false });
+
+      expect(deactivateRes.status).toBe(200);
+      expect(deactivateRes.body.data.active).toBe(false);
+      expect(deactivateRes.body.data.showOnHomepage).toBe(false);
+
+      const reEnableRes = await request(app)
+        .patch(`/api/v1/admin/categories/${categoryId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ showOnHomepage: true });
+
+      expect(reEnableRes.status).toBe(200);
+      expect(reEnableRes.body.data.showOnHomepage).toBe(true);
+      expect(reEnableRes.body.data.active).toBe(false); // an inactive category may still be flagged for homepage
+    });
+
+    it("should not leak showOnHomepage into public Storefront category responses", async () => {
+      const listRes = await request(app).get("/api/v1/storefront/categories");
+      expect(listRes.status).toBe(200);
+      for (const category of listRes.body.data) {
+        expect(category).not.toHaveProperty("showOnHomepage");
+      }
+    });
+
+    it("should default showOnHomepage=false at the database level for a row inserted without the column", async () => {
+      // Simulates a Category row that existed before this migration — created
+      // directly against the model, bypassing the API's own default.
+      const id = await sequelize.transaction((transaction) => IdSequenceService.allocateNextId(DATABASE_TABLE_NAMES.categories, transaction));
+      const row = await Category.create({ id, name: "Legacy Category", slug: "homepage-legacy-category" });
+      cleanupSlugs.push("homepage-legacy-category");
+
+      expect(row.show_on_homepage).toBe(false);
+
+      const res = await request(app)
+        .get(`/api/v1/admin/categories/${id}`)
+        .set("Authorization", `Bearer ${adminToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.showOnHomepage).toBe(false);
+    });
+  });
+
+  describe("Storefront homepage-scoped category list (?showOnHomepage=true)", () => {
+    const slugs = {
+      homepageA: "homepage-scope-a",
+      homepageB: "homepage-scope-b",
+      shopOnly: "homepage-scope-shop-only",
+      inactiveHomepage: "homepage-scope-inactive"
+    };
+    let idA: number, idB: number, idShopOnly: number, idInactive: number;
+
+    beforeAll(async () => {
+      const create = async (name: string, slug: string, displayOrder: number, active: boolean, showOnHomepage: boolean) => {
+        const res = await request(app)
+          .post("/api/v1/admin/categories")
+          .set("Authorization", `Bearer ${adminToken}`)
+          .send({ name, slug, active, showOnHomepage });
+        expect(res.status).toBe(201);
+        await request(app)
+          .patch("/api/v1/admin/categories/reorder")
+          .set("Authorization", `Bearer ${adminToken}`)
+          .send({ items: [{ categoryId: res.body.data.id, displayOrder }] });
+        return res.body.data.id as number;
+      };
+
+      // Higher displayOrder on purpose — proves the response is actually
+      // sorted, not just returned in creation order.
+      idA = await create("Homepage Scope A", slugs.homepageA, 20, true, true);
+      idB = await create("Homepage Scope B", slugs.homepageB, 10, true, true);
+      idShopOnly = await create("Homepage Scope Shop Only", slugs.shopOnly, 1, true, false);
+      idInactive = await create("Homepage Scope Inactive", slugs.inactiveHomepage, 1, false, true);
+    });
+
+    afterAll(async () => {
+      await Category.destroy({ where: { id: [idA, idB, idShopOnly, idInactive] }, force: true });
+    });
+
+    it("returns only active + showOnHomepage categories, sorted by displayOrder ASC then id ASC", async () => {
+      const res = await request(app).get("/api/v1/storefront/categories?showOnHomepage=true");
+      expect(res.status).toBe(200);
+
+      const ids = res.body.data.map((c: { id: number }) => c.id);
+      expect(ids).toContain(idA);
+      expect(ids).toContain(idB);
+      expect(ids).not.toContain(idShopOnly); // active but not flagged for homepage
+      expect(ids).not.toContain(idInactive); // flagged for homepage but inactive
+
+      const bIndex = ids.indexOf(idB);
+      const aIndex = ids.indexOf(idA);
+      expect(bIndex).toBeGreaterThanOrEqual(0);
+      expect(bIndex).toBeLessThan(aIndex); // displayOrder 10 (B) before 20 (A)
+    });
+
+    it("returns only homepage-safe fields (no showOnHomepage leak) for the homepage-scoped query too", async () => {
+      const res = await request(app).get("/api/v1/storefront/categories?showOnHomepage=true");
+      const match = res.body.data.find((c: { id: number }) => c.id === idA);
+      expect(match).toMatchObject({ id: idA, name: "Homepage Scope A", slug: slugs.homepageA, petType: "all", displayOrder: 20 });
+      expect(match).not.toHaveProperty("showOnHomepage");
+      expect(match).not.toHaveProperty("active");
+    });
+
+    it("leaves Shop's existing category list behavior unchanged when showOnHomepage is not requested", async () => {
+      const res = await request(app).get("/api/v1/storefront/categories");
+      expect(res.status).toBe(200);
+
+      const ids = res.body.data.map((c: { id: number }) => c.id);
+      // Shop must keep seeing every active category, homepage-flagged or not.
+      expect(ids).toContain(idA);
+      expect(ids).toContain(idB);
+      expect(ids).toContain(idShopOnly);
+      expect(ids).not.toContain(idInactive); // active:true is still always enforced
+    });
+  });
 });

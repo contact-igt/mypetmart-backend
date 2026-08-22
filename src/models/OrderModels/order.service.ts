@@ -29,6 +29,7 @@ import type { InlineAddressInput } from "../CheckoutModels/checkout.types.js";
 import { PaymentService } from "../PaymentModels/payment.service.js";
 import { RefundService } from "../RefundModels/refund.service.js";
 import { ShipmentService } from "../ShipmentModels/shipment.service.js";
+import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import type { ShipmentJSON } from "../ShipmentModels/shipment.types.js";
 import { getValidNextOrderStatuses, isValidOrderStatusTransition } from "./order.constants.js";
 import {
@@ -374,7 +375,13 @@ export const OrderService = {
   async createOrder(identity: CartIdentity, input: CreateOrderInput): Promise<CreateOrderResultJSON> {
     await reconcileExistingPendingOrderPayment(identity);
 
-    return sequelize.transaction(async (t) => {
+    // Set only on the genuinely-new-Order path below (never the "reissue a
+    // guest access token for an already-existing pending Order" early
+    // return) — read after the transaction commits to fire ORDER_PLACED
+    // exactly once per real Order, never on a reissue.
+    const captured: { newlyCreatedOrder: { id: number; rawGuestToken: string | undefined } | null } = { newlyCreatedOrder: null };
+
+    const result = await sequelize.transaction(async (t) => {
       let cart: Cart | null = null;
       let contactEmail: string;
 
@@ -564,9 +571,17 @@ export const OrderService = {
       // docs/mypetmart-architecture/payu-inventory-contract.md for the full
       // atomic transaction and the paid-but-out-of-stock exception handling.
 
+      captured.newlyCreatedOrder = { id: order.id, rawGuestToken: guestAccess?.rawToken };
+
       const detail = toOrderDetailJSON(order, orderItems);
       return guestAccess ? { ...detail, guestAccessToken: guestAccess.rawToken } : detail;
     });
+
+    if (captured.newlyCreatedOrder) {
+      await CommerceNotifications.orderPlaced(captured.newlyCreatedOrder.id, captured.newlyCreatedOrder.rawGuestToken);
+    }
+
+    return result;
   },
 
   /**
@@ -930,9 +945,21 @@ export const AdminOrderService = {
       return { detail: await loadAdminOrderDetail(order.id, t), pendingRefundId };
     });
 
+    // Post-commit notification dispatch — see payment-finalization.service.ts
+    // for why this always happens after the transaction, never inside it.
+    // Only these three target statuses have a customer email; the state
+    // machine (order.constants.ts) makes each reachable at most once per
+    // Order, and CommerceNotifications re-verifies order.status before
+    // sending regardless.
+    if (nextStatus === "processing") await CommerceNotifications.orderProcessing(orderId);
+    else if (nextStatus === "shipped") await CommerceNotifications.orderShipped(orderId);
+    else if (nextStatus === "delivered") await CommerceNotifications.orderDelivered(orderId);
+
     if (pendingRefundId === null) {
       return detail;
     }
+
+    await CommerceNotifications.refundInitiated(pendingRefundId);
 
     // PayU call deliberately outside the transaction above — the Refund row
     // is already durably committed alongside the cancellation and stock
@@ -945,6 +972,7 @@ export const AdminOrderService = {
 
   async bulkUpdateStatus(ids: number[], nextStatus: OrderStatus, admin: { id: number; role: UserRole }): Promise<BulkUpdateOrderStatusResult> {
     const pendingRefundIds: number[] = [];
+    const updatedOrderIds: number[] = [];
 
     const result = await sequelize.transaction(async (t) => {
       let updated = 0;
@@ -979,14 +1007,24 @@ export const AdminOrderService = {
 
         await order.save({ transaction: t });
         updated += 1;
+        updatedOrderIds.push(order.id);
       }
 
       return { updated, skipped };
     });
 
     // Sequential, after the transaction has committed — same "commit first,
-    // call the provider after" rule as the single-order path above.
+    // notify/call the provider after" rule as the single-order path above.
+    if (nextStatus === "processing" || nextStatus === "shipped" || nextStatus === "delivered") {
+      for (const orderId of updatedOrderIds) {
+        if (nextStatus === "processing") await CommerceNotifications.orderProcessing(orderId);
+        else if (nextStatus === "shipped") await CommerceNotifications.orderShipped(orderId);
+        else await CommerceNotifications.orderDelivered(orderId);
+      }
+    }
+
     for (const refundId of pendingRefundIds) {
+      await CommerceNotifications.refundInitiated(refundId);
       await RefundService.dispatchRefund(refundId);
     }
 

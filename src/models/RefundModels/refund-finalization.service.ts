@@ -2,6 +2,7 @@ import { sequelize } from "../../database/index.js";
 import { Order, Payment, Refund, ReturnRequest } from "../../database/tables/index.js";
 import { logger } from "../../utils/logger.js";
 import { parseMoneyToPaise } from "../../utils/product-money.js";
+import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import type { NormalizedRefundResult, RefundFinalizationOutcome } from "./refund.types.js";
 
 // Terminal for a single Refund row — once succeeded or failed, no later
@@ -32,7 +33,7 @@ export const RefundFinalizationService = {
    * data-integrity invariant violation throws.
    */
   async processVerifiedRefundResult(result: NormalizedRefundResult): Promise<RefundFinalizationOutcome> {
-    return sequelize.transaction(async (t) => {
+    const outcome = await sequelize.transaction(async (t): Promise<RefundFinalizationOutcome> => {
       // 1. Lock the Refund row by our own merchant refund token — the
       // idempotency guard for every replay/duplicate/racing signal, and
       // simultaneously how an unrecognized/spoofed token is rejected: it
@@ -144,5 +145,15 @@ export const RefundFinalizationService = {
       logger.info({ ...logContext, isFullyRefunded }, "refund finalization: verified success, Payment/Order/Return updated");
       return { code: "SUCCEEDED_RECORDED", refundId: refund.id, returnRequestId: refund.return_request_id };
     });
+
+    // Post-commit, same discipline as PaymentFinalizationService — see that
+    // file's matching comment.
+    if (outcome.code === "SUCCEEDED_RECORDED" && outcome.refundId) {
+      await CommerceNotifications.refundSucceeded(outcome.refundId);
+    } else if (outcome.code === "FAILED_RECORDED" && outcome.refundId) {
+      await CommerceNotifications.refundFailed(outcome.refundId);
+    }
+
+    return outcome;
   }
 };

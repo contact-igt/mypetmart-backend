@@ -10,6 +10,7 @@ export class ContactEnquiry extends Model<InferAttributes<ContactEnquiry>, Infer
   declare email: string;
   declare phone: string | null;
   declare subject: string;
+  declare order_number: string | null;
   declare message: string;
   declare status: CreationOptional<ContactEnquiryStatus>;
   declare admin_note: string | null;
@@ -37,6 +38,7 @@ export function initializeContactEnquiryTable(sequelize: Sequelize): typeof Cont
       },
       phone: { type: DataTypes.STRING(32), allowNull: true, validate: { len: [0, 32] } },
       subject: { type: DataTypes.STRING(190), allowNull: false, validate: { notEmpty: true, len: [1, 190] } },
+      order_number: { type: DataTypes.STRING(50), allowNull: true, validate: { len: [0, 50] } },
       message: { type: DataTypes.TEXT, allowNull: false, validate: { notEmpty: true } },
       status: { type: DataTypes.ENUM(...CONTACT_ENQUIRY_STATUS_VALUES), allowNull: false, defaultValue: "new" },
       admin_note: { type: DataTypes.TEXT, allowNull: true },

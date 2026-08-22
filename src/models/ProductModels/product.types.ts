@@ -220,6 +220,7 @@ export type StorefrontProductListQuery = {
   category?: string;
   petType?: PetType;
   sort?: "newest" | "price_asc" | "price_desc" | "name";
+  featured?: boolean;
 };
 
 export type AdminProductListQuery = {

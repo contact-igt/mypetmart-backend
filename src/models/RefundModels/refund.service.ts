@@ -9,6 +9,7 @@ import { buildBusinessReference } from "../../utils/reference-generator.js";
 import { formatMoney, parseMoneyToPaise } from "../../utils/product-money.js";
 import { logger } from "../../utils/logger.js";
 import { ReturnItemNotReceivedError, ReturnRequestNotFoundError } from "../ReturnModels/return.errors.js";
+import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import { PayuRefundClient } from "./payu-refund.client.js";
 import { normalizeInitiateResponse, normalizeStatusApiResponse } from "./refund-result-normalizer.js";
 import { RefundFinalizationService } from "./refund-finalization.service.js";
@@ -167,6 +168,11 @@ export const RefundService = {
         { transaction: t }
       );
     });
+
+    // REFUND_INITIATED fires as soon as the Refund row is durably committed
+    // — "initiated" describes our own decision to refund, not PayU's
+    // acknowledgement of it, so this doesn't wait on dispatchRefund below.
+    await CommerceNotifications.refundInitiated(refund.id);
 
     // Network call deliberately outside the transaction above — the Refund
     // row (and its token) is already durably committed, matching the same
