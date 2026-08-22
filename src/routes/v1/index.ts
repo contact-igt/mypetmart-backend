@@ -28,6 +28,7 @@ import { adminShipmentRouter } from "../../models/ShipmentModels/admin-shipment.
 import { storefrontNewsletterRouter } from "../../models/NewsletterModels/storefront-newsletter.routes.js";
 import { adminNewsletterRouter } from "../../models/NewsletterModels/admin-newsletter.routes.js";
 import { adminSettingsRouter } from "../../models/SettingsModels/admin-settings.routes.js";
+import { storefrontSettingsRouter } from "../../models/SettingsModels/storefront-settings.routes.js";
 import storefrontContactRouter from "../../models/ContactModels/storefront-contact.routes.js";
 import adminContactRouter from "../../models/ContactModels/admin-contact.routes.js";
 
@@ -63,6 +64,7 @@ v1Router.use("/admin/newsletter", adminNewsletterRouter);
 // Same reasoning as /admin/newsletter above — registered ahead of the broad
 // adminRefundRouter mount so /admin/settings/* is matched here first.
 v1Router.use("/admin/settings", adminSettingsRouter);
+v1Router.use("/storefront/store-profile", storefrontSettingsRouter);
 v1Router.use("/storefront/contact-enquiries", storefrontContactRouter);
 // Same reasoning as /admin/newsletter above — registered ahead of the broad
 // adminRefundRouter mount so /admin/contact-enquiries/* is matched here first.

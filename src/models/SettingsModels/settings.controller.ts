@@ -40,3 +40,17 @@ export async function handleAdminListAdminUsers(_req: Request, res: Response, ne
     next(error);
   }
 }
+
+// Public, unauthenticated read for the storefront Contact page. Explicitly
+// re-picks the 4 fields rather than forwarding SettingsService's return
+// value directly — StoreProfile only has these 4 fields today, but this
+// keeps "what the public can see" a visible, deliberate list instead of an
+// implicit assumption if the type ever grows an admin-only field later.
+export async function handleStorefrontGetStoreProfile(_req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { storeName, supportEmail, supportPhone, address } = await SettingsService.getStoreProfile();
+    sendSuccess(res, 200, { storeName, supportEmail, supportPhone, address });
+  } catch (error) {
+    next(error);
+  }
+}
