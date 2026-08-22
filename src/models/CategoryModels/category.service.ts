@@ -60,6 +60,7 @@ export class CategoryService {
       petType: category.pet_type,
       active: category.active,
       displayOrder: category.display_order,
+      showOnHomepage: category.show_on_homepage,
       imageKey: category.image_key,
       imageUrl: category.image_url,
       imageAlt: category.image_alt,
@@ -79,6 +80,10 @@ export class CategoryService {
 
     if (query.petType) {
       where.pet_type = query.petType;
+    }
+
+    if (query.showOnHomepage) {
+      where.show_on_homepage = true;
     }
 
     const categories = await Category.findAll({
@@ -205,6 +210,7 @@ export class CategoryService {
           pet_type: input.petType ?? "all",
           active: input.active ?? true,
           display_order: displayOrder,
+          show_on_homepage: input.showOnHomepage ?? false,
           image_key: input.imageKey ?? null,
           image_url: input.imageUrl ?? null,
           image_alt: input.imageAlt ?? null
@@ -246,6 +252,9 @@ export class CategoryService {
     }
     if (input.petType !== undefined) {
       category.pet_type = input.petType;
+    }
+    if (input.showOnHomepage !== undefined) {
+      category.show_on_homepage = input.showOnHomepage;
     }
     if (input.imageKey !== undefined) {
       category.image_key = input.imageKey;

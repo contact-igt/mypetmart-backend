@@ -12,10 +12,13 @@ import { OrderItem, initializeOrderItemTable } from "./OrderItemTable/index.js";
 import { OrderNote, initializeOrderNoteTable } from "./OrderNoteTable/index.js";
 import { MediaAsset, initializeMediaAssetTable } from "./MediaAssetTable/index.js";
 import { NewsletterSubscriber, initializeNewsletterSubscriberTable } from "./NewsletterSubscriberTable/index.js";
+import { NotificationLog, initializeNotificationLogTable } from "./NotificationLogTable/index.js";
 import { PasswordResetToken, initializePasswordResetTokenTable } from "./PasswordResetTokenTable/index.js";
 import { Payment, initializePaymentTable } from "./PaymentTable/index.js";
 import { Product, initializeProductTable } from "./ProductTable/index.js";
+import { ProductFeature, initializeProductFeatureTable } from "./ProductFeatureTable/index.js";
 import { ProductImage, initializeProductImageTable } from "./ProductImageTable/index.js";
+import { ProductMediaAssignment, initializeProductMediaAssignmentTable } from "./ProductMediaAssignmentTable/index.js";
 import { ProductVariant, initializeProductVariantTable } from "./ProductVariantTable/index.js";
 import { Replacement, initializeReplacementTable } from "./ReplacementTable/index.js";
 import { Refund, initializeRefundTable } from "./RefundTable/index.js";
@@ -37,13 +40,16 @@ export {
   ContactEnquiry,
   MediaAsset,
   NewsletterSubscriber,
+  NotificationLog,
   Order,
   OrderItem,
   OrderNote,
   PasswordResetToken,
   Payment,
   Product,
+  ProductFeature,
   ProductImage,
+  ProductMediaAssignment,
   ProductVariant,
   Replacement,
   Refund,
@@ -64,6 +70,8 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "Product",
   "ProductVariant",
   "ProductImage",
+  "ProductFeature",
+  "ProductMediaAssignment",
   "MediaAsset",
   "Cart",
   "CartItem",
@@ -82,7 +90,8 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "AuthChallenge",
   "PasswordResetToken",
   "Wishlist",
-  "NewsletterSubscriber"
+  "NewsletterSubscriber",
+  "NotificationLog"
 ] as const;
 
 export type DatabaseModelName = (typeof EXPECTED_DATABASE_MODEL_NAMES)[number];
@@ -95,6 +104,8 @@ export type DatabaseModelRegistry = Readonly<{
   Product: typeof Product;
   ProductVariant: typeof ProductVariant;
   ProductImage: typeof ProductImage;
+  ProductFeature: typeof ProductFeature;
+  ProductMediaAssignment: typeof ProductMediaAssignment;
   MediaAsset: typeof MediaAsset;
   Cart: typeof Cart;
   CartItem: typeof CartItem;
@@ -114,6 +125,7 @@ export type DatabaseModelRegistry = Readonly<{
   PasswordResetToken: typeof PasswordResetToken;
   Wishlist: typeof Wishlist;
   NewsletterSubscriber: typeof NewsletterSubscriber;
+  NotificationLog: typeof NotificationLog;
 }>;
 
 let initializedRegistry: DatabaseModelRegistry | undefined;
@@ -130,6 +142,8 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeProductTable(sequelize);
   initializeProductVariantTable(sequelize);
   initializeProductImageTable(sequelize);
+  initializeProductFeatureTable(sequelize);
+  initializeProductMediaAssignmentTable(sequelize);
   initializeMediaAssetTable(sequelize);
   initializeCartTable(sequelize);
   initializeCartItemTable(sequelize);
@@ -149,6 +163,7 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializePasswordResetTokenTable(sequelize);
   initializeWishlistTable(sequelize);
   initializeNewsletterSubscriberTable(sequelize);
+  initializeNotificationLogTable(sequelize);
 
   initializedRegistry = Object.freeze({
     User,
@@ -158,6 +173,8 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     Product,
     ProductVariant,
     ProductImage,
+    ProductFeature,
+    ProductMediaAssignment,
     MediaAsset,
     Cart,
     CartItem,
@@ -176,7 +193,8 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     AuthChallenge,
     PasswordResetToken,
     Wishlist,
-    NewsletterSubscriber
+    NewsletterSubscriber,
+    NotificationLog
   });
 
   return initializedRegistry;

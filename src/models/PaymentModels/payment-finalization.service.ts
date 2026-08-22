@@ -9,6 +9,7 @@ import { logger } from "../../utils/logger.js";
 import { parseMoneyToPaise } from "../../utils/product-money.js";
 import { CartService } from "../CartModels/cart.service.js";
 import { isValidOrderStatusTransition } from "../OrderModels/order.constants.js";
+import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import type { FinalizationOutcome, NormalizedPaymentResult } from "./payment.types.js";
 
 // "partially_refunded" is included here even though it isn't in this
@@ -109,7 +110,7 @@ export const PaymentFinalizationService = {
       return { code: "NOOP_UNCERTAIN", paymentId: null, orderId: null };
     }
 
-    return sequelize.transaction(async (t) => {
+    const outcome = await sequelize.transaction(async (t): Promise<FinalizationOutcome> => {
       // 1. Lock the Payment row — the idempotency guard for every replay/
       // duplicate/racing verification path.
       const payment = await Payment.findOne({
@@ -236,5 +237,20 @@ export const PaymentFinalizationService = {
       logger.error({ ...logContext, commerceException: order.commerce_exception }, "payment finalization: captured but could not confirm Order — commerce exception recorded");
       return { code: "SUCCESS_COMMERCE_EXCEPTION", paymentId: payment.id, orderId: order.id };
     });
+
+    // Notification dispatch deliberately happens AFTER the transaction above
+    // has committed — never inside it (see NotificationService.notify's own
+    // doc comment). A broken SMTP server can therefore never roll back a
+    // real payment finalization. Both SUCCESS_CONFIRMED and
+    // SUCCESS_COMMERCE_EXCEPTION mean money was genuinely captured (payment.status
+    // moved to "paid" either way) — see CommerceNotifications.paymentSuccessful's
+    // own dedup note for why both outcomes map to the same email.
+    if ((outcome.code === "SUCCESS_CONFIRMED" || outcome.code === "SUCCESS_COMMERCE_EXCEPTION") && outcome.orderId && outcome.paymentId) {
+      await CommerceNotifications.paymentSuccessful(outcome.orderId, outcome.paymentId);
+    } else if (outcome.code === "FAILED_RECORDED" && outcome.paymentId) {
+      await CommerceNotifications.paymentFailed(outcome.paymentId);
+    }
+
+    return outcome;
   }
 };

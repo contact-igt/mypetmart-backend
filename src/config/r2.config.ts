@@ -12,6 +12,7 @@ export const r2Config = Object.freeze({
   uploadIntentSecret: environmentConfig.R2_UPLOAD_INTENT_SECRET,
   uploadUrlExpirySeconds: environmentConfig.R2_UPLOAD_URL_EXPIRY_SECONDS,
   maxImageSizeBytes: environmentConfig.R2_MAX_IMAGE_SIZE_BYTES,
+  maxVideoSizeBytes: environmentConfig.R2_MAX_VIDEO_SIZE_BYTES,
   orphanGraceHours: environmentConfig.R2_ORPHAN_GRACE_HOURS,
   ready:
     Boolean(environmentConfig.R2_ACCOUNT_ID) &&

@@ -5,6 +5,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { app } from "../../src/app.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
+import { ProductFeature } from "../../src/database/tables/ProductFeatureTable/index.js";
+import { ProductMediaAssignment } from "../../src/database/tables/ProductMediaAssignmentTable/index.js";
 import { ProductVariant } from "../../src/database/tables/ProductVariantTable/index.js";
 import { ProductImage } from "../../src/database/tables/ProductImageTable/index.js";
 import { User } from "../../src/database/tables/UserTable/index.js";
@@ -55,6 +57,8 @@ describe("Stage 13 — Products Backend Integration Tests", () => {
     // Clean products, variants, images, categories, and SKU reservations for isolated tests
     await ProductImage.destroy({ where: {}, truncate: false, force: true });
     await ProductVariant.destroy({ where: {}, truncate: false, force: true });
+    await ProductFeature.destroy({ where: {}, truncate: false, force: true });
+    await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     await sequelize.query("DELETE FROM `catalog_sku_reservations`");
@@ -283,29 +287,154 @@ describe("Stage 13 — Products Backend Integration Tests", () => {
     expect(historicalRes.body.error.code).toBe("PRODUCT_SKU_CONFLICT");
   });
 
-  it("should validate shipping readiness before product activation", async () => {
-    // Create product without shipping metrics
+  it("should activate a product with blank shipping measurements", async () => {
+    // Shipping measurements are optional at Product Create/Edit/Activation —
+    // they are only required later at shipment-creation time.
     const createRes = await request(app)
       .post("/api/v1/admin/products")
       .set("Authorization", `Bearer ${adminToken}`)
       .send({
         categoryId,
-        name: "Unshippable Toy",
+        name: "Unmeasured Toy",
         sku: "TOY-001",
         description: "Fun toy",
         price: "299.00"
       });
 
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.data.weightGrams).toBeNull();
+    expect(createRes.body.data.lengthCm).toBeNull();
+    expect(createRes.body.data.widthCm).toBeNull();
+    expect(createRes.body.data.heightCm).toBeNull();
+
     const productId = createRes.body.data.id;
 
-    // Attempt status update to active -> expect 422 PRODUCT_NOT_SHIPPING_READY
     const activeRes = await request(app)
       .patch(`/api/v1/admin/products/${productId}/status`)
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ status: "active" });
 
-    expect(activeRes.status).toBe(422);
-    expect(activeRes.body.error.code).toBe("PRODUCT_NOT_SHIPPING_READY");
+    expect(activeRes.status).toBe(200);
+    expect(activeRes.body.data.status).toBe("active");
+  });
+
+  it("should update a product to clear shipping measurements back to null", async () => {
+    const createRes = await request(app)
+      .post("/api/v1/admin/products")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        categoryId,
+        name: "Clearable Toy",
+        sku: "TOY-CLEAR-001",
+        description: "Fun toy",
+        price: "299.00",
+        weightGrams: 200,
+        lengthCm: "10.00",
+        widthCm: "10.00",
+        heightCm: "5.00"
+      });
+    const productId = createRes.body.data.id;
+
+    const updateRes = await request(app)
+      .patch(`/api/v1/admin/products/${productId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ weightGrams: null, lengthCm: null, widthCm: null, heightCm: null });
+
+    expect(updateRes.status).toBe(200);
+    expect(updateRes.body.data.weightGrams).toBeNull();
+    expect(updateRes.body.data.lengthCm).toBeNull();
+    expect(updateRes.body.data.widthCm).toBeNull();
+    expect(updateRes.body.data.heightCm).toBeNull();
+  });
+
+  it.each([
+    ["weight zero", { weightGrams: 0 }],
+    ["weight negative", { weightGrams: -5 }],
+    ["length zero", { lengthCm: "0" }],
+    ["length negative", { lengthCm: "-1" }],
+    ["width zero", { widthCm: "0" }],
+    ["height negative", { heightCm: "-2.5" }]
+  ])("should reject a supplied invalid shipping value (%s) while still allowing blank", async (_label, fields) => {
+    const response = await request(app)
+      .post("/api/v1/admin/products")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        categoryId,
+        name: "Invalid Shipping Toy",
+        sku: `TOY-INVALID-${_label.replace(/\s+/g, "-").toUpperCase()}`,
+        description: "Fun toy",
+        price: "299.00",
+        ...fields
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe("AUTH_VALIDATION_FAILED");
+  });
+
+  it.each([
+    ["250 g", 250],
+    ["1000 g (1 kg)", 1000]
+  ])("should accept a supplied whole-gram weight of %s", async (_label, weightGrams) => {
+    const response = await request(app)
+      .post("/api/v1/admin/products")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        categoryId,
+        name: `Weight Product ${weightGrams}`,
+        sku: `TOY-WEIGHT-${weightGrams}`,
+        description: "Fun toy",
+        price: "299.00",
+        weightGrams
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.data.weightGrams).toBe(weightGrams);
+  });
+
+  it("should keep the whole-gram weight rule intact (decimal grams rejected)", async () => {
+    const response = await request(app)
+      .post("/api/v1/admin/products")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        categoryId,
+        name: "Fractional Weight Product",
+        sku: "TOY-WEIGHT-FRACTIONAL",
+        description: "Fun toy",
+        price: "299.00",
+        weightGrams: 0.25
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe("AUTH_VALIDATION_FAILED");
+    expect(response.body.error.errors.weightGrams).toBeDefined();
+  });
+
+  it("should create a Variant Product with all four shipping fields blank and activate it", async () => {
+    const createRes = await request(app)
+      .post("/api/v1/admin/products")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        categoryId,
+        name: "Unmeasured Multi-Pack",
+        sku: "KIBBLE-UNMEASURED-MASTER",
+        description: "Various pack sizes",
+        hasVariants: true,
+        variants: [{ name: "1kg", sku: "KIBBLE-UNMEASURED-1KG", price: "299.00", stock: 20 }]
+      });
+
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.data.weightGrams).toBeNull();
+    expect(createRes.body.data.lengthCm).toBeNull();
+    expect(createRes.body.data.widthCm).toBeNull();
+    expect(createRes.body.data.heightCm).toBeNull();
+
+    const activeRes = await request(app)
+      .patch(`/api/v1/admin/products/${createRes.body.data.id}/status`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ status: "active" });
+
+    expect(activeRes.status).toBe(200);
+    expect(activeRes.body.data.status).toBe("active");
   });
 
   it("should activate product when shipping metrics are resolved", async () => {
@@ -549,6 +678,57 @@ describe("Stage 13 — Products Backend Integration Tests", () => {
     const detailRes = await request(app).get(`/api/v1/storefront/products/${createRes.body.data.slug}`);
     expect(detailRes.status).toBe(200);
     expect(detailRes.body.data.name).toBe("Storefront Kibble");
+  });
+
+  it("returns only active + featured products for ?featured=true, and leaves Shop's unscoped listing unchanged", async () => {
+    const create = async (name: string, sku: string, featured: boolean) => {
+      const res = await request(app)
+        .post("/api/v1/admin/products")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ categoryId, name, sku, description: "Featured-flow fixture", price: "99.00", featured });
+      expect(res.status).toBe(201);
+      return res.body.data.id as number;
+    };
+    const activate = async (id: number) => {
+      const res = await request(app)
+        .patch(`/api/v1/admin/products/${id}/status`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ status: "active" });
+      expect(res.status).toBe(200);
+    };
+
+    const activeFeaturedId = await create("Featured Active Toy", "FEATURED-ACTIVE-001", true);
+    await activate(activeFeaturedId);
+
+    const activeNotFeaturedId = await create("Plain Active Toy", "FEATURED-PLAIN-001", false);
+    await activate(activeNotFeaturedId);
+
+    // Left in draft on purpose — featured=true must not surface non-active Products.
+    await create("Featured Draft Toy", "FEATURED-DRAFT-001", true);
+
+    const archivedFeaturedId = await create("Featured Archived Toy", "FEATURED-ARCHIVED-001", true);
+    await activate(archivedFeaturedId);
+    const archiveRes = await request(app)
+      .patch(`/api/v1/admin/products/${archivedFeaturedId}/status`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ status: "archived" });
+    expect(archiveRes.status).toBe(200);
+
+    const featuredRes = await request(app).get("/api/v1/storefront/products?featured=true&pageSize=50");
+    expect(featuredRes.status).toBe(200);
+    const featuredIds = featuredRes.body.data.items.map((p: { id: number }) => p.id);
+    expect(featuredIds).toContain(activeFeaturedId);
+    expect(featuredIds).not.toContain(activeNotFeaturedId); // active but not featured
+    expect(featuredIds).not.toContain(archivedFeaturedId); // featured but not active
+    const featuredNames = featuredRes.body.data.items.map((p: { name: string }) => p.name);
+    expect(featuredNames).not.toContain("Featured Draft Toy"); // featured but never activated
+
+    const unscopedRes = await request(app).get("/api/v1/storefront/products?category=dog-food&pageSize=50");
+    expect(unscopedRes.status).toBe(200);
+    const unscopedIds = unscopedRes.body.data.items.map((p: { id: number }) => p.id);
+    expect(unscopedIds).toContain(activeFeaturedId);
+    expect(unscopedIds).toContain(activeNotFeaturedId); // still visible without the featured filter
+    expect(unscopedIds).not.toContain(archivedFeaturedId); // status:active is still always enforced
   });
 });
 

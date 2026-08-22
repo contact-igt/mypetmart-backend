@@ -6,6 +6,8 @@ import { app } from "../../src/app.js";
 import { paymentConfig } from "../../src/config/payment.config.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
+import { ProductFeature } from "../../src/database/tables/ProductFeatureTable/index.js";
+import { ProductMediaAssignment } from "../../src/database/tables/ProductMediaAssignmentTable/index.js";
 import { ProductVariant } from "../../src/database/tables/ProductVariantTable/index.js";
 import { Cart } from "../../src/database/tables/CartTable/index.js";
 import { CartItem } from "../../src/database/tables/CartItemTable/index.js";
@@ -242,6 +244,8 @@ describe("PayU verification, webhook & idempotent commerce finalization", () => 
     await Cart.destroy({ where: {}, truncate: false, force: true });
     await Address.destroy({ where: {}, truncate: false, force: true });
     await ProductVariant.destroy({ where: {}, truncate: false, force: true });
+    await ProductFeature.destroy({ where: {}, truncate: false, force: true });
+    await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     await AuthSession.destroy({ where: { user_id: [CUSTOMER_A_ID, CUSTOMER_B_ID] }, force: true });
@@ -257,6 +261,8 @@ describe("PayU verification, webhook & idempotent commerce finalization", () => 
     await Cart.destroy({ where: {}, truncate: false, force: true });
     await Address.destroy({ where: {}, truncate: false, force: true });
     await ProductVariant.destroy({ where: {}, truncate: false, force: true });
+    await ProductFeature.destroy({ where: {}, truncate: false, force: true });
+    await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     categoryId = await createCategory();

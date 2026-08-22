@@ -142,6 +142,48 @@ export class ProductImageNotFoundError extends ProductError {
   }
 }
 
+export class InvalidFeatureIdError extends ProductError {
+  public constructor() {
+    super("INVALID_FEATURE_ID", "Feature ID must be a positive safe integer.", 400);
+    this.name = "InvalidFeatureIdError";
+  }
+}
+
+export class ProductFeatureNotFoundError extends ProductError {
+  public constructor(featureId: number) {
+    super("PRODUCT_FEATURE_NOT_FOUND", `Product feature '${featureId}' was not found.`, 404);
+    this.name = "ProductFeatureNotFoundError";
+  }
+}
+
+export class ProductImageMediaTypeNotAllowedError extends ProductError {
+  public constructor() {
+    super("PRODUCT_IMAGE_MEDIA_TYPE_NOT_ALLOWED", "Only image Media Assets can be attached as a Product image. This asset is a video.", 422);
+    this.name = "ProductImageMediaTypeNotAllowedError";
+  }
+}
+
+export class InvalidMediaAssignmentIdError extends ProductError {
+  public constructor() {
+    super("INVALID_MEDIA_ASSIGNMENT_ID", "Media assignment ID must be a positive safe integer.", 400);
+    this.name = "InvalidMediaAssignmentIdError";
+  }
+}
+
+export class ProductMediaAssignmentNotFoundError extends ProductError {
+  public constructor(assignmentId: number) {
+    super("PRODUCT_MEDIA_ASSIGNMENT_NOT_FOUND", `Product media assignment '${assignmentId}' was not found.`, 404);
+    this.name = "ProductMediaAssignmentNotFoundError";
+  }
+}
+
+export class ProductMediaAssignmentTypeNotAllowedError extends ProductError {
+  public constructor() {
+    super("PRODUCT_MEDIA_ASSIGNMENT_TYPE_NOT_ALLOWED", "Only video Media Assets can be assigned as a Product video or Testimonial video.", 422);
+    this.name = "ProductMediaAssignmentTypeNotAllowedError";
+  }
+}
+
 export class InvalidProductDataError extends ProductError {
   public constructor(message: string) {
     super("INVALID_PRODUCT_DATA", message, 400);

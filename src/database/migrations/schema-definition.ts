@@ -6,7 +6,12 @@ import {
   DEFAULT_COUNTRY_CODE,
   DEFAULT_CURRENCY_CODE,
   FULFILMENT_STATUS_VALUES,
+  MEDIA_ASSET_TYPE_VALUES,
   NEWSLETTER_SUBSCRIBER_STATUS_VALUES,
+  PRODUCT_MEDIA_ROLE_VALUES,
+  NOTIFICATION_ENTITY_TYPE_VALUES,
+  NOTIFICATION_EVENT_TYPE_VALUES,
+  NOTIFICATION_STATUS_VALUES,
   ORDER_COMMERCE_EXCEPTION_VALUES,
   ORDER_STATUS_VALUES,
   PAYMENT_STATUS_VALUES,
@@ -147,6 +152,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`pet_type\` ${enumSql(PET_TYPE_VALUES)} NOT NULL DEFAULT 'all',
         \`active\` TINYINT(1) NOT NULL DEFAULT 1,
         \`display_order\` INT NOT NULL DEFAULT 0,
+        \`show_on_homepage\` TINYINT(1) NOT NULL DEFAULT 0,
         \`image_key\` VARCHAR(512) NULL,
         \`image_url\` VARCHAR(1000) NULL,
         \`image_alt\` VARCHAR(255) NULL,
@@ -614,6 +620,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`email\` VARCHAR(190) NOT NULL,
         \`phone\` VARCHAR(32) NULL,
         \`subject\` VARCHAR(190) NOT NULL,
+        \`order_number\` VARCHAR(50) NULL,
         \`message\` TEXT NOT NULL,
         \`status\` ${enumSql(CONTACT_ENQUIRY_STATUS_VALUES)} NOT NULL DEFAULT 'new',
         \`admin_note\` TEXT NULL,
@@ -793,6 +800,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`storage_key\` VARCHAR(512) NOT NULL,
         \`public_url\` VARCHAR(1000) NOT NULL,
         \`mime_type\` VARCHAR(100) NOT NULL,
+        \`media_type\` ${enumSql(MEDIA_ASSET_TYPE_VALUES)} NOT NULL DEFAULT 'image',
         \`file_size\` INT UNSIGNED NOT NULL,
         \`width\` INT UNSIGNED NULL,
         \`height\` INT UNSIGNED NULL,
@@ -804,6 +812,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         PRIMARY KEY (\`id\`),
         UNIQUE KEY \`media_assets_storage_key_unique\` (\`storage_key\`),
         KEY \`media_assets_uploaded_by_idx\` (\`uploaded_by\`),
+        KEY \`media_assets_media_type_idx\` (\`media_type\`),
         KEY \`media_assets_created_at_idx\` (\`created_at\`),
         KEY \`media_assets_deleted_at_idx\` (\`deleted_at\`),
         CONSTRAINT \`fk_media_assets_uploaded_by\` FOREIGN KEY (\`uploaded_by\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
@@ -836,6 +845,66 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         UNIQUE KEY \`newsletter_subscribers_unsubscribe_token_hash_unique\` (\`unsubscribe_token_hash\`),
         KEY \`newsletter_subscribers_status_idx\` (\`status\`),
         KEY \`newsletter_subscribers_created_at_idx\` (\`created_at\`)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.notificationLog,
+    migrationName: "045-create-notification-log",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.notificationLog)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`event_type\` ${enumSql(NOTIFICATION_EVENT_TYPE_VALUES)} NOT NULL,
+        \`entity_type\` ${enumSql(NOTIFICATION_ENTITY_TYPE_VALUES)} NOT NULL,
+        \`entity_id\` INT UNSIGNED NOT NULL,
+        \`recipient_email\` VARCHAR(190) NOT NULL,
+        \`status\` ${enumSql(NOTIFICATION_STATUS_VALUES)} NOT NULL DEFAULT 'pending',
+        \`error_message\` VARCHAR(500) NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`notification_log_event_entity_unique\` (\`event_type\`, \`entity_type\`, \`entity_id\`),
+        KEY \`notification_log_status_idx\` (\`status\`),
+        KEY \`notification_log_created_at_idx\` (\`created_at\`)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.productFeatures,
+    migrationName: "048-create-product-features",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.productFeatures)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NOT NULL,
+        \`label\` VARCHAR(120) NOT NULL,
+        \`display_order\` INT NOT NULL DEFAULT 0,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        KEY \`product_features_product_order_idx\` (\`product_id\`, \`display_order\`),
+        CONSTRAINT \`fk_product_features_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_product_features_display_order_nonnegative\` CHECK (\`display_order\` >= 0)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.productMediaAssignments,
+    migrationName: "050-create-product-media-assignments",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.productMediaAssignments)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NOT NULL,
+        \`media_asset_id\` INT UNSIGNED NOT NULL,
+        \`media_role\` ${enumSql(PRODUCT_MEDIA_ROLE_VALUES)} NOT NULL,
+        \`title\` VARCHAR(190) NULL,
+        \`caption\` VARCHAR(500) NULL,
+        \`display_order\` INT NOT NULL DEFAULT 0,
+        \`active\` TINYINT(1) NOT NULL DEFAULT 1,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        KEY \`product_media_assignments_product_role_order_idx\` (\`product_id\`, \`media_role\`, \`display_order\`),
+        KEY \`product_media_assignments_media_asset_id_idx\` (\`media_asset_id\`),
+        CONSTRAINT \`fk_product_media_assignments_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_product_media_assignments_media_asset_id\` FOREIGN KEY (\`media_asset_id\`) REFERENCES \`media_assets\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_product_media_assignments_display_order_nonnegative\` CHECK (\`display_order\` >= 0)
       ) ${engine};
     `
   }

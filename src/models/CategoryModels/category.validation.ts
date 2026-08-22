@@ -30,8 +30,11 @@ export function parseCategorySlug(param: unknown): string {
   return slugify(param);
 }
 
+const queryBoolean = z.preprocess((value) => value === "true" || value === true, z.boolean());
+
 export const ListStorefrontCategoriesQuerySchema = z.object({
-  petType: z.enum(PET_TYPE_VALUES).optional()
+  petType: z.enum(PET_TYPE_VALUES).optional(),
+  showOnHomepage: queryBoolean.optional().default(false)
 });
 
 export const ListAdminCategoriesQuerySchema = z.object({
@@ -49,6 +52,7 @@ export const CreateCategorySchema = z.object({
   petType: z.enum(PET_TYPE_VALUES).optional().default("all"),
   active: z.boolean().optional().default(true),
   displayOrder: z.number().int().min(0, "Display order must be non-negative.").optional(),
+  showOnHomepage: z.boolean().optional().default(false),
   imageKey: z.string().trim().max(512).nullable().optional(),
   imageUrl: z.string().trim().max(1000).nullable().optional(),
   imageAlt: z.string().trim().max(255).nullable().optional()
@@ -59,6 +63,7 @@ export const UpdateCategorySchema = z.object({
   slug: z.string().trim().min(1).max(190).optional(),
   description: z.string().trim().nullable().optional(),
   petType: z.enum(PET_TYPE_VALUES).optional(),
+  showOnHomepage: z.boolean().optional(),
   imageKey: z.string().trim().max(512).nullable().optional(),
   imageUrl: z.string().trim().max(1000).nullable().optional(),
   imageAlt: z.string().trim().max(255).nullable().optional()

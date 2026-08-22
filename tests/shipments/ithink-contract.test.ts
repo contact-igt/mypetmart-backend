@@ -19,7 +19,7 @@ import { IThinkClient, IThinkClientError } from "../../src/models/ShipmentModels
 import { canAdvanceShipmentStatus, normalizeIThinkStatus } from "../../src/models/ShipmentModels/shipment.service.js";
 import { ShipmentService } from "../../src/models/ShipmentModels/shipment.service.js";
 import { connectDatabase, disconnectDatabase } from "../../src/database/index.js";
-import { Category, Order, OrderItem, Product, Replacement, ReturnRequest, Shipment, ShipmentTrackingEvent, User } from "../../src/database/tables/index.js";
+import { Category, Order, OrderItem, Product, ProductFeature, ProductMediaAssignment, Replacement, ReturnRequest, Shipment, ShipmentTrackingEvent, User } from "../../src/database/tables/index.js";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -138,6 +138,8 @@ describe("ShipmentService fulfilment invariants", () => {
     await ReturnRequest.destroy({ where: {}, force: true });
     await OrderItem.destroy({ where: {}, force: true });
     await Order.destroy({ where: {}, force: true });
+    await ProductFeature.destroy({ where: {}, force: true });
+    await ProductMediaAssignment.destroy({ where: {}, force: true });
     await Product.destroy({ where: {}, force: true });
     await Category.destroy({ where: {}, force: true });
     await User.destroy({ where: { id: baseId }, force: true });
@@ -183,6 +185,18 @@ describe("ShipmentService fulfilment invariants", () => {
     const { order } = await createOrder(overrides);
     const createSpy = mockSuccessfulProvider();
     await expect(ShipmentService.createForOrder(order.id)).rejects.toMatchObject({ code: "SHIPMENT_NOT_ELIGIBLE" });
+    expect(await Shipment.count()).toBe(0);
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects shipment creation for a Product left with blank shipping measurements", async () => {
+    // Product-level Create/Edit/Activation intentionally allows null shipping
+    // measurements; ShipmentService must still fail clearly instead of
+    // inventing fallback package dimensions.
+    const { order, product } = await createOrder();
+    await product.update({ weight_grams: null, length_cm: null, width_cm: null, height_cm: null });
+    const createSpy = mockSuccessfulProvider();
+    await expect(ShipmentService.createForOrder(order.id)).rejects.toMatchObject({ code: "SHIPMENT_PACKAGE_DATA_INVALID" });
     expect(await Shipment.count()).toBe(0);
     expect(createSpy).not.toHaveBeenCalled();
   });

@@ -12,6 +12,7 @@ export class Category extends Model<InferAttributes<Category>, InferCreationAttr
   declare pet_type: CreationOptional<PetType>;
   declare active: CreationOptional<boolean>;
   declare display_order: CreationOptional<number>;
+  declare show_on_homepage: CreationOptional<boolean>;
   declare image_key: string | null;
   declare image_url: string | null;
   declare image_alt: string | null;
@@ -36,6 +37,7 @@ export function initializeCategoryTable(sequelize: Sequelize): typeof Category {
       pet_type: { type: DataTypes.ENUM(...PET_TYPE_VALUES), allowNull: false, defaultValue: "all" },
       active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       display_order: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0 } },
+      show_on_homepage: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       image_key: { type: DataTypes.STRING(512), allowNull: true, validate: { len: [0, 512] } },
       image_url: { type: DataTypes.STRING(1000), allowNull: true, validate: { len: [0, 1000] } },
       image_alt: { type: DataTypes.STRING(255), allowNull: true, validate: { len: [0, 255] } },

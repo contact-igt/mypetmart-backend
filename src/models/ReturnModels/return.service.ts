@@ -18,6 +18,7 @@ import { getValidNextOrderStatuses } from "../OrderModels/order.constants.js";
 import { OrderNotFoundError } from "../OrderModels/order.errors.js";
 import { ReplacementService } from "../ReplacementModels/replacement.service.js";
 import { ShipmentService } from "../ShipmentModels/shipment.service.js";
+import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import {
   ReturnAlreadyReviewedError,
   ReturnItemAlreadyReceivedError,
@@ -122,7 +123,7 @@ export const ReturnService = {
    * re-derived from persisted data.
    */
   async createReturnRequest(caller: ReturnCaller, input: CreateReturnRequestInput): Promise<ReturnRequestJSON> {
-    return sequelize.transaction(async (t) => {
+    const created = await sequelize.transaction(async (t) => {
       const order = await Order.findOne({ where: { id: input.orderId, user_id: caller.userId }, transaction: t, lock: t.LOCK.UPDATE });
       if (!order) {
         throw new OrderNotFoundError(input.orderId);
@@ -198,6 +199,9 @@ export const ReturnService = {
 
       return toJSON(returnRequest, order, orderItem, [], null);
     });
+
+    await CommerceNotifications.returnRequested(created.id);
+    return created;
   },
 
   async listCustomerReturns(caller: ReturnCaller, params: ListReturnsParams): Promise<ListReturnsResultJSON> {
@@ -245,6 +249,8 @@ export const ReturnService = {
    * which is the only other writer of ReturnRequest.status/resolved_at.
    */
   async adminReviewReturn(adminId: number, returnId: number, input: AdminReviewReturnInput): Promise<ReturnRequestDetailJSON> {
+    let createdReplacementId: number | null = null;
+
     await sequelize.transaction(async (t) => {
       const returnRequest = await ReturnRequest.findByPk(returnId, { transaction: t, lock: t.LOCK.UPDATE });
       if (!returnRequest) {
@@ -276,7 +282,8 @@ export const ReturnService = {
       await returnRequest.save({ transaction: t });
 
       if (input.action === "approve" && returnRequest.type === "replacement") {
-        await ReplacementService.createForApprovedReturn(adminId, returnRequest, t);
+        const replacement = await ReplacementService.createForApprovedReturn(adminId, returnRequest, t);
+        createdReplacementId = replacement.id;
       }
 
       if (input.note) {
@@ -284,6 +291,21 @@ export const ReturnService = {
         await ReturnNote.create({ id: noteId, return_request_id: returnRequest.id, admin_id: adminId, message: input.note }, { transaction: t });
       }
     });
+
+    // Post-commit — see payment-finalization.service.ts for why this always
+    // happens after the transaction, never inside it.
+    if (input.action === "approve") {
+      await CommerceNotifications.returnApproved(returnId);
+    } else {
+      await CommerceNotifications.returnRejected(returnId);
+    }
+    if (createdReplacementId !== null) {
+      // CommerceNotifications re-verifies the Replacement's actual persisted
+      // status, so it always resolves to exactly one of these two — this
+      // just picks which milestone to attempt.
+      await CommerceNotifications.replacementApproved(createdReplacementId);
+      await CommerceNotifications.replacementStockUnavailable(createdReplacementId);
+    }
 
     return this.getAdminReturn(returnId);
   },

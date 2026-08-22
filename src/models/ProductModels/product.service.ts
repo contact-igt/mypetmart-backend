@@ -5,24 +5,28 @@ import { DATABASE_TABLE_NAMES } from "../../constants/database.constants.js";
 import { environmentConfig } from "../../config/environment.config.js";
 import { sequelize } from "../../database/index.js";
 import { Category } from "../../database/tables/CategoryTable/index.js";
+import { MediaAsset } from "../../database/tables/MediaAssetTable/index.js";
+import { ProductFeature } from "../../database/tables/ProductFeatureTable/index.js";
 import { ProductImage } from "../../database/tables/ProductImageTable/index.js";
+import { ProductMediaAssignment } from "../../database/tables/ProductMediaAssignmentTable/index.js";
 import { objectStorageService } from "../../services/object-storage/object-storage.service.js";
 import { Product } from "../../database/tables/ProductTable/index.js";
 import { ProductVariant } from "../../database/tables/ProductVariantTable/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
 import { formatMoney, isCompareAtPriceValid } from "../../utils/product-money.js";
 import { generateDuplicateSku, generateDuplicateSlug, isSkuReservedBy, normalizeAndValidateSku, reserveSku } from "./catalog-sku.service.js";
+import { MediaAssetNotFoundError } from "../MediaModels/media-asset.errors.js";
 import {
   InvalidProductDataError,
   ProductCategoryInvalidError,
   ProductLegacyTrashNotRestorableError,
+  ProductMediaAssignmentTypeNotAllowedError,
   ProductNotDeletedError,
   ProductNotFoundError,
   ProductNotSellableError,
   ProductRestoreConflictError,
   ProductRestoreSkuConflictError,
   ProductRestoreSlugConflictError,
-  ProductShippingDataInvalidError,
   ProductSkuConflictError,
   ProductSlugConflictError
 } from "./product.errors.js";
@@ -33,7 +37,9 @@ import type {
   AdminProductListQuery,
   AdminProductSummaryJSON,
   CreateProductInput,
+  ProductFeatureJSON,
   ProductImageJSON,
+  ProductMediaAssignmentJSON,
   ProductVariantJSON,
   StorefrontProductDetailJSON,
   StorefrontProductListItemJSON,
@@ -172,7 +178,9 @@ export function validatePetTypeCompatibility(categoryPetType: string, productPet
   }
 }
 
-// Helper: Validate shipping readiness for product activation
+// Helper: Validate sellability (pricing, active variants) for product activation.
+// Shipping measurements are intentionally not required here — they are validated
+// independently at shipment-creation time in ShipmentModels/shipment.service.ts.
 export async function validateShippingReadiness(product: Product, transaction?: Transaction): Promise<void> {
   if (product.has_variants) {
     const activeVariants = await ProductVariant.findAll({
@@ -188,28 +196,10 @@ export async function validateShippingReadiness(product: Product, transaction?: 
       if (parseFloat(variant.price) <= 0) {
         throw new ProductNotSellableError(`Variant '${variant.name}' (SKU: ${variant.sku}) must have a positive selling price before activation.`);
       }
-
-      const weight = variant.weight_grams ?? product.weight_grams;
-      const length = variant.length_cm ?? product.length_cm;
-      const width = variant.width_cm ?? product.width_cm;
-      const height = variant.height_cm ?? product.height_cm;
-
-      if (!weight || weight <= 0 || !length || parseFloat(length) <= 0 || !width || parseFloat(width) <= 0 || !height || parseFloat(height) <= 0) {
-        throw new ProductShippingDataInvalidError(`Variant '${variant.name}' (SKU: ${variant.sku}) is missing required positive shipping measurements.`);
-      }
     }
   } else {
     if (parseFloat(product.price) <= 0) {
       throw new ProductNotSellableError("A simple product must have a positive selling price before activation.");
-    }
-
-    const weight = product.weight_grams;
-    const length = product.length_cm;
-    const width = product.width_cm;
-    const height = product.height_cm;
-
-    if (!weight || weight <= 0 || !length || parseFloat(length) <= 0 || !width || parseFloat(width) <= 0 || !height || parseFloat(height) <= 0) {
-      throw new ProductShippingDataInvalidError("Simple product is missing required positive shipping measurements.");
     }
   }
 }
@@ -267,6 +257,54 @@ export function formatVariantDTO(v: ProductVariant): ProductVariantJSON {
   };
 }
 
+// Helper: Format feature DTO
+export function formatFeatureDTO(f: ProductFeature): ProductFeatureJSON {
+  return {
+    id: f.id,
+    productId: f.product_id,
+    label: f.label,
+    displayOrder: f.display_order,
+    createdAt: f.created_at.toISOString(),
+    updatedAt: f.updated_at.toISOString()
+  };
+}
+
+// Helper: Format Product media assignment DTO. mediaAsset must be eager-loaded
+// (see the `mediaAssignments` include below) — this never re-queries.
+export function formatMediaAssignmentDTO(a: ProductMediaAssignment): ProductMediaAssignmentJSON {
+  const asset = a.mediaAsset!;
+  return {
+    id: a.id,
+    mediaAssetId: a.media_asset_id,
+    mediaRole: a.media_role,
+    title: a.title,
+    caption: a.caption,
+    displayOrder: a.display_order,
+    active: a.active,
+    media: {
+      id: asset.id,
+      publicUrl: objectStorageService.getPublicUrl(asset.storage_key) ?? asset.public_url,
+      mimeType: asset.mime_type,
+      mediaType: asset.media_type,
+      title: asset.title,
+      originalName: asset.original_name
+    }
+  };
+}
+
+// Helper: Load a MediaAsset and assert it is a video — shared by createProduct's
+// inline mediaAssignments and ProductMediaAssignmentService's standalone create.
+export async function assertVideoMediaAsset(mediaAssetId: number, transaction?: Transaction): Promise<MediaAsset> {
+  const asset = await MediaAsset.findByPk(mediaAssetId, ...(transaction ? [{ transaction }] : []));
+  if (!asset) {
+    throw new MediaAssetNotFoundError(mediaAssetId);
+  }
+  if (asset.media_type !== "video") {
+    throw new ProductMediaAssignmentTypeNotAllowedError();
+  }
+  return asset;
+}
+
 export class ProductService {
   // Storefront Product List
   static async listStorefrontProducts(query: StorefrontProductListQuery): Promise<{
@@ -286,6 +324,10 @@ export class ProductService {
 
     if (query.petType) {
       whereClause.pet_type = query.petType;
+    }
+
+    if (query.featured) {
+      whereClause.featured = true;
     }
 
     if (query.search) {
@@ -388,11 +430,27 @@ export class ProductService {
           model: ProductImage,
           as: "images",
           required: false
+        },
+        {
+          model: ProductFeature,
+          as: "features",
+          required: false
+        },
+        {
+          model: ProductMediaAssignment,
+          as: "mediaAssignments",
+          where: { active: true },
+          required: false,
+          include: [{ model: MediaAsset, as: "mediaAsset" }]
         }
       ],
       order: [
         [{ model: ProductVariant, as: "variants" }, "display_order", "ASC"],
-        [{ model: ProductImage, as: "images" }, "sort_order", "ASC"]
+        [{ model: ProductImage, as: "images" }, "sort_order", "ASC"],
+        [{ model: ProductFeature, as: "features" }, "display_order", "ASC"],
+        [{ model: ProductFeature, as: "features" }, "id", "ASC"],
+        [{ model: ProductMediaAssignment, as: "mediaAssignments" }, "display_order", "ASC"],
+        [{ model: ProductMediaAssignment, as: "mediaAssignments" }, "id", "ASC"]
       ]
     });
 
@@ -402,6 +460,10 @@ export class ProductService {
 
     const variants = (product.variants || []).map(formatVariantDTO);
     const images = (product.images || []).map((img) => formatImageDTO(img, false));
+    const features = (product.features || []).map(formatFeatureDTO);
+    const mediaAssignments = (product.mediaAssignments || []).map(formatMediaAssignmentDTO);
+    const productVideos = mediaAssignments.filter((a) => a.mediaRole === "product_video");
+    const testimonialVideos = mediaAssignments.filter((a) => a.mediaRole === "testimonial_video");
     const primaryImg = images.find((img) => img.isPrimary) || (images.length > 0 ? images[0] : null);
 
     return {
@@ -433,7 +495,10 @@ export class ProductService {
       },
       primaryImage: primaryImg ?? null,
       variants,
-      images
+      images,
+      features,
+      productVideos,
+      testimonialVideos
     };
   }
 
@@ -566,11 +631,22 @@ export class ProductService {
       include: [
         { model: Category, as: "category", paranoid: false },
         { model: ProductVariant, as: "variants", required: false },
-        { model: ProductImage, as: "images", required: false }
+        { model: ProductImage, as: "images", required: false },
+        { model: ProductFeature, as: "features", required: false },
+        {
+          model: ProductMediaAssignment,
+          as: "mediaAssignments",
+          required: false,
+          include: [{ model: MediaAsset, as: "mediaAsset" }]
+        }
       ],
       order: [
         [{ model: ProductVariant, as: "variants" }, "display_order", "ASC"],
-        [{ model: ProductImage, as: "images" }, "sort_order", "ASC"]
+        [{ model: ProductImage, as: "images" }, "sort_order", "ASC"],
+        [{ model: ProductFeature, as: "features" }, "display_order", "ASC"],
+        [{ model: ProductFeature, as: "features" }, "id", "ASC"],
+        [{ model: ProductMediaAssignment, as: "mediaAssignments" }, "display_order", "ASC"],
+        [{ model: ProductMediaAssignment, as: "mediaAssignments" }, "id", "ASC"]
       ],
       ...(transaction ? { transaction } : {})
     });
@@ -584,6 +660,10 @@ export class ProductService {
 
     const variants = (product.variants || []).map(formatVariantDTO);
     const images = (product.images || []).map((img) => formatImageDTO(img, true));
+    const features = (product.features || []).map(formatFeatureDTO);
+    const mediaAssignments = (product.mediaAssignments || []).map(formatMediaAssignmentDTO);
+    const productVideos = mediaAssignments.filter((a) => a.mediaRole === "product_video");
+    const testimonialVideos = mediaAssignments.filter((a) => a.mediaRole === "testimonial_video");
     const primaryImg: typeof images[0] | null = images.find((img) => img.isPrimary) ?? (images.length > 0 ? images[0] ?? null : null);
 
     return {
@@ -618,6 +698,9 @@ export class ProductService {
       primaryImage: primaryImg,
       variants,
       images,
+      features,
+      productVideos,
+      testimonialVideos,
       createdAt: product.created_at.toISOString(),
       updatedAt: product.updated_at.toISOString(),
       deletedAt: product.deleted_at?.toISOString() ?? null,
@@ -723,6 +806,51 @@ export class ProductService {
         }
 
         await refreshVariantProductAggregates(productId, t);
+      }
+
+      if (input.features && input.features.length > 0) {
+        const featureCount = input.features.length;
+        const featureIds = await IdSequenceService.allocateIdRange(DATABASE_TABLE_NAMES.productFeatures, featureCount, t);
+
+        for (let i = 0; i < featureCount; i++) {
+          const fInput = input.features[i]!;
+          const fId = featureIds[i]!;
+
+          await ProductFeature.create(
+            {
+              id: fId,
+              product_id: productId,
+              label: fInput.label,
+              display_order: fInput.displayOrder ?? i
+            },
+            { transaction: t }
+          );
+        }
+      }
+
+      if (input.mediaAssignments && input.mediaAssignments.length > 0) {
+        const assignmentCount = input.mediaAssignments.length;
+        const assignmentIds = await IdSequenceService.allocateIdRange(DATABASE_TABLE_NAMES.productMediaAssignments, assignmentCount, t);
+
+        for (let i = 0; i < assignmentCount; i++) {
+          const mInput = input.mediaAssignments[i]!;
+          const mId = assignmentIds[i]!;
+          await assertVideoMediaAsset(mInput.mediaAssetId, t);
+
+          await ProductMediaAssignment.create(
+            {
+              id: mId,
+              product_id: productId,
+              media_asset_id: mInput.mediaAssetId,
+              media_role: mInput.mediaRole,
+              title: mInput.title ?? null,
+              caption: mInput.caption ?? null,
+              display_order: mInput.displayOrder ?? i,
+              active: mInput.active ?? true
+            },
+            { transaction: t }
+          );
+        }
       }
 
       const reloaded = await Product.findByPk(productId, { transaction: t });
@@ -873,7 +1001,11 @@ export class ProductService {
   // Duplicate Product
   static async duplicateProduct(id: number): Promise<AdminProductDetailJSON> {
     const source = await Product.findByPk(id, {
-      include: [{ model: ProductVariant, as: "variants" }]
+      include: [
+        { model: ProductVariant, as: "variants" },
+        { model: ProductFeature, as: "features" },
+        { model: ProductMediaAssignment, as: "mediaAssignments" }
+      ]
     });
 
     if (!source) {
@@ -946,6 +1078,50 @@ export class ProductService {
         }
 
         await refreshVariantProductAggregates(newProductId, t);
+      }
+
+      if (source.features && source.features.length > 0) {
+        const featureCount = source.features.length;
+        const featureIds = await IdSequenceService.allocateIdRange(DATABASE_TABLE_NAMES.productFeatures, featureCount, t);
+
+        for (let i = 0; i < featureCount; i++) {
+          const f = source.features[i]!;
+          const newFeatureId = featureIds[i]!;
+
+          await ProductFeature.create(
+            {
+              id: newFeatureId,
+              product_id: newProductId,
+              label: f.label,
+              display_order: f.display_order
+            },
+            { transaction: t }
+          );
+        }
+      }
+
+      if (source.mediaAssignments && source.mediaAssignments.length > 0) {
+        const assignmentCount = source.mediaAssignments.length;
+        const assignmentIds = await IdSequenceService.allocateIdRange(DATABASE_TABLE_NAMES.productMediaAssignments, assignmentCount, t);
+
+        for (let i = 0; i < assignmentCount; i++) {
+          const a = source.mediaAssignments[i]!;
+          const newAssignmentId = assignmentIds[i]!;
+
+          await ProductMediaAssignment.create(
+            {
+              id: newAssignmentId,
+              product_id: newProductId,
+              media_asset_id: a.media_asset_id,
+              media_role: a.media_role,
+              title: a.title,
+              caption: a.caption,
+              display_order: a.display_order,
+              active: a.active
+            },
+            { transaction: t }
+          );
+        }
       }
 
       return await ProductService.getAdminProductById(newProductId, t);

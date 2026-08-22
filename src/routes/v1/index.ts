@@ -10,6 +10,8 @@ import { storefrontProductRouter } from "../../models/ProductModels/storefront-p
 import { adminProductRouter } from "../../models/ProductModels/admin-product.routes.js";
 import { adminVariantRouter } from "../../models/ProductModels/admin-variant.routes.js";
 import { adminImageRouter } from "../../models/ProductModels/admin-image.routes.js";
+import { adminFeatureRouter } from "../../models/ProductModels/admin-feature.routes.js";
+import { adminProductMediaRouter } from "../../models/ProductModels/admin-product-media.routes.js";
 import { adminMediaRouter } from "../../models/MediaModels/admin-media.routes.js";
 import { adminDashboardRouter } from "../../models/DashboardModels/admin-dashboard.routes.js";
 import { storefrontCartRouter } from "../../models/CartModels/storefront-cart.routes.js";
@@ -27,6 +29,10 @@ import { payuRefundWebhookRouter } from "../../models/RefundModels/payu-refund-w
 import { adminShipmentRouter } from "../../models/ShipmentModels/admin-shipment.routes.js";
 import { storefrontNewsletterRouter } from "../../models/NewsletterModels/storefront-newsletter.routes.js";
 import { adminNewsletterRouter } from "../../models/NewsletterModels/admin-newsletter.routes.js";
+import { adminSettingsRouter } from "../../models/SettingsModels/admin-settings.routes.js";
+import { storefrontSettingsRouter } from "../../models/SettingsModels/storefront-settings.routes.js";
+import storefrontContactRouter from "../../models/ContactModels/storefront-contact.routes.js";
+import adminContactRouter from "../../models/ContactModels/admin-contact.routes.js";
 
 export const v1Router = Router();
 
@@ -40,6 +46,8 @@ v1Router.use("/storefront/products", storefrontProductRouter);
 v1Router.use("/admin/products", adminProductRouter);
 v1Router.use("/admin/products", adminVariantRouter);
 v1Router.use("/admin/products", adminImageRouter);
+v1Router.use("/admin/products", adminFeatureRouter);
+v1Router.use("/admin/products", adminProductMediaRouter);
 v1Router.use("/admin/media", adminMediaRouter);
 v1Router.use("/admin/dashboard", adminDashboardRouter);
 v1Router.use("/storefront/cart", storefrontCartRouter);
@@ -57,6 +65,14 @@ v1Router.use("/storefront/newsletter", storefrontNewsletterRouter);
 // super_admin) so /admin/newsletter/* is matched here first instead of falling
 // through into that router's super_admin-only gate.
 v1Router.use("/admin/newsletter", adminNewsletterRouter);
+// Same reasoning as /admin/newsletter above — registered ahead of the broad
+// adminRefundRouter mount so /admin/settings/* is matched here first.
+v1Router.use("/admin/settings", adminSettingsRouter);
+v1Router.use("/storefront/store-profile", storefrontSettingsRouter);
+v1Router.use("/storefront/contact-enquiries", storefrontContactRouter);
+// Same reasoning as /admin/newsletter above — registered ahead of the broad
+// adminRefundRouter mount so /admin/contact-enquiries/* is matched here first.
+v1Router.use("/admin/contact-enquiries", adminContactRouter);
 v1Router.use("/admin", adminRefundRouter);
 v1Router.use("/admin/shipments", adminShipmentRouter);
 v1Router.use("/payments/payu", payuRefundWebhookRouter);

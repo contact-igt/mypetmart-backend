@@ -6,6 +6,8 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   products: "products",
   productVariants: "product_variants",
   productImages: "product_images",
+  productFeatures: "product_features",
+  productMediaAssignments: "product_media_assignments",
   carts: "carts",
   cartItems: "cart_items",
   orders: "orders",
@@ -24,7 +26,8 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   passwordResetTokens: "password_reset_tokens",
   wishlists: "wishlists",
   mediaAssets: "media_assets",
-  newsletterSubscribers: "newsletter_subscribers"
+  newsletterSubscribers: "newsletter_subscribers",
+  notificationLog: "notification_log"
 });
 
 export const AUTH_CHALLENGE_PURPOSE_VALUES = ["email_verification", "password_reset"] as const;
@@ -44,6 +47,19 @@ export type PetType = (typeof PET_TYPE_VALUES)[number];
 
 export const PRODUCT_STATUS_VALUES = ["active", "draft", "archived"] as const;
 export type ProductStatus = (typeof PRODUCT_STATUS_VALUES)[number];
+
+// V1 media library types: image (existing) and video (MP4 only — see
+// object-storage.service.ts's MEDIA_LIBRARY_VIDEO_TYPES). Derived server-side
+// from the verified upload's MIME type at MediaAssetService.completeUpload,
+// never trusted from client input.
+export const MEDIA_ASSET_TYPE_VALUES = ["image", "video"] as const;
+export type MediaAssetType = (typeof MEDIA_ASSET_TYPE_VALUES)[number];
+
+// V1 Product<->MediaAsset assignment roles (Phase B). Enhanced Content
+// (future ProductContentBlock) deliberately does not reuse this enum — see
+// product_media_assignments schema comment.
+export const PRODUCT_MEDIA_ROLE_VALUES = ["product_video", "testimonial_video"] as const;
+export type ProductMediaRole = (typeof PRODUCT_MEDIA_ROLE_VALUES)[number];
 
 export const CART_STATUS_VALUES = ["active", "ordered", "abandoned"] as const;
 export type CartStatus = (typeof CART_STATUS_VALUES)[number];
@@ -131,6 +147,47 @@ export type ContactEnquiryStatus = (typeof CONTACT_ENQUIRY_STATUS_VALUES)[number
 // "unsubscribed", so there is only ever one verification flow to reason about.
 export const NEWSLETTER_SUBSCRIBER_STATUS_VALUES = ["pending", "subscribed", "unsubscribed"] as const;
 export type NewsletterSubscriberStatus = (typeof NEWSLETTER_SUBSCRIBER_STATUS_VALUES)[number];
+
+// One row per (event_type, entity_type, entity_id) — see NOTIFICATION_EVENT_TYPE_VALUES
+// below for what entity_id means per event. The UNIQUE constraint on that
+// triple (see schema-definition.ts) is the durable, crash-safe idempotency
+// guarantee for transactional emails: a claim row is inserted BEFORE the
+// email is sent, so a replayed webhook/retry that races a prior successful
+// send always loses the INSERT (UniqueConstraintError) and skips sending,
+// even across process restarts. This deliberately does not use an in-memory
+// Set anywhere. See services/notification/notification.service.ts.
+export const NOTIFICATION_EVENT_TYPE_VALUES = [
+  "ORDER_PLACED",
+  "PAYMENT_SUCCESSFUL",
+  "PAYMENT_FAILED",
+  "ORDER_PROCESSING",
+  "ORDER_SHIPPED",
+  "ORDER_OUT_FOR_DELIVERY",
+  "ORDER_DELIVERED",
+  "RETURN_REQUESTED",
+  "RETURN_APPROVED",
+  "RETURN_REJECTED",
+  "REFUND_INITIATED",
+  "REFUND_SUCCEEDED",
+  "REFUND_FAILED",
+  "REPLACEMENT_APPROVED",
+  "REPLACEMENT_STOCK_UNAVAILABLE",
+  "REPLACEMENT_SHIPPED",
+  "REPLACEMENT_COMPLETED"
+] as const;
+export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPE_VALUES)[number];
+
+// What entity_id refers to for a given event_type — e.g. PAYMENT_SUCCESSFUL
+// is keyed by entity_type "order" (dedup is per-Order: whichever Payment
+// attempt first succeeds sends the one email for that Order), while
+// PAYMENT_FAILED is keyed by "payment" (each distinct failed attempt is its
+// own real, customer-meaningful event). See commerce-notifications.service.ts
+// for the full per-event rationale.
+export const NOTIFICATION_ENTITY_TYPE_VALUES = ["order", "payment", "return", "refund", "replacement", "shipment"] as const;
+export type NotificationEntityType = (typeof NOTIFICATION_ENTITY_TYPE_VALUES)[number];
+
+export const NOTIFICATION_STATUS_VALUES = ["pending", "sent", "failed", "skipped"] as const;
+export type NotificationStatus = (typeof NOTIFICATION_STATUS_VALUES)[number];
 
 export const DEFAULT_COUNTRY_CODE = "IN";
 export const DEFAULT_CURRENCY_CODE = "INR";

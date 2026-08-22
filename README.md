@@ -120,8 +120,13 @@ npm run db:schema:verify
 npm run test:migrations
 npm run db:seed:status
 npm run db:seed
+npm run db:seed:catalog:production:preview
+npm run db:seed:catalog:production
+npm run db:seed:catalog:production:replace
 npm run test:seeders
 ```
+
+`db:seed:catalog:production` copies the current, non-deleted production categories, products, variants, and product images into an empty local catalog. Use the explicit `:replace` command to replace an existing local catalog; it is blocked when carts, orders, wishlists, or replacements reference local products. The command compares migration histories, reads production in a read-only transaction, and writes local data atomically. Product image URLs are retained, while `media_asset_id` links are cleared so production users and media-library records are never copied.
 
 Rollback commands for a local/disposable database only:
 
