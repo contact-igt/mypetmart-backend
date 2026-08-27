@@ -133,3 +133,20 @@ export class OrderCancelRequiresSuperAdminError extends OrderError {
     this.name = "OrderCancelRequiresSuperAdminError";
   }
 }
+
+// Editing the delivery address of a terminal Order (cancelled/delivered/a
+// return already in progress) has no useful effect and risks confusing a
+// completed fulfilment record — mirrors the same "terminal states are
+// closed to further mutation" principle isValidOrderStatusTransition already
+// enforces for order.status itself.
+export class OrderShippingAddressNotEditableError extends OrderError {
+  public constructor(orderId: number, status: string) {
+    super(
+      "ORDER_SHIPPING_ADDRESS_NOT_EDITABLE",
+      `Order '${orderId}' shipping address cannot be edited while the order status is '${status}'.`,
+      422,
+      { orderId, status }
+    );
+    this.name = "OrderShippingAddressNotEditableError";
+  }
+}

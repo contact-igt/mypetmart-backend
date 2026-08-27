@@ -43,6 +43,7 @@ async function buildWishlistProductSummary(product: Product, transaction?: Trans
     name: product.name,
     slug: product.slug,
     brand: product.brand,
+    description: product.description,
     petType: product.pet_type,
     price: formatMoney(product.price),
     compareAtPrice: product.compare_at_price ? formatMoney(product.compare_at_price) : null,

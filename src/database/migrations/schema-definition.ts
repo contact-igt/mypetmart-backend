@@ -9,6 +9,9 @@ import {
   MEDIA_ASSET_TYPE_VALUES,
   NEWSLETTER_SUBSCRIBER_STATUS_VALUES,
   PRODUCT_MEDIA_ROLE_VALUES,
+  PRODUCT_CONTENT_LAYOUT_VALUES,
+  REVIEW_STATUS_VALUES,
+  REVIEW_SOURCE_VALUES,
   NOTIFICATION_ENTITY_TYPE_VALUES,
   NOTIFICATION_EVENT_TYPE_VALUES,
   NOTIFICATION_STATUS_VALUES,
@@ -193,6 +196,9 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`length_cm\` DECIMAL(8,2) NULL,
         \`width_cm\` DECIMAL(8,2) NULL,
         \`height_cm\` DECIMAL(8,2) NULL,
+        \`how_to_use\` TEXT NULL,
+        \`care_instructions\` TEXT NULL,
+        \`safety_info\` TEXT NULL,
         ${createdUpdated},
         ${deletedAt},
         PRIMARY KEY (\`id\`),
@@ -882,6 +888,95 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         KEY \`product_features_product_order_idx\` (\`product_id\`, \`display_order\`),
         CONSTRAINT \`fk_product_features_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
         CONSTRAINT \`chk_product_features_display_order_nonnegative\` CHECK (\`display_order\` >= 0)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.productReviews,
+    migrationName: "054-create-product-reviews",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.productReviews)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NOT NULL,
+        \`user_id\` INT UNSIGNED NULL,
+        \`order_item_id\` INT UNSIGNED NULL,
+        \`rating\` TINYINT UNSIGNED NOT NULL,
+        \`title\` VARCHAR(160) NULL,
+        \`review\` TEXT NOT NULL,
+        \`status\` ${enumSql(REVIEW_STATUS_VALUES)} NOT NULL DEFAULT 'pending',
+        \`verified_purchase\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`customer_name\` VARCHAR(120) NULL,
+        \`review_source\` ${enumSql(REVIEW_SOURCE_VALUES)} NOT NULL DEFAULT 'customer',
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`product_reviews_user_product_unique\` (\`user_id\`, \`product_id\`),
+        KEY \`product_reviews_product_status_created_idx\` (\`product_id\`, \`status\`, \`created_at\`),
+        KEY \`product_reviews_status_idx\` (\`status\`),
+        KEY \`product_reviews_order_item_id_idx\` (\`order_item_id\`),
+        CONSTRAINT \`fk_product_reviews_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_product_reviews_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_product_reviews_order_item_id\` FOREIGN KEY (\`order_item_id\`) REFERENCES \`order_items\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_product_reviews_rating_range\` CHECK (\`rating\` BETWEEN 1 AND 5)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.productContentBlocks,
+    migrationName: "053-create-product-content-blocks",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.productContentBlocks)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NOT NULL,
+        \`media_asset_id\` INT UNSIGNED NULL,
+        \`heading\` VARCHAR(160) NULL,
+        \`description\` TEXT NULL,
+        \`layout\` ${enumSql(PRODUCT_CONTENT_LAYOUT_VALUES)} NOT NULL DEFAULT 'media_left',
+        \`display_order\` INT NOT NULL DEFAULT 0,
+        \`active\` TINYINT(1) NOT NULL DEFAULT 1,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        KEY \`product_content_blocks_product_order_idx\` (\`product_id\`, \`display_order\`),
+        KEY \`product_content_blocks_media_asset_id_idx\` (\`media_asset_id\`),
+        CONSTRAINT \`fk_product_content_blocks_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_product_content_blocks_media_asset_id\` FOREIGN KEY (\`media_asset_id\`) REFERENCES \`media_assets\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_product_content_blocks_display_order_nonnegative\` CHECK (\`display_order\` >= 0)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.productSpecifications,
+    migrationName: "051-create-product-specifications",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.productSpecifications)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NOT NULL,
+        \`label\` VARCHAR(80) NOT NULL,
+        \`value\` VARCHAR(200) NOT NULL,
+        \`display_order\` INT NOT NULL DEFAULT 0,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`product_specifications_product_label_unique\` (\`product_id\`, \`label\`),
+        KEY \`product_specifications_product_order_idx\` (\`product_id\`, \`display_order\`),
+        CONSTRAINT \`fk_product_specifications_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_product_specifications_display_order_nonnegative\` CHECK (\`display_order\` >= 0)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.productFaqs,
+    migrationName: "055-create-product-faqs",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.productFaqs)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NOT NULL,
+        \`question\` VARCHAR(200) NOT NULL,
+        \`answer\` TEXT NOT NULL,
+        \`display_order\` INT NOT NULL DEFAULT 0,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        KEY \`product_faqs_product_order_idx\` (\`product_id\`, \`display_order\`),
+        CONSTRAINT \`fk_product_faqs_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_product_faqs_display_order_nonnegative\` CHECK (\`display_order\` >= 0)
       ) ${engine};
     `
   },

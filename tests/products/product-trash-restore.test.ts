@@ -9,6 +9,7 @@ import { IdSequenceService } from "../../src/database/sequences/id-sequence.serv
 import { AuthSession } from "../../src/database/tables/AuthSessionTable/index.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
+import { ProductContentBlock } from "../../src/database/tables/ProductContentBlockTable/index.js";
 import { ProductFeature } from "../../src/database/tables/ProductFeatureTable/index.js";
 import { ProductMediaAssignment } from "../../src/database/tables/ProductMediaAssignmentTable/index.js";
 import { ProductImage } from "../../src/database/tables/ProductImageTable/index.js";
@@ -60,6 +61,7 @@ describe("Safe Product Trash and Restore", () => {
     await ProductVariant.destroy({ where: {}, force: true });
     await ProductFeature.destroy({ where: {}, force: true });
     await ProductMediaAssignment.destroy({ where: {}, force: true });
+    await ProductContentBlock.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, force: true });
     await Category.destroy({ where: {}, force: true });
     await sequelize.query("DELETE FROM `catalog_sku_reservations`");

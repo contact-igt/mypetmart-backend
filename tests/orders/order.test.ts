@@ -7,7 +7,10 @@ import { app } from "../../src/app.js";
 import { paymentConfig } from "../../src/config/payment.config.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
+import { ProductContentBlock } from "../../src/database/tables/ProductContentBlockTable/index.js";
+import { ProductFaq } from "../../src/database/tables/ProductFaqTable/index.js";
 import { ProductFeature } from "../../src/database/tables/ProductFeatureTable/index.js";
+import { ProductReview } from "../../src/database/tables/ProductReviewTable/index.js";
 import { ProductMediaAssignment } from "../../src/database/tables/ProductMediaAssignmentTable/index.js";
 import { ProductVariant } from "../../src/database/tables/ProductVariantTable/index.js";
 import { ProductImage } from "../../src/database/tables/ProductImageTable/index.js";
@@ -19,6 +22,8 @@ import { OrderItem } from "../../src/database/tables/OrderItemTable/index.js";
 import { OrderNote } from "../../src/database/tables/OrderNoteTable/index.js";
 import { Payment } from "../../src/database/tables/PaymentTable/index.js";
 import { Refund } from "../../src/database/tables/RefundTable/index.js";
+import { Shipment } from "../../src/database/tables/ShipmentTable/index.js";
+import { buildBusinessReference } from "../../src/utils/reference-generator.js";
 import { User } from "../../src/database/tables/UserTable/index.js";
 import { AuthSession } from "../../src/database/tables/AuthSessionTable/index.js";
 import { IdSequenceService } from "../../src/database/sequences/id-sequence.service.js";
@@ -285,9 +290,11 @@ describe("Order Backend Integration Tests", () => {
   });
 
   afterAll(async () => {
+    await Shipment.destroy({ where: {}, truncate: false, force: true });
     await Refund.destroy({ where: {}, truncate: false, force: true });
     await Payment.destroy({ where: {}, truncate: false, force: true });
     await OrderNote.destroy({ where: {}, truncate: false, force: true });
+    await ProductReview.destroy({ where: {}, truncate: false, force: true });
     await OrderItem.destroy({ where: {}, truncate: false, force: true });
     await Order.destroy({ where: {}, truncate: false, force: true });
     await CartItem.destroy({ where: {}, truncate: false, force: true });
@@ -297,6 +304,8 @@ describe("Order Backend Integration Tests", () => {
     await ProductVariant.destroy({ where: {}, truncate: false, force: true });
     await ProductFeature.destroy({ where: {}, truncate: false, force: true });
     await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
+    await ProductContentBlock.destroy({ where: {}, truncate: false, force: true });
+    await ProductFaq.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     await AuthSession.destroy({ where: { user_id: [CUSTOMER_A_ID, CUSTOMER_B_ID, ADMIN_ID, SUPER_ADMIN_ID] }, force: true });
@@ -305,8 +314,10 @@ describe("Order Backend Integration Tests", () => {
   });
 
   beforeEach(async () => {
+    await Shipment.destroy({ where: {}, truncate: false, force: true });
     await Refund.destroy({ where: {}, truncate: false, force: true });
     await OrderNote.destroy({ where: {}, truncate: false, force: true });
+    await ProductReview.destroy({ where: {}, truncate: false, force: true });
     await OrderItem.destroy({ where: {}, truncate: false, force: true });
     await Payment.destroy({ where: {}, truncate: false, force: true });
     await Order.destroy({ where: {}, truncate: false, force: true });
@@ -317,6 +328,8 @@ describe("Order Backend Integration Tests", () => {
     await ProductVariant.destroy({ where: {}, truncate: false, force: true });
     await ProductFeature.destroy({ where: {}, truncate: false, force: true });
     await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
+    await ProductContentBlock.destroy({ where: {}, truncate: false, force: true });
+    await ProductFaq.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     categoryId = await createCategory();
@@ -1592,6 +1605,230 @@ describe("Order Backend Integration Tests", () => {
       const res = await request(app).patch(`${ADMIN_ORDERS_URL}/${id}/status`).set("Authorization", `Bearer ${adminToken}`).send({ status: "confirmed" });
       expect(res.status).toBe(200);
       expect(res.body.data.status).toBe("confirmed");
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Customer Orders List — product previews, shipment summary, filters
+  // ---------------------------------------------------------------------
+  describe("Customer Orders List", () => {
+    async function createShipmentForOrder(orderId: number, overrides: Partial<{ status: string; carrier: string | null; trackingNumber: string | null }> = {}): Promise<void> {
+      await sequelize.transaction(async (t) => {
+        const id = await IdSequenceService.allocateNextId("shipments", t);
+        await Shipment.create(
+          {
+            id, shipment_number: buildBusinessReference("shipment", id), source_type: "order", source_id: orderId, order_id: orderId,
+            replacement_id: null, method: "standard", provider: "ithink", provider_order_id: `REF-${id}`,
+            provider_shipment_id: null, carrier: overrides.carrier === undefined ? "Courier A" : overrides.carrier,
+            tracking_number: overrides.trackingNumber === undefined ? `AWB-${id}` : overrides.trackingNumber,
+            service_type: "Surface", status: (overrides.status ?? "awb_assigned") as never, provider_status: "Created internally", provider_status_code: "INTERNAL_TEST_CODE",
+            pickup_warehouse_id: "warehouse-1", weight_grams: 250, length_cm: "10.00", width_cm: "8.00", height_cm: "5.00",
+            shipping_charge: "87.50", currency: "INR", shipped_at: null, delivered_at: null, cancelled_at: null, rto_at: null,
+            last_synced_at: new Date(), raw_payload: null
+          } as never,
+          { transaction: t }
+        );
+      });
+    }
+
+    it("returns up to 3 product previews with name and image, without full item objects", async () => {
+      const p1 = await createSimpleProduct({ stock: 10 });
+      const p2 = await createSimpleProduct({ stock: 10 });
+      const p3 = await createSimpleProduct({ stock: 10 });
+      const p4 = await createSimpleProduct({ stock: 10 });
+      const token = customerAToken;
+      for (const p of [p1, p2, p3, p4]) {
+        await request(app).post(`${CART_URL}/items`).set("Authorization", `Bearer ${token}`).send({ productId: p.id, quantity: 1 });
+      }
+      const address = await request(app).post(ADDRESS_URL).set("Authorization", `Bearer ${token}`).send(validAddressPayload());
+      await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${token}`).send({ savedAddressId: address.body.data.id });
+
+      const res = await request(app).get(ORDERS_URL).set("Authorization", `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const order = res.body.data.items[0];
+      expect(order.products).toHaveLength(3);
+      expect(order.products[0]).toEqual({ name: p1.name, image: null });
+      expect(order.items).toBeUndefined();
+    });
+
+    it("handles a product with no image by returning image: null rather than omitting the field", async () => {
+      const product = await createSimpleProduct({ stock: 10 });
+      const a = await addSimpleItemAndCreateAddress(customerAToken);
+      await request(app).post(`${CART_URL}/items`).set("Authorization", `Bearer ${customerAToken}`).send({ productId: product.id, quantity: 1 });
+      await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: a.addressId });
+
+      const res = await request(app).get(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`);
+      expect(res.status).toBe(200);
+      const order = res.body.data.items[0];
+      expect(order.products.every((p: { image: string | null }) => p.image === null)).toBe(true);
+    });
+
+    it("returns a customer-safe shipment summary when a shipment exists", async () => {
+      const paid = await createPaidOrder(customerAToken);
+      await createShipmentForOrder(paid.orderId, { status: "in_transit", carrier: "Courier A" });
+
+      const res = await request(app).get(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`);
+      expect(res.status).toBe(200);
+      const order = res.body.data.items.find((item: { id: number }) => item.id === paid.orderId);
+      expect(order.shipment).toEqual({ status: "in_transit", carrier: "Courier A", trackingAvailable: true });
+    });
+
+    it("returns shipment: null when the order has no shipment yet", async () => {
+      const paid = await createPaidOrder(customerAToken);
+
+      const res = await request(app).get(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`);
+      expect(res.status).toBe(200);
+      const order = res.body.data.items.find((item: { id: number }) => item.id === paid.orderId);
+      expect(order.shipment).toBeNull();
+    });
+
+    it("never exposes provider_status, provider_status_code, or failureReason on the listing shipment summary", async () => {
+      const paid = await createPaidOrder(customerAToken);
+      await createShipmentForOrder(paid.orderId, { status: "in_transit" });
+
+      const res = await request(app).get(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`);
+      const order = res.body.data.items.find((item: { id: number }) => item.id === paid.orderId);
+      expect(Object.keys(order.shipment).sort()).toEqual(["carrier", "status", "trackingAvailable"]);
+      expect(JSON.stringify(order.shipment)).not.toContain("INTERNAL_TEST_CODE");
+    });
+
+    it("filters by order status", async () => {
+      const paid = await createPaidOrder(customerAToken);
+      const a = await addSimpleItemAndCreateAddress(customerAToken);
+      const pendingRes = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: a.addressId });
+      const pendingId = pendingRes.body.data.id;
+
+      const res = await request(app).get(ORDERS_URL).query({ status: "confirmed" }).set("Authorization", `Bearer ${customerAToken}`);
+      expect(res.status).toBe(200);
+      const ids = res.body.data.items.map((item: { id: number }) => item.id);
+      expect(ids).toContain(paid.orderId);
+      expect(ids).not.toContain(pendingId);
+    });
+
+    it("filters by placed-date range", async () => {
+      const paid = await createPaidOrder(customerAToken);
+
+      const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const resExcluded = await request(app).get(ORDERS_URL).query({ from: future }).set("Authorization", `Bearer ${customerAToken}`);
+      expect(resExcluded.body.data.items.map((item: { id: number }) => item.id)).not.toContain(paid.orderId);
+
+      const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const resIncluded = await request(app).get(ORDERS_URL).query({ from: past }).set("Authorization", `Bearer ${customerAToken}`);
+      expect(resIncluded.body.data.items.map((item: { id: number }) => item.id)).toContain(paid.orderId);
+    });
+
+    it("searches by order number only", async () => {
+      const paid = await createPaidOrder(customerAToken);
+      const orderNumber: string = (await request(app).get(`${ORDERS_URL}/${paid.orderId}`).set("Authorization", `Bearer ${customerAToken}`)).body.data.orderNumber;
+
+      const res = await request(app).get(ORDERS_URL).query({ search: orderNumber }).set("Authorization", `Bearer ${customerAToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.items.map((item: { id: number }) => item.id)).toContain(paid.orderId);
+
+      const missRes = await request(app).get(ORDERS_URL).query({ search: "NO-SUCH-ORDER-NUMBER" }).set("Authorization", `Bearer ${customerAToken}`);
+      expect(missRes.body.data.items).toHaveLength(0);
+    });
+
+    it("rejects an invalid status filter value", async () => {
+      const res = await request(app).get(ORDERS_URL).query({ status: "not_a_real_status" }).set("Authorization", `Bearer ${customerAToken}`);
+      expect(res.status).toBe(400);
+    });
+
+    it("still returns unchanged existing fields alongside the new ones (backward compatibility)", async () => {
+      const paid = await createPaidOrder(customerAToken);
+
+      const res = await request(app).get(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`);
+      const order = res.body.data.items.find((item: { id: number }) => item.id === paid.orderId);
+      expect(order.orderNumber).toEqual(expect.any(String));
+      expect(order.status).toBe("confirmed");
+      expect(order.paymentStatus).toBe("paid");
+      expect(order.itemCount).toBe(1);
+      expect(order.total).toBeDefined();
+      expect(order.placedAt).toEqual(expect.any(String));
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Customer Order Detail — payment info & refund summary
+  // ---------------------------------------------------------------------
+  describe("Customer Order Payment & Refund Summary", () => {
+    it("returns payment provider/method/status/providerOrderId/paidAt for a paid Order", async () => {
+      const paid = await createPaidOrder(customerAToken);
+
+      const res = await request(app).get(`${ORDERS_URL}/${paid.orderId}`).set("Authorization", `Bearer ${customerAToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.payments).toHaveLength(1);
+      const payment = res.body.data.payments[0];
+      expect(payment.provider).toBe("payu");
+      expect(payment.status).toBe("paid");
+      expect(payment.providerOrderId).toEqual(expect.any(String));
+      expect(payment.paidAt).toEqual(expect.any(String));
+    });
+
+    it("returns every payment attempt on the Order, including an earlier failed attempt", async () => {
+      const a = await addSimpleItemAndCreateAddress(customerAToken, { stock: 10 });
+      const orderRes = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: a.addressId });
+      const orderId = orderRes.body.data.id;
+
+      const initRes1 = await request(app).post(INITIATE_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId });
+      const fields1 = initRes1.body.data.fields;
+      const hash1 = buildPayuResponseHash(
+        { key: fields1.key, txnid: fields1.txnid, amount: fields1.amount, productinfo: fields1.productinfo, firstname: fields1.firstname, email: fields1.email, udf1: fields1.udf1, status: "failure" },
+        paymentConfig.payuSalt as string
+      );
+      await request(app)
+        .post(WEBHOOK_URL)
+        .type("form")
+        .send({ status: "failure", txnid: fields1.txnid, amount: fields1.amount, productinfo: fields1.productinfo, firstname: fields1.firstname, email: fields1.email, udf1: fields1.udf1, mihpayid: `mihpay_fail_${fields1.txnid}`, mode: "UPI", hash: hash1 });
+
+      const initRes2 = await request(app).post(INITIATE_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId });
+      const fields2 = initRes2.body.data.fields;
+      const hash2 = buildPayuResponseHash(
+        { key: fields2.key, txnid: fields2.txnid, amount: fields2.amount, productinfo: fields2.productinfo, firstname: fields2.firstname, email: fields2.email, udf1: fields2.udf1, status: "success" },
+        paymentConfig.payuSalt as string
+      );
+      await request(app)
+        .post(WEBHOOK_URL)
+        .type("form")
+        .send({ status: "success", txnid: fields2.txnid, amount: fields2.amount, productinfo: fields2.productinfo, firstname: fields2.firstname, email: fields2.email, udf1: fields2.udf1, mihpayid: `mihpay_ok_${fields2.txnid}`, mode: "UPI", hash: hash2 });
+
+      const res = await request(app).get(`${ORDERS_URL}/${orderId}`).set("Authorization", `Bearer ${customerAToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.payments).toHaveLength(2);
+      const statuses = res.body.data.payments.map((p: { status: string }) => p.status).sort();
+      expect(statuses).toEqual(["failed", "paid"]);
+    });
+
+    it("never exposes admin-only Payment fields (id, providerPaymentId, amount, currency, createdAt, failedAt) on the customer response", async () => {
+      const paid = await createPaidOrder(customerAToken);
+
+      const res = await request(app).get(`${ORDERS_URL}/${paid.orderId}`).set("Authorization", `Bearer ${customerAToken}`);
+      const payment = res.body.data.payments[0];
+      expect(Object.keys(payment).sort()).toEqual(["method", "paidAt", "providerOrderId", "provider", "refundedAt", "status"].sort());
+    });
+
+    it("returns refundSummary: null when the Order has no Refund at all", async () => {
+      const paid = await createPaidOrder(customerAToken);
+
+      const res = await request(app).get(`${ORDERS_URL}/${paid.orderId}`).set("Authorization", `Bearer ${customerAToken}`);
+      expect(res.body.data.refundSummary).toBeNull();
+    });
+
+    it("includes a cancellation-triggered refund (no Return involved) in refundSummary", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: 1, request_id: "req_cancel_summary" })));
+
+      const paid = await createPaidOrder(customerAToken, { price: "500.00", quantity: 2 });
+      const cancelRes = await request(app).patch(`${ADMIN_ORDERS_URL}/${paid.orderId}/status`).set("Authorization", `Bearer ${superAdminToken}`).send({ status: "cancelled" });
+      expect(cancelRes.status).toBe(200);
+
+      const res = await request(app).get(`${ORDERS_URL}/${paid.orderId}`).set("Authorization", `Bearer ${customerAToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.refundSummary).not.toBeNull();
+      expect(res.body.data.refundSummary.status).toBe("processing");
+      // Not yet succeeded (no PayU confirmation processed) — no money counted as moved yet.
+      expect(res.body.data.refundSummary.totalRefunded).toBe("0.00");
+
+      vi.unstubAllGlobals();
     });
   });
 });

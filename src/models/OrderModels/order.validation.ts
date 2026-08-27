@@ -60,7 +60,12 @@ const queryDate = z.string().trim().refine((value) => !Number.isNaN(Date.parse(v
 
 export const customerOrderListQuerySchema = z.object({
   page: positiveQueryInteger.optional(),
-  pageSize: queryPageSize.optional()
+  pageSize: queryPageSize.optional(),
+  status: z.enum(ORDER_STATUS_VALUES).optional(),
+  from: queryDate.optional(),
+  to: queryDate.optional(),
+  // Order number only (never customer name/email — see CustomerOrderListQuery).
+  search: z.string().trim().min(1).max(190).optional()
 });
 
 export const adminOrderListQuerySchema = z.object({
@@ -89,4 +94,33 @@ export const addOrderNoteSchema = z.object({
 export const bulkUpdateOrderStatusSchema = z.object({
   ids: z.array(z.number().int().positive()).min(1).max(100),
   status: z.enum(ORDER_STATUS_VALUES)
+});
+
+// Mirrors AddressModels/address.validation.ts's baseAddressObjectSchema
+// field-for-field (same limits/messages for name/phone/line1/line2/city/
+// state) rather than importing it directly — that schema already has
+// .superRefine() applied (Zod v4 can't .omit()/.extend() a refined schema),
+// and this endpoint intentionally diverges on two points: no
+// latitude/longitude (never accepted here — see UpdateOrderShippingAddressInput),
+// and a stricter postalCode format. The 6-digit Indian pincode regex matches
+// ShipmentModels/shipment.service.ts's own collectOrderReadinessIssues check
+// exactly, so an address accepted here can never again fail that pre-flight
+// shipment validation on pincode format alone.
+export const updateOrderShippingAddressSchema = z.object({
+  recipientName: z.string().trim().min(1, "Recipient name is required.").max(160, "Recipient name must be at most 160 characters."),
+  phone: z
+    .string()
+    .trim()
+    .min(1, "Phone is required.")
+    .max(32, "Phone must be at most 32 characters.")
+    .regex(/^[\d\s+\-()]*$/, "Invalid phone format.")
+    .refine((value) => value.replace(/\D/g, "").length >= 10, "Phone number must have at least 10 digits."),
+  line1: z.string().trim().min(1, "Address line 1 is required.").max(255, "Address line 1 must be at most 255 characters."),
+  line2: z.string().trim().max(255, "Address line 2 must be at most 255 characters.").optional(),
+  city: z.string().trim().min(1, "City is required.").max(120, "City must be at most 120 characters."),
+  state: z.string().trim().min(1, "State is required.").max(120, "State must be at most 120 characters."),
+  postalCode: z
+    .string()
+    .trim()
+    .regex(/^[1-9][0-9]{5}$/, "Postal code must be a valid 6-digit Indian pincode.")
 });

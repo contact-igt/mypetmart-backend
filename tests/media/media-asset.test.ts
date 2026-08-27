@@ -9,6 +9,8 @@ import { IdSequenceService } from "../../src/database/sequences/id-sequence.serv
 import { AuthSession } from "../../src/database/tables/AuthSessionTable/index.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
 import { MediaAsset } from "../../src/database/tables/MediaAssetTable/index.js";
+import { ProductContentBlock } from "../../src/database/tables/ProductContentBlockTable/index.js";
+import { ProductFaq } from "../../src/database/tables/ProductFaqTable/index.js";
 import { ProductImage } from "../../src/database/tables/ProductImageTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
 import { ProductFeature } from "../../src/database/tables/ProductFeatureTable/index.js";
@@ -65,9 +67,11 @@ describe("Media Gallery Integration", () => {
   beforeEach(async () => {
     vi.restoreAllMocks();
     await ProductImage.destroy({ where: {}, truncate: false, force: true });
+    await ProductContentBlock.destroy({ where: {}, truncate: false, force: true });
     await ProductVariant.destroy({ where: {}, truncate: false, force: true });
     await ProductFeature.destroy({ where: {}, truncate: false, force: true });
     await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
+    await ProductFaq.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     await MediaAsset.destroy({ where: {}, truncate: false, force: true });
@@ -366,5 +370,60 @@ describe("Media Gallery Integration", () => {
 
     expect(attached.status).toBe(201);
     expect(attached.body.data.mediaAssetId).toBe(mediaAssetId);
+  });
+
+  it("blocks deleting a Media Asset that is referenced by a Product Content Block", async () => {
+    const uploaded = await uploadMediaAsset();
+    const mediaAssetId = uploaded.body.data.id;
+    await request(app)
+      .post(`/api/v1/admin/products/${productAId}/content-blocks`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ mediaAssetId, heading: "Built for comfort" });
+
+    const response = await request(app).delete(`/api/v1/admin/media/${mediaAssetId}`).set("Authorization", `Bearer ${adminToken}`);
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe("MEDIA_ASSET_IN_USE");
+    expect(response.body.error.details).toMatchObject({ usageCount: 1, productIds: [productAId] });
+    expect(await MediaAsset.findByPk(mediaAssetId)).not.toBeNull();
+  });
+
+  it("removing a Product Content Block never deletes the shared Media Asset", async () => {
+    const uploaded = await uploadMediaAsset();
+    const mediaAssetId = uploaded.body.data.id;
+    const created = await request(app)
+      .post(`/api/v1/admin/products/${productAId}/content-blocks`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ mediaAssetId, heading: "Built for comfort" });
+    const deleteObject = vi.spyOn(objectStorageService, "deleteMediaAssetObject").mockResolvedValue();
+
+    const response = await request(app)
+      .delete(`/api/v1/admin/products/${productAId}/content-blocks/${created.body.data.id}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    expect(response.status).toBe(200);
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(await MediaAsset.findByPk(mediaAssetId)).not.toBeNull();
+  });
+
+  it("allows deleting a Media Asset once its final Content Block usage is removed", async () => {
+    const uploaded = await uploadMediaAsset();
+    const mediaAssetId = uploaded.body.data.id;
+    const created = await request(app)
+      .post(`/api/v1/admin/products/${productAId}/content-blocks`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ mediaAssetId, heading: "Built for comfort" });
+
+    await request(app)
+      .delete(`/api/v1/admin/products/${productAId}/content-blocks/${created.body.data.id}`)
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    vi.spyOn(objectStorageService, "deleteMediaAssetObject").mockResolvedValue();
+    vi.spyOn(objectStorageService, "ensureConfigured").mockReturnValue();
+
+    const response = await request(app).delete(`/api/v1/admin/media/${mediaAssetId}`).set("Authorization", `Bearer ${adminToken}`);
+
+    expect(response.status).toBe(200);
+    expect(await MediaAsset.findByPk(mediaAssetId)).toBeNull();
   });
 });

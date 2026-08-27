@@ -14,6 +14,12 @@ export type IThinkPackageInput = {
   weightKg: string;
   logistics: string;
   serviceType: string;
+  // Determined server-side by ShipmentService from the Order's own Payment
+  // records (see createInput's isCod derivation) — never trusted from any
+  // client input. "COD" carries codAmount = the payable total (nothing was
+  // captured upfront); "Prepaid" always sends codAmount "0".
+  paymentMode: "Prepaid" | "COD";
+  codAmount: string;
 };
 
 export type IThinkTrackingEvent = { status: string; statusCode: string | null; location: string | null; message: string | null; eventAt: string };
@@ -53,18 +59,26 @@ async function post(path: string, data: JsonRecord, options: { tracking?: boolea
   return payload;
 }
 
+// "prepaid" (PayU — funds already captured) vs "cod" (funds collected on
+// delivery) — determines both the payment_method value iThink is asked
+// about and which per-courier capability flag (prepaid/cod) a candidate
+// must have "Y" for. Derived server-side from the Order's own Payment
+// record by ShipmentService (see prepared.isCod) — this client itself
+// never decides payment mode, only receives it.
+export type IThinkPaymentMode = "prepaid" | "cod";
+
 export const IThinkClient = {
-  async checkServiceability(pincode: string): Promise<string[]> {
+  async checkServiceability(pincode: string, paymentMode: IThinkPaymentMode): Promise<string[]> {
     const payload = await post("/api_v3/pincode/check.json", { pincode });
     if (!success(payload.status)) throw new IThinkClientError("SERVICEABILITY_CHECK_FAILED", text(payload.html_message) ?? text(payload.message) ?? "iThink Logistics rejected the pincode check.");
     const courierMap = record(record(payload.data)?.[pincode]);
     if (!courierMap) return [];
     return Object.entries(courierMap)
-      .filter(([, details]) => { const row = record(details); return text(row?.prepaid)?.toUpperCase() === "Y" && text(row?.pickup)?.toUpperCase() === "Y"; })
+      .filter(([, details]) => { const row = record(details); return text(row?.[paymentMode])?.toUpperCase() === "Y" && text(row?.pickup)?.toUpperCase() === "Y"; })
       .map(([name]) => name.toLowerCase());
   },
 
-  async getRates(input: { toPincode: string; lengthCm: string; widthCm: string; heightCm: string; weightKg: string; productMrp: string }): Promise<Array<{ courier: string; serviceType: string; rate: string }>> {
+  async getRates(input: { toPincode: string; lengthCm: string; widthCm: string; heightCm: string; weightKg: string; productMrp: string; paymentMode: IThinkPaymentMode }): Promise<Array<{ courier: string; serviceType: string; rate: string }>> {
     if (!shippingConfig.originPincode) throw new IThinkClientError("NOT_CONFIGURED", "Origin pincode is not configured.");
     const payload = await post("/api_v3/rate/check.json", {
       from_pincode: shippingConfig.originPincode,
@@ -74,7 +88,7 @@ export const IThinkClient = {
       shipping_height_cms: input.heightCm,
       shipping_weight_kg: input.weightKg,
       order_type: "forward",
-      payment_method: "prepaid",
+      payment_method: input.paymentMode,
       product_mrp: input.productMrp,
       delivery_type: "0"
     });
@@ -83,13 +97,14 @@ export const IThinkClient = {
       const row = record(value);
       const courier = text(row?.logistic_name);
       const rate = text(row?.rate);
-      if (!courier || !rate || text(row?.prepaid)?.toUpperCase() !== "Y" || text(row?.pickup)?.toUpperCase() !== "Y") return [];
+      if (!courier || !rate || text(row?.[input.paymentMode])?.toUpperCase() !== "Y" || text(row?.pickup)?.toUpperCase() !== "Y") return [];
       return [{ courier, serviceType: text(row?.logistic_service_type) ?? "", rate }];
     });
   },
 
   async createShipment(input: IThinkPackageInput): Promise<{ awb: string | null; reference: string | null; courier: string | null; trackingUrl: string | null }> {
     if (!shippingConfig.pickupAddressId || !shippingConfig.returnAddressId) throw new IThinkClientError("NOT_CONFIGURED", "iThink warehouse configuration is incomplete.");
+    if (!shippingConfig.storeId) throw new IThinkClientError("NOT_CONFIGURED", "iThink store ID is not configured.");
     const address = input.recipient;
     const payload = await post("/api_v3/order/add.json", {
       shipments: [{
@@ -102,8 +117,17 @@ export const IThinkClient = {
         products: input.products.map((product) => ({ product_name: product.name, product_sku: product.sku, product_quantity: String(product.quantity), product_price: product.price, product_discount: "0" })),
         shipment_length: input.lengthCm, shipment_width: input.widthCm, shipment_height: input.heightCm, weight: input.weightKg,
         shipping_charges: "0", giftwrap_charges: "0", transaction_charges: "0", total_discount: "0", first_attemp_discount: "0",
-        cod_charges: "0", advance_amount: input.totalAmount, cod_amount: "0", payment_mode: "Prepaid", reseller_name: "", eway_bill_number: "", gst_number: "",
-        return_address_id: shippingConfig.returnAddressId
+        // Prepaid: the full amount was already captured by PayU, so nothing
+        // is collected on delivery (cod_amount "0"). COD: nothing was
+        // captured upfront (advance_amount "0"), the full amount is
+        // collected on delivery (cod_amount = codAmount).
+        cod_charges: "0",
+        advance_amount: input.paymentMode === "COD" ? "0" : input.totalAmount,
+        cod_amount: input.paymentMode === "COD" ? input.codAmount : "0",
+        payment_mode: input.paymentMode,
+        reseller_name: "", eway_bill_number: "", gst_number: "",
+        return_address_id: shippingConfig.returnAddressId,
+        store_id: shippingConfig.storeId
       }],
       pickup_address_id: shippingConfig.pickupAddressId,
       logistics: input.logistics,

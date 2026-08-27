@@ -7,6 +7,7 @@ import {
   handleAdminGetOrderById,
   handleAdminGetOrderSummary,
   handleAdminListOrders,
+  handleAdminUpdateOrderShippingAddress,
   handleAdminUpdateOrderStatus
 } from "./admin-order.controller.js";
 
@@ -35,6 +36,10 @@ adminOrderRouter.get("/:orderId", (req, res, next) => {
 
 adminOrderRouter.patch("/:orderId/status", (req, res, next) => {
   void handleAdminUpdateOrderStatus(req, res, next);
+});
+
+adminOrderRouter.patch("/:orderId/shipping-address", (req, res, next) => {
+  void handleAdminUpdateOrderShippingAddress(req, res, next);
 });
 
 adminOrderRouter.post("/:orderId/notes", (req, res, next) => {

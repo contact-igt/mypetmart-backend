@@ -37,6 +37,26 @@ describe("environment configuration", () => {
     expect(config.DB_NAME).toBe("mypetmart");
     expect(config.DB_LOGGING).toBe(false);
     expect(config.DB_POOL_MAX).toBe(10);
+    expect(config.SHIPMENT_NUMBER_PREFIX).toBe("TEST-SHP");
+  });
+
+  it("loads an explicit shipment number prefix", () => {
+    expect(parseEnvironmentConfig(createValidEnvironment({ SHIPMENT_NUMBER_PREFIX: "SHP" })).SHIPMENT_NUMBER_PREFIX).toBe("SHP");
+  });
+
+  it.each(["", "test-shp", "TEST SHP", "TEST/SHP", "TEST--SHP", "A".repeat(25)])("rejects unsafe shipment number prefix %j", (prefix) => {
+    expect(() => parseEnvironmentConfig(createValidEnvironment({ SHIPMENT_NUMBER_PREFIX: prefix }))).toThrow(EnvironmentValidationError);
+  });
+
+  it("requires an explicit shipment number prefix in production", () => {
+    expect(() => parseEnvironmentConfig(createValidEnvironment({ NODE_ENV: "production", PRODUCT_SAFE_TRASH_CUTOFF: "2026-08-11T14:00:00.000Z" }))).toThrow(
+      /SHIPMENT_NUMBER_PREFIX is required/u
+    );
+  });
+
+  it("accepts the production shipment number prefix", () => {
+    const config = parseEnvironmentConfig(createValidEnvironment({ NODE_ENV: "production", PRODUCT_SAFE_TRASH_CUTOFF: "2026-08-11T14:00:00.000Z", SHIPMENT_NUMBER_PREFIX: "SHP" }));
+    expect(config.SHIPMENT_NUMBER_PREFIX).toBe("SHP");
   });
 
   it("fails when a required database variable is missing", () => {
@@ -97,6 +117,52 @@ describe("environment configuration", () => {
     expect(config.R2_MAX_IMAGE_SIZE_BYTES).toBe(5_000_000);
   });
 
+  it("loads and preserves the iThink Store ID from environment configuration", () => {
+    const config = parseEnvironmentConfig(
+      createValidEnvironment({
+        ITHINK_ACCESS_TOKEN: "test-access-token",
+        ITHINK_SECRET_KEY: "test-secret-key",
+        ITHINK_STORE_ID: "27377",
+        ITHINK_PICKUP_ADDRESS_ID: "108362",
+        ITHINK_RETURN_ADDRESS_ID: "108362",
+        ITHINK_ORIGIN_PINCODE: "600077"
+      })
+    );
+
+    expect(config.ITHINK_STORE_ID).toBe("27377");
+    expect(config.ITHINK_PICKUP_ADDRESS_ID).toBe("108362");
+  });
+
+  it("requires Store ID when iThink Logistics is configured", () => {
+    expect(() =>
+      parseEnvironmentConfig(
+        createValidEnvironment({
+          ITHINK_ACCESS_TOKEN: "test-access-token",
+          ITHINK_SECRET_KEY: "test-secret-key",
+          ITHINK_PICKUP_ADDRESS_ID: "108362",
+          ITHINK_RETURN_ADDRESS_ID: "108362",
+          ITHINK_ORIGIN_PINCODE: "600077"
+        })
+      )
+    ).toThrow(EnvironmentValidationError);
+
+    try {
+      parseEnvironmentConfig(
+        createValidEnvironment({
+          ITHINK_ACCESS_TOKEN: "test-access-token",
+          ITHINK_SECRET_KEY: "test-secret-key",
+          ITHINK_PICKUP_ADDRESS_ID: "108362",
+          ITHINK_RETURN_ADDRESS_ID: "108362",
+          ITHINK_ORIGIN_PINCODE: "600077"
+        })
+      );
+    } catch (error) {
+      expect(String(error)).toContain("ITHINK_STORE_ID is required when iThink Logistics is configured.");
+      expect(String(error)).not.toContain("test-secret-key");
+      expect(String(error)).not.toContain("test-access-token");
+    }
+  });
+
   it("rejects a Product image policy above the 5 MiB Admin contract", () => {
     expect(() => parseEnvironmentConfig(createValidEnvironment({ R2_MAX_IMAGE_SIZE_BYTES: String(5 * 1024 * 1024 + 1) }))).toThrow(
       EnvironmentValidationError
@@ -104,12 +170,12 @@ describe("environment configuration", () => {
   });
 
   it("requires an explicit safe Product trash rollout cutoff in production", () => {
-    expect(() => parseEnvironmentConfig(createValidEnvironment({ NODE_ENV: "production" }))).toThrow(EnvironmentValidationError);
+    expect(() => parseEnvironmentConfig(createValidEnvironment({ NODE_ENV: "production", SHIPMENT_NUMBER_PREFIX: "SHP" }))).toThrow(EnvironmentValidationError);
   });
 
   it("accepts and preserves an ISO Product trash rollout cutoff", () => {
     const cutoff = "2026-08-11T14:00:00.000Z";
-    const config = parseEnvironmentConfig(createValidEnvironment({ NODE_ENV: "production", PRODUCT_SAFE_TRASH_CUTOFF: cutoff }));
+    const config = parseEnvironmentConfig(createValidEnvironment({ NODE_ENV: "production", PRODUCT_SAFE_TRASH_CUTOFF: cutoff, SHIPMENT_NUMBER_PREFIX: "SHP" }));
 
     expect(config.PRODUCT_SAFE_TRASH_CUTOFF).toBe(cutoff);
   });
@@ -117,6 +183,7 @@ describe("environment configuration", () => {
   it("rejects production R2 placeholder secrets without echoing their values", () => {
     const environment = createValidEnvironment({
       NODE_ENV: "production",
+      SHIPMENT_NUMBER_PREFIX: "SHP",
       R2_ACCOUNT_ID: "account-id",
       R2_ACCESS_KEY_ID: "replace_with_r2_access_key_id",
       R2_SECRET_ACCESS_KEY: "replace_with_r2_secret_access_key",

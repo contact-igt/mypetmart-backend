@@ -36,7 +36,7 @@ const R2_REQUIRED_FIELDS = [
   "R2_UPLOAD_INTENT_SECRET"
 ] as const;
 
-const ITHINK_REQUIRED_FIELDS = ["ITHINK_ACCESS_TOKEN", "ITHINK_SECRET_KEY", "ITHINK_PICKUP_ADDRESS_ID", "ITHINK_RETURN_ADDRESS_ID", "ITHINK_ORIGIN_PINCODE"] as const;
+const ITHINK_REQUIRED_FIELDS = ["ITHINK_ACCESS_TOKEN", "ITHINK_SECRET_KEY", "ITHINK_STORE_ID", "ITHINK_PICKUP_ADDRESS_ID", "ITHINK_RETURN_ADDRESS_ID", "ITHINK_ORIGIN_PINCODE"] as const;
 
 function loadLocalEnvironmentFile(): void {
   if (existsSync(".env")) {
@@ -124,6 +124,14 @@ const environmentSchema = z
     PORT: integerFromString("PORT", 1, 65535).default(5000),
     LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
     REQUEST_BODY_LIMIT: requiredString("REQUEST_BODY_LIMIT").default("1mb"),
+    SHIPMENT_NUMBER_PREFIX: z.preprocess(
+      (value) => (typeof value === "string" ? value.trim() : value),
+      z
+        .string({ error: "SHIPMENT_NUMBER_PREFIX is required." })
+        .min(1, "SHIPMENT_NUMBER_PREFIX is required.")
+        .max(24, "SHIPMENT_NUMBER_PREFIX must be at most 24 characters.")
+        .regex(/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/u, "SHIPMENT_NUMBER_PREFIX may contain only uppercase letters, numbers, and single hyphens.")
+    ),
 
     STOREFRONT_ORIGIN: requiredString("STOREFRONT_ORIGIN"),
     ADMIN_ORIGIN: requiredString("ADMIN_ORIGIN"),
@@ -225,6 +233,7 @@ const environmentSchema = z
     ITHINK_SECRET_KEY: optionalTrimmedStringSchema,
     ITHINK_API_BASE_URL: z.preprocess(optionalString, z.url("ITHINK_API_BASE_URL must be a valid URL.").optional()),
     ITHINK_TRACKING_BASE_URL: z.preprocess(optionalString, z.url("ITHINK_TRACKING_BASE_URL must be a valid URL.").optional()),
+    ITHINK_STORE_ID: optionalTrimmedStringSchema,
     ITHINK_PICKUP_ADDRESS_ID: optionalTrimmedStringSchema,
     ITHINK_RETURN_ADDRESS_ID: optionalTrimmedStringSchema,
     ITHINK_ORIGIN_PINCODE: z.preprocess(optionalString, z.string().regex(/^\d{6}$/u, "ITHINK_ORIGIN_PINCODE must contain exactly 6 digits.").optional()),
@@ -308,8 +317,10 @@ function sanitizeIssueMessage(issue: z.ZodIssue): string {
 }
 
 export function parseEnvironmentConfig(environment: NodeJS.ProcessEnv): EnvironmentConfig {
+  const nodeEnvironment = optionalString(environment.NODE_ENV) ?? "development";
   const normalizedEnvironment = {
     ...environment,
+    SHIPMENT_NUMBER_PREFIX: environment.SHIPMENT_NUMBER_PREFIX === undefined && nodeEnvironment !== "production" ? "TEST-SHP" : environment.SHIPMENT_NUMBER_PREFIX,
     DB_HOST: optionalString(environment.DB_HOST) ?? optionalString(environment.PRODUCTION_DB_HOST),
     DB_PORT: optionalString(environment.DB_PORT) ?? optionalString(environment.PRODUCTION_DB_PORT),
     DB_NAME: optionalString(environment.DB_NAME) ?? optionalString(environment.PRODUCTION_DB_NAME),

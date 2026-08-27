@@ -176,6 +176,73 @@ export const CommerceNotifications = {
     });
   },
 
+  /**
+   * Fires once a Shipment genuinely has an AWB (ShipmentService.create()'s
+   * success path, called after that transaction commits) — distinct from
+   * orderShipped below, which instead fires later once the COURIER reports
+   * its own "picked up" scan (ingest()). Re-verifies tracking_number is
+   * actually set before sending: create() calls this unconditionally after
+   * its AWB-persistence transaction, including the "accepted without AWB,
+   * reconciliation required" outcome, which must not email a tracking
+   * number that doesn't exist. Order-sourced only, matching this module's
+   * existing order-vs-replacement split (replacementShipped is the
+   * Replacement-side equivalent, fired at the same courier-pickup point
+   * orderShipped uses — this module does not yet have a Replacement
+   * equivalent of "booked", matching the same asymmetry already present
+   * before this addition).
+   */
+  async shipmentCreated(shipmentId: number): Promise<void> {
+    const shipment = await Shipment.findByPk(shipmentId);
+    if (!shipment || shipment.source_type !== "order" || !shipment.tracking_number) return;
+    const order = await Order.findByPk(shipment.order_id);
+    if (!order) return;
+    await NotificationService.notify({
+      eventType: "SHIPMENT_CREATED",
+      entityType: "shipment",
+      entityId: shipment.id,
+      recipientEmail: order.contact_email,
+      build: () => templates.getShipmentCreatedTemplate({ orderNumber: order.order_number, carrier: shipment.carrier, awbNumber: shipment.tracking_number, trackOrderUrl: orderViewUrl(order) })
+    });
+  },
+
+  /** Fires once a Shipment's tracking first reports RTO initiated — called from ingest()'s notification block, same order-sourced scope as orderShipped/orderOutForDelivery/orderDelivered in that same block. */
+  async orderReturnedToOrigin(shipmentId: number): Promise<void> {
+    const shipment = await Shipment.findByPk(shipmentId);
+    if (!shipment || shipment.source_type !== "order" || shipment.status !== "rto_initiated") return;
+    const order = await Order.findByPk(shipment.order_id);
+    if (!order) return;
+    await NotificationService.notify({
+      eventType: "SHIPMENT_RTO_INITIATED",
+      entityType: "shipment",
+      entityId: shipment.id,
+      recipientEmail: order.contact_email,
+      build: () => templates.getOrderReturnedToOriginTemplate({ orderNumber: order.order_number, viewOrderUrl: orderViewUrl(order) })
+    });
+  },
+
+  /**
+   * Fires on a failed delivery attempt ("ndr") or a courier-reported
+   * delivery exception — both collapse into the same customer-facing event
+   * (SHIPMENT_DELIVERY_FAILED), so a shipment that later toggles between the
+   * two (e.g. ndr -> delivery_exception on a retry) still only ever emails
+   * once, per NotificationService's per-(event,entity) dedupe — the same
+   * "several distinct transitions, one email" precedent orderShipped above
+   * already establishes for picked_up/in_transit/out_for_delivery.
+   */
+  async deliveryAttemptFailed(shipmentId: number): Promise<void> {
+    const shipment = await Shipment.findByPk(shipmentId);
+    if (!shipment || shipment.source_type !== "order" || (shipment.status !== "ndr" && shipment.status !== "delivery_exception")) return;
+    const order = await Order.findByPk(shipment.order_id);
+    if (!order) return;
+    await NotificationService.notify({
+      eventType: "SHIPMENT_DELIVERY_FAILED",
+      entityType: "shipment",
+      entityId: shipment.id,
+      recipientEmail: order.contact_email,
+      build: () => templates.getDeliveryAttemptFailedTemplate({ orderNumber: order.order_number, trackOrderUrl: orderViewUrl(order) })
+    });
+  },
+
   async returnRequested(returnRequestId: number): Promise<void> {
     const returnRequest = await ReturnRequest.findByPk(returnRequestId);
     if (!returnRequest) return;

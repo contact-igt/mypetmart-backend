@@ -3,6 +3,7 @@ import { Op } from "sequelize";
 import { DATABASE_TABLE_NAMES } from "../../constants/database.constants.js";
 import { sequelize } from "../../database/index.js";
 import { MediaAsset } from "../../database/tables/MediaAssetTable/index.js";
+import { ProductContentBlock } from "../../database/tables/ProductContentBlockTable/index.js";
 import { ProductImage } from "../../database/tables/ProductImageTable/index.js";
 import { ProductMediaAssignment } from "../../database/tables/ProductMediaAssignmentTable/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
@@ -33,14 +34,15 @@ function deriveMediaType(mimeType: string): "image" | "video" {
   return VIDEO_MIME_TYPES.has(mimeType) ? "video" : "image";
 }
 
-// Usage spans two independent Product<->MediaAsset join tables (ProductImage for
-// images, ProductMediaAssignment for Product/Testimonial videos — see Phase B) — a
-// MediaAsset counts as "in use" if referenced by either, so both are always summed
-// together here rather than counting ProductImage alone.
+// Usage spans three independent Product<->MediaAsset join tables (ProductImage for
+// images, ProductMediaAssignment for Product/Testimonial videos — Phase B, and
+// ProductContentBlock for Enhanced Product Content) — a MediaAsset counts as "in
+// use" if referenced by any of the three, so all are always summed together here
+// rather than counting ProductImage alone.
 async function getUsageCountMap(mediaAssetIds: number[]): Promise<Map<number, number>> {
   if (mediaAssetIds.length === 0) return new Map();
 
-  const [imageRows, assignmentRows] = await Promise.all([
+  const [imageRows, assignmentRows, contentBlockRows] = await Promise.all([
     ProductImage.findAll({
       attributes: ["media_asset_id", [sequelize.fn("COUNT", sequelize.col("id")), "count"]],
       where: { media_asset_id: mediaAssetIds },
@@ -52,11 +54,17 @@ async function getUsageCountMap(mediaAssetIds: number[]): Promise<Map<number, nu
       where: { media_asset_id: mediaAssetIds },
       group: ["media_asset_id"],
       raw: true
+    }) as unknown as Promise<Array<{ media_asset_id: number; count: string | number }>>,
+    ProductContentBlock.findAll({
+      attributes: ["media_asset_id", [sequelize.fn("COUNT", sequelize.col("id")), "count"]],
+      where: { media_asset_id: mediaAssetIds },
+      group: ["media_asset_id"],
+      raw: true
     }) as unknown as Promise<Array<{ media_asset_id: number; count: string | number }>>
   ]);
 
   const counts = new Map<number, number>();
-  for (const row of [...imageRows, ...assignmentRows]) {
+  for (const row of [...imageRows, ...assignmentRows, ...contentBlockRows]) {
     const id = Number(row.media_asset_id);
     counts.set(id, (counts.get(id) ?? 0) + Number(row.count ?? 0));
   }
@@ -195,12 +203,15 @@ export class MediaAssetService {
   }
 
   static async getUsage(id: number): Promise<MediaAssetUsage> {
-    const [images, assignments] = await Promise.all([
+    const [images, assignments, contentBlocks] = await Promise.all([
       ProductImage.findAll({ where: { media_asset_id: id }, attributes: ["product_id"] }),
-      ProductMediaAssignment.findAll({ where: { media_asset_id: id }, attributes: ["product_id"] })
+      ProductMediaAssignment.findAll({ where: { media_asset_id: id }, attributes: ["product_id"] }),
+      ProductContentBlock.findAll({ where: { media_asset_id: id }, attributes: ["product_id"] })
     ]);
-    const productIds = Array.from(new Set([...images.map((image) => image.product_id), ...assignments.map((assignment) => assignment.product_id)]));
-    return { usageCount: images.length + assignments.length, productIds };
+    const productIds = Array.from(
+      new Set([...images.map((image) => image.product_id), ...assignments.map((assignment) => assignment.product_id), ...contentBlocks.map((block) => block.product_id)])
+    );
+    return { usageCount: images.length + assignments.length + contentBlocks.length, productIds };
   }
 
   static async deleteMediaAsset(id: number, storage: ObjectStorageService = objectStorageService): Promise<void> {

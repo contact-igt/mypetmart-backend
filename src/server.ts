@@ -4,6 +4,7 @@ import { app } from "./app.js";
 import { databaseConfig } from "./config/database.config.js";
 import { serverConfig } from "./config/server.config.js";
 import { connectDatabase, disconnectDatabase } from "./database/index.js";
+import { startShipmentSyncScheduler, stopShipmentSyncScheduler } from "./models/ShipmentModels/shipment-sync.job.js";
 import { logger } from "./utils/logger.js";
 
 const server = createServer(app);
@@ -35,6 +36,8 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
 
   shutdownInProgress = true;
   logger.info({ signal }, "Graceful shutdown started");
+
+  stopShipmentSyncScheduler();
 
   const safetyTimeout = setTimeout(() => {
     logger.error({ signal }, "Graceful shutdown timed out");
@@ -81,6 +84,7 @@ async function bootstrap(): Promise<void> {
         },
         "HTTP server started"
       );
+      startShipmentSyncScheduler();
     });
   } catch (error) {
     logger.fatal({ err: error, database: databaseConfig.database }, "Application startup failed before HTTP listen");

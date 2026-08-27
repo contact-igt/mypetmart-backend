@@ -18,7 +18,11 @@ import { Payment, initializePaymentTable } from "./PaymentTable/index.js";
 import { Product, initializeProductTable } from "./ProductTable/index.js";
 import { ProductFeature, initializeProductFeatureTable } from "./ProductFeatureTable/index.js";
 import { ProductImage, initializeProductImageTable } from "./ProductImageTable/index.js";
+import { ProductContentBlock, initializeProductContentBlockTable } from "./ProductContentBlockTable/index.js";
+import { ProductFaq, initializeProductFaqTable } from "./ProductFaqTable/index.js";
 import { ProductMediaAssignment, initializeProductMediaAssignmentTable } from "./ProductMediaAssignmentTable/index.js";
+import { ProductReview, initializeProductReviewTable } from "./ProductReviewTable/index.js";
+import { ProductSpecification, initializeProductSpecificationTable } from "./ProductSpecificationTable/index.js";
 import { ProductVariant, initializeProductVariantTable } from "./ProductVariantTable/index.js";
 import { Replacement, initializeReplacementTable } from "./ReplacementTable/index.js";
 import { Refund, initializeRefundTable } from "./RefundTable/index.js";
@@ -49,7 +53,11 @@ export {
   Product,
   ProductFeature,
   ProductImage,
+  ProductContentBlock,
+  ProductFaq,
   ProductMediaAssignment,
+  ProductReview,
+  ProductSpecification,
   ProductVariant,
   Replacement,
   Refund,
@@ -72,12 +80,16 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "ProductImage",
   "ProductFeature",
   "ProductMediaAssignment",
+  "ProductSpecification",
   "MediaAsset",
+  "ProductContentBlock",
+  "ProductFaq",
   "Cart",
   "CartItem",
   "Order",
   "OrderItem",
   "OrderNote",
+  "ProductReview",
   "Payment",
   "Shipment",
   "ShipmentTrackingEvent",
@@ -106,12 +118,16 @@ export type DatabaseModelRegistry = Readonly<{
   ProductImage: typeof ProductImage;
   ProductFeature: typeof ProductFeature;
   ProductMediaAssignment: typeof ProductMediaAssignment;
+  ProductSpecification: typeof ProductSpecification;
   MediaAsset: typeof MediaAsset;
+  ProductContentBlock: typeof ProductContentBlock;
+  ProductFaq: typeof ProductFaq;
   Cart: typeof Cart;
   CartItem: typeof CartItem;
   Order: typeof Order;
   OrderItem: typeof OrderItem;
   OrderNote: typeof OrderNote;
+  ProductReview: typeof ProductReview;
   Payment: typeof Payment;
   Shipment: typeof Shipment;
   ShipmentTrackingEvent: typeof ShipmentTrackingEvent;
@@ -144,12 +160,16 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeProductImageTable(sequelize);
   initializeProductFeatureTable(sequelize);
   initializeProductMediaAssignmentTable(sequelize);
+  initializeProductSpecificationTable(sequelize);
   initializeMediaAssetTable(sequelize);
+  initializeProductContentBlockTable(sequelize);
+  initializeProductFaqTable(sequelize);
   initializeCartTable(sequelize);
   initializeCartItemTable(sequelize);
   initializeOrderTable(sequelize);
   initializeOrderItemTable(sequelize);
   initializeOrderNoteTable(sequelize);
+  initializeProductReviewTable(sequelize);
   initializePaymentTable(sequelize);
   initializeShipmentTable(sequelize);
   initializeShipmentTrackingEventTable(sequelize);
@@ -175,12 +195,16 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     ProductImage,
     ProductFeature,
     ProductMediaAssignment,
+    ProductSpecification,
     MediaAsset,
+    ProductContentBlock,
+    ProductFaq,
     Cart,
     CartItem,
     Order,
     OrderItem,
     OrderNote,
+    ProductReview,
     Payment,
     Shipment,
     ShipmentTrackingEvent,

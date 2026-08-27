@@ -5,6 +5,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { app } from "../../src/app.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
+import { ProductContentBlock } from "../../src/database/tables/ProductContentBlockTable/index.js";
+import { ProductFaq } from "../../src/database/tables/ProductFaqTable/index.js";
 import { ProductFeature } from "../../src/database/tables/ProductFeatureTable/index.js";
 import { ProductMediaAssignment } from "../../src/database/tables/ProductMediaAssignmentTable/index.js";
 import { ProductVariant } from "../../src/database/tables/ProductVariantTable/index.js";
@@ -59,6 +61,8 @@ describe("Stage 13 — Products Backend Integration Tests", () => {
     await ProductVariant.destroy({ where: {}, truncate: false, force: true });
     await ProductFeature.destroy({ where: {}, truncate: false, force: true });
     await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
+    await ProductContentBlock.destroy({ where: {}, truncate: false, force: true });
+    await ProductFaq.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     await sequelize.query("DELETE FROM `catalog_sku_reservations`");
@@ -674,6 +678,7 @@ describe("Stage 13 — Products Backend Integration Tests", () => {
     expect(listRes.status).toBe(200);
     expect(listRes.body.data.items).toHaveLength(1);
     expect(listRes.body.data.items[0].name).toBe("Storefront Kibble");
+    expect(listRes.body.data.items[0].description).toBe("Healthy kibble");
 
     const detailRes = await request(app).get(`/api/v1/storefront/products/${createRes.body.data.slug}`);
     expect(detailRes.status).toBe(200);
@@ -731,5 +736,4 @@ describe("Stage 13 — Products Backend Integration Tests", () => {
     expect(unscopedIds).not.toContain(archivedFeaturedId); // status:active is still always enforced
   });
 });
-
 

@@ -1,3 +1,5 @@
+import { shipmentConfig } from "../config/shipment.config.js";
+
 /**
  * Centralized business reference code generator.
  */
@@ -32,7 +34,7 @@ export function buildBusinessReference(type: "customer" | "admin" | "super_admin
       prefix = "RPL";
       break;
     case "shipment":
-      prefix = "SHP";
+      prefix = shipmentConfig.numberPrefix;
       break;
     default:
       throw new Error(`Unsupported business reference type: ${type as string}`);

@@ -1,6 +1,6 @@
 import type { FulfilmentStatus, OrderStatus, PaymentStatus } from "../../constants/database.constants.js";
 import type { InlineAddressInput } from "../CheckoutModels/checkout.types.js";
-import type { ShipmentJSON } from "../ShipmentModels/shipment.types.js";
+import type { OrderShipmentSummaryJSON, ShipmentJSON } from "../ShipmentModels/shipment.types.js";
 
 // Exactly one of the two must be present — enforced by createOrderSchema's
 // Zod refine, not by this type. savedAddressId is customer-only (an
@@ -55,6 +55,33 @@ export type OrderListItemJSON = {
   placedAt: string;
 };
 
+// Customer-safe subset of the Payment record — deliberately its own type
+// rather than a reuse of Admin's AdminOrderPaymentJSON, so a future
+// admin-only field (e.g. raw provider metadata) never accidentally leaks
+// onto this response just by widening the admin type. method/providerOrderId/
+// paidAt/refundedAt are nullable because the underlying Payment columns are
+// (a COD Payment, or a PayU attempt that never reached PayU, can genuinely
+// have no method/txnid/paidAt yet) — never fabricated as non-null.
+export type CustomerOrderPaymentJSON = {
+  provider: string;
+  method: string | null;
+  status: PaymentStatus;
+  providerOrderId: string | null;
+  paidAt: string | null;
+  refundedAt: string | null;
+};
+
+// null when the Order has no Refund rows at all (never fabricated).
+// "processing" takes priority over "succeeded" (a customer with one
+// completed and one still-pending refund should see the in-flight state,
+// not a falsely-final "succeeded"); "failed" only when every refund on the
+// Order failed. totalRefunded only sums succeeded amounts — a pending or
+// failed refund hasn't moved any money yet.
+export type CustomerOrderRefundSummaryJSON = {
+  totalRefunded: string;
+  status: "processing" | "succeeded" | "failed";
+};
+
 export type OrderDetailJSON = OrderListItemJSON & {
   contactEmail: string;
   shippingAddress: OrderShippingAddressJSON;
@@ -63,6 +90,8 @@ export type OrderDetailJSON = OrderListItemJSON & {
   createdAt: string;
   updatedAt: string;
   shipment?: ShipmentJSON;
+  payments: CustomerOrderPaymentJSON[];
+  refundSummary: CustomerOrderRefundSummaryJSON | null;
 };
 
 // Additive-only wrapper around OrderDetailJSON used solely by Order Creation's
@@ -82,13 +111,33 @@ export type GuestOrderDetailJSON = Omit<OrderDetailJSON, "shippingAddress"> & {
   shippingAddress: GuestOrderShippingAddressJSON;
 };
 
+// Preview-only — never the full OrderItemJSON. Capped to 3 per order by the
+// service (see listCustomerOrders), never client-controlled.
+export type OrderProductPreviewJSON = {
+  name: string;
+  image: string | null;
+};
+
+export type CustomerOrderListItemJSON = OrderListItemJSON & {
+  products: OrderProductPreviewJSON[];
+  // null when the order has no shipment yet (never fabricated) — matches
+  // the same "no shipment" meaning as OrderDetailJSON.shipment being absent.
+  shipment: OrderShipmentSummaryJSON | null;
+};
+
 export type CustomerOrderListQuery = {
   page?: number;
   pageSize?: number;
+  status?: OrderStatus;
+  from?: string;
+  to?: string;
+  // Order number only — never searches customer PII (contrast with Admin's
+  // search, which also matches against customer name/email).
+  search?: string;
 };
 
 export type CustomerOrderListResult = {
-  items: OrderListItemJSON[];
+  items: CustomerOrderListItemJSON[];
   total: number;
   page: number;
   pageSize: number;
@@ -195,6 +244,20 @@ export type AdminOrderDetailJSON = OrderDetailJSON & {
 
 export type UpdateOrderStatusInput = {
   status: OrderStatus;
+};
+
+// Full replacement of the Order's own shipping snapshot — never the
+// customer's saved Address book entry (see AddressModels; entirely
+// unrelated table). No coordinates: this endpoint doesn't accept new
+// lat/lng, and stale ones from before the edit are cleared rather than kept.
+export type UpdateOrderShippingAddressInput = {
+  recipientName: string;
+  phone: string;
+  line1: string;
+  line2?: string | undefined;
+  city: string;
+  state: string;
+  postalCode: string;
 };
 
 export type AddOrderNoteInput = {

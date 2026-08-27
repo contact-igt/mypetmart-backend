@@ -157,6 +157,51 @@ export function getOrderDeliveredTemplate(input: { orderNumber: string; viewOrde
   return { subject, text, html };
 }
 
+// Deliberately distinct subject/copy from getOrderShippedTemplate above —
+// that one fires later, once the COURIER reports its own "picked up" scan
+// (ShipmentModels/shipment.service.ts ingest()); this one fires the moment
+// booking with iThink succeeds and an AWB exists (ShipmentService.create()),
+// which happens first. Using the same "has shipped" wording for both would
+// read as two identical, confusing emails at two different times.
+export function getShipmentCreatedTemplate(input: { orderNumber: string; carrier: string | null; awbNumber: string | null; trackOrderUrl: string | null }): EmailTemplate {
+  const subject = `Order ${input.orderNumber} — shipment booked`;
+  const trackingLine = input.carrier && input.awbNumber ? `Carrier: ${input.carrier}\nTracking number: ${input.awbNumber}\n\n` : "";
+  const text = `Shipment booked\n\nWe've booked a courier for order ${input.orderNumber}. We'll email you again once it's picked up.\n\n${trackingLine}${input.trackOrderUrl ? `Track your order: ${input.trackOrderUrl}` : ""}`;
+  const html = shell(`
+    <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Shipment booked</p>
+    <p style="font-size: 14px; line-height: 1.5; color: #35221b;">We've booked a courier for order <strong>${input.orderNumber}</strong>. We'll email you again once it's picked up.</p>
+    ${input.carrier && input.awbNumber ? `<p style="font-size: 13px; color: #35221b;"><strong>Carrier:</strong> ${input.carrier}<br/><strong>Tracking number:</strong> ${input.awbNumber}</p>` : ""}
+    ${input.trackOrderUrl ? ctaButton(input.trackOrderUrl, "Track Order") : ""}
+  `);
+  return { subject, text, html };
+}
+
+export function getOrderReturnedToOriginTemplate(input: { orderNumber: string; viewOrderUrl: string | null }): EmailTemplate {
+  const subject = `Order ${input.orderNumber} is being returned to us`;
+  const text = `Shipment returning to origin\n\nOrder ${input.orderNumber}'s shipment could not be delivered and is on its way back to us. We'll be in touch once it arrives.${input.viewOrderUrl ? `\n\nView your order: ${input.viewOrderUrl}` : ""}`;
+  const html = shell(`
+    <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Shipment returning to origin</p>
+    <p style="font-size: 14px; line-height: 1.5; color: #35221b;">Order <strong>${input.orderNumber}</strong>'s shipment could not be delivered and is on its way back to us. We'll be in touch once it arrives.</p>
+    ${input.viewOrderUrl ? ctaButton(input.viewOrderUrl, "View Order") : ""}
+  `);
+  return { subject, text, html };
+}
+
+// Deliberately generic — never includes the raw courier remark/reason text
+// (NDR/delivery-exception messages from iThink can be internal logistics
+// jargon, e.g. "Consignee refused", "ODA", not something to forward verbatim
+// to a customer). Points them at tracking for whatever detail is safe to show.
+export function getDeliveryAttemptFailedTemplate(input: { orderNumber: string; trackOrderUrl: string | null }): EmailTemplate {
+  const subject = `Delivery attempt failed - Order ${input.orderNumber}`;
+  const text = `Delivery attempt failed\n\nA delivery attempt for order ${input.orderNumber} was unsuccessful. The courier will typically retry.${input.trackOrderUrl ? `\n\nTrack your order: ${input.trackOrderUrl}` : ""}`;
+  const html = shell(`
+    <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Delivery attempt failed</p>
+    <p style="font-size: 14px; line-height: 1.5; color: #35221b;">A delivery attempt for order <strong>${input.orderNumber}</strong> was unsuccessful. The courier will typically retry.</p>
+    ${input.trackOrderUrl ? ctaButton(input.trackOrderUrl, "Track Order") : ""}
+  `);
+  return { subject, text, html };
+}
+
 // ---------------------------------------------------------------------------
 // RETURN
 // ---------------------------------------------------------------------------
