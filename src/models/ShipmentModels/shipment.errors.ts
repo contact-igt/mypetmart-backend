@@ -46,3 +46,13 @@ export class ShipmentValidationError extends ShipmentError {
 export class ShipmentCourierSelectionInvalidError extends ShipmentError {
   public constructor() { super("SHIPMENT_COURIER_SELECTION_INVALID", "Selected courier is unavailable.", 422); }
 }
+// Storefront pre-purchase delivery check (Product Detail page) only — a
+// technical/provider failure (iThink down, timed out, rejected the request,
+// or returned garbage). The message is deliberately generic and carries no
+// iThink error code, courier name, or raw provider text: a storefront
+// visitor must never see provider internals, and "unable to check right now"
+// must never be confused with "we don't deliver there" (a non-serviceable
+// pincode is a normal 200 result, not this error).
+export class DeliveryCheckUnavailableError extends ShipmentError {
+  public constructor() { super("DELIVERY_CHECK_UNAVAILABLE", "Unable to check delivery right now. Please try again.", 503); }
+}
