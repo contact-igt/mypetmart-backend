@@ -96,6 +96,22 @@ describe("environment configuration", () => {
     expect(config.R2_MAX_IMAGE_SIZE_BYTES).toBe(5 * 1024 * 1024);
   });
 
+  it("parses Breeze provider foundation settings without requiring PayU changes", () => {
+    const config = parseEnvironmentConfig(
+      createValidEnvironment({
+        BREEZE_MERCHANT_ID: "mypetmart",
+        BREEZE_ENVIRONMENT: "smb-release",
+        BREEZE_WEBHOOK_SECRET: "breeze_webhook_secret_for_tests",
+        BREEZE_PUBLIC_KEY: "breeze-public-key-placeholder"
+      })
+    );
+
+    expect(config.BREEZE_MERCHANT_ID).toBe("mypetmart");
+    expect(config.BREEZE_ENVIRONMENT).toBe("smb-release");
+    expect(config.BREEZE_WEBHOOK_SECRET).toBe("breeze_webhook_secret_for_tests");
+    expect(config.BREEZE_PUBLIC_KEY).toBe("breeze-public-key-placeholder");
+  });
+
   it("requires a complete coherent R2 configuration when any R2 credential is present", () => {
     expect(() => parseEnvironmentConfig(createValidEnvironment({ R2_ACCOUNT_ID: "account-only" }))).toThrow(EnvironmentValidationError);
   });

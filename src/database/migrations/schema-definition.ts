@@ -8,6 +8,7 @@ import {
   FULFILMENT_STATUS_VALUES,
   MEDIA_ASSET_TYPE_VALUES,
   NEWSLETTER_SUBSCRIBER_STATUS_VALUES,
+  ORDER_DOCUMENT_TYPE_VALUES,
   PRODUCT_MEDIA_ROLE_VALUES,
   PRODUCT_CONTENT_LAYOUT_VALUES,
   REVIEW_STATUS_VALUES,
@@ -22,6 +23,7 @@ import {
   PRODUCT_STATUS_VALUES,
   REPLACEMENT_STATUS_VALUES,
   REFUND_STATUS_VALUES,
+  RETURN_SHIPMENT_STATUS_VALUES,
   RETURN_STATUS_VALUES,
   RETURN_TYPE_VALUES,
   SESSION_TYPE_VALUES,
@@ -1000,6 +1002,87 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         CONSTRAINT \`fk_product_media_assignments_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
         CONSTRAINT \`fk_product_media_assignments_media_asset_id\` FOREIGN KEY (\`media_asset_id\`) REFERENCES \`media_assets\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
         CONSTRAINT \`chk_product_media_assignments_display_order_nonnegative\` CHECK (\`display_order\` >= 0)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.orderDocuments,
+    migrationName: "059-create-order-documents",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.orderDocuments)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`order_id\` INT UNSIGNED NOT NULL,
+        \`document_type\` ${enumSql(ORDER_DOCUMENT_TYPE_VALUES)} NOT NULL,
+        \`document_number\` VARCHAR(50) NOT NULL,
+        \`generated_at\` DATETIME NOT NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`order_documents_number_unique\` (\`document_number\`),
+        UNIQUE KEY \`order_documents_order_type_unique\` (\`order_id\`, \`document_type\`),
+        CONSTRAINT \`fk_order_documents_order_id\` FOREIGN KEY (\`order_id\`) REFERENCES \`orders\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.returnShipments,
+    migrationName: "060-create-return-shipments",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.returnShipments)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`return_request_id\` INT UNSIGNED NOT NULL,
+        \`shipment_number\` VARCHAR(50) NOT NULL,
+        \`provider\` VARCHAR(50) NOT NULL DEFAULT 'ithink',
+        \`provider_order_id\` VARCHAR(190) NULL,
+        \`carrier\` VARCHAR(120) NULL,
+        \`awb_number\` VARCHAR(120) NULL,
+        \`service_type\` VARCHAR(80) NULL,
+        \`status\` ${enumSql(RETURN_SHIPMENT_STATUS_VALUES)} NOT NULL DEFAULT 'pending',
+        \`provider_status\` VARCHAR(120) NULL,
+        \`provider_status_code\` VARCHAR(80) NULL,
+        \`weight_grams\` INT UNSIGNED NOT NULL,
+        \`length_cm\` DECIMAL(8,2) NOT NULL,
+        \`width_cm\` DECIMAL(8,2) NOT NULL,
+        \`height_cm\` DECIMAL(8,2) NOT NULL,
+        \`shipping_charge\` DECIMAL(10,2) NULL,
+        \`currency\` CHAR(3) NOT NULL DEFAULT 'INR',
+        \`tracking_url\` VARCHAR(1000) NULL,
+        \`raw_payload\` JSON NULL,
+        \`picked_up_at\` DATETIME NULL,
+        \`delivered_at\` DATETIME NULL,
+        \`cancelled_at\` DATETIME NULL,
+        \`last_synced_at\` DATETIME NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`return_shipments_number_unique\` (\`shipment_number\`),
+        UNIQUE KEY \`return_shipments_return_request_unique\` (\`return_request_id\`),
+        UNIQUE KEY \`return_shipments_provider_order_id_unique\` (\`provider_order_id\`),
+        UNIQUE KEY \`return_shipments_awb_number_unique\` (\`awb_number\`),
+        KEY \`return_shipments_status_idx\` (\`status\`),
+        CONSTRAINT \`fk_return_shipments_return_request_id\` FOREIGN KEY (\`return_request_id\`) REFERENCES \`return_requests\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_return_shipments_weight_positive\` CHECK (\`weight_grams\` > 0),
+        CONSTRAINT \`chk_return_shipments_dimensions_positive\` CHECK (\`length_cm\` > 0 AND \`width_cm\` > 0 AND \`height_cm\` > 0)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.returnShipmentTrackingEvents,
+    migrationName: "061-create-return-shipment-tracking-events",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.returnShipmentTrackingEvents)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`return_shipment_id\` INT UNSIGNED NOT NULL,
+        \`dedupe_key\` CHAR(64) NOT NULL,
+        \`provider_status\` VARCHAR(120) NOT NULL,
+        \`provider_status_code\` VARCHAR(80) NULL,
+        \`normalized_status\` ${enumSql(RETURN_SHIPMENT_STATUS_VALUES)} NOT NULL,
+        \`location\` VARCHAR(255) NULL,
+        \`message\` VARCHAR(1000) NULL,
+        \`event_at\` DATETIME NOT NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`return_shipment_events_dedupe_unique\` (\`return_shipment_id\`, \`dedupe_key\`),
+        KEY \`return_shipment_events_timeline_idx\` (\`return_shipment_id\`, \`event_at\`),
+        CONSTRAINT \`fk_return_shipment_events_return_shipment_id\` FOREIGN KEY (\`return_shipment_id\`) REFERENCES \`return_shipments\` (\`id\`) ON DELETE CASCADE ON UPDATE RESTRICT
       ) ${engine};
     `
   }

@@ -12,6 +12,7 @@ const SECRET_FIELD_NAMES = [
   "R2_UPLOAD_INTENT_SECRET",
   "PAYMENT_KEY_SECRET",
   "PAYMENT_WEBHOOK_SECRET",
+  "BREEZE_WEBHOOK_SECRET",
   "SHIPPING_API_KEY",
   "SHIPPING_WEBHOOK_SECRET",
   "ITHINK_ACCESS_TOKEN",
@@ -207,6 +208,10 @@ const environmentSchema = z
     PAYMENT_KEY_ID: optionalTrimmedStringSchema,
     PAYMENT_KEY_SECRET: optionalTrimmedStringSchema,
     PAYMENT_WEBHOOK_SECRET: optionalTrimmedStringSchema,
+    BREEZE_MERCHANT_ID: optionalTrimmedStringSchema,
+    BREEZE_ENVIRONMENT: optionalTrimmedStringSchema,
+    BREEZE_WEBHOOK_SECRET: optionalTrimmedStringSchema,
+    BREEZE_PUBLIC_KEY: optionalTrimmedStringSchema,
     // PayU Hosted Checkout form-post endpoint. Optional — payment.config.ts
     // falls back to PayU's published test/live URL by NODE_ENV when unset.
     PAYMENT_GATEWAY_URL: z.preprocess(optionalString, z.url("PAYMENT_GATEWAY_URL must be a valid URL.").optional()),

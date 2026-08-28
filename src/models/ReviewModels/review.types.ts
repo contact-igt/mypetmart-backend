@@ -1,4 +1,5 @@
 import type { ReviewSource, ReviewStatus } from "../../constants/database.constants.js";
+import type { StorefrontProductSummaryJSON } from "../../utils/storefront-product-summary.js";
 
 // Public/Storefront shape — deliberately omits userId, orderItemId, and any
 // moderation data. See review.service.ts's `toPublicReviewJSON`.
@@ -55,6 +56,24 @@ export type PublicReviewListResult = {
   pageSize: number;
   total: number;
   summary: ReviewSummaryJSON;
+};
+
+export type StorefrontReviewFeedItemJSON = {
+  id: number;
+  rating: number;
+  title: string | null;
+  review: string;
+  customerName: string;
+  verifiedPurchase: boolean;
+  product: StorefrontProductSummaryJSON;
+};
+
+export type StorefrontReviewFeedResult = {
+  reviews: StorefrontReviewFeedItemJSON[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
 };
 
 // The customer's own Review, as returned by create/update/eligibility — shows

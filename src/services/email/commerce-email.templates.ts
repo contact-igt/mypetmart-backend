@@ -239,6 +239,42 @@ export function getReturnRejectedTemplate(input: { returnNumber: string; itemNam
   return { subject, text, html };
 }
 
+export function getReturnPickupCreatedTemplate(input: { returnNumber: string; itemName: string; carrier: string | null; awbNumber: string | null }): EmailTemplate {
+  const subject = `Pickup scheduled for return ${input.returnNumber}`;
+  const trackingLine = input.carrier && input.awbNumber ? `Carrier: ${input.carrier}\nAWB: ${input.awbNumber}\n\n` : "";
+  const text = `Return pickup scheduled\n\nWe've scheduled a courier pickup for your return ${input.returnNumber} (${input.itemName}). Please keep the item ready for handover.\n\n${trackingLine}We'll email you again once it's picked up.`;
+  const html = shell(`
+    <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Return pickup scheduled</p>
+    <p style="font-size: 14px; line-height: 1.5; color: #35221b;">We've scheduled a courier pickup for your return <strong>${input.returnNumber}</strong> (${input.itemName}). Please keep the item ready for handover.</p>
+    ${input.carrier && input.awbNumber ? `<p style="font-size: 13px; color: #35221b;"><strong>Carrier:</strong> ${input.carrier}<br/><strong>AWB:</strong> ${input.awbNumber}</p>` : ""}
+  `);
+  return { subject, text, html };
+}
+
+export function getReturnPickedUpTemplate(input: { returnNumber: string; itemName: string }): EmailTemplate {
+  const subject = `Return ${input.returnNumber} picked up`;
+  const text = `Return picked up\n\nThe courier has picked up your return ${input.returnNumber} (${input.itemName}). We'll email you again once it reaches our warehouse.`;
+  const html = shell(`
+    <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Return picked up</p>
+    <p style="font-size: 14px; line-height: 1.5; color: #35221b;">The courier has picked up your return <strong>${input.returnNumber}</strong> (${input.itemName}). We'll email you again once it reaches our warehouse.</p>
+  `);
+  return { subject, text, html };
+}
+
+// Deliberately never claims a refund has started here — "delivered" only
+// means the parcel reached the warehouse; refund initiation is a separate,
+// later admin action (see ReturnDetailView's own Item Received / Refund
+// sections) that this email must not get ahead of.
+export function getReturnDeliveredTemplate(input: { returnNumber: string; itemName: string }): EmailTemplate {
+  const subject = `Return ${input.returnNumber} received at our warehouse`;
+  const text = `Return received\n\nYour return ${input.returnNumber} (${input.itemName}) has reached our warehouse. Our team will inspect it and follow up on your refund shortly.`;
+  const html = shell(`
+    <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Return received</p>
+    <p style="font-size: 14px; line-height: 1.5; color: #35221b;">Your return <strong>${input.returnNumber}</strong> (${input.itemName}) has reached our warehouse. Our team will inspect it and follow up on your refund shortly.</p>
+  `);
+  return { subject, text, html };
+}
+
 // ---------------------------------------------------------------------------
 // REFUND
 // ---------------------------------------------------------------------------

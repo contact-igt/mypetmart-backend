@@ -26,6 +26,9 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   replacements: "replacements",
   contactEnquiries: "contact_enquiries",
   storeSettings: "store_settings",
+  orderDocuments: "order_documents",
+  returnShipments: "return_shipments",
+  returnShipmentTrackingEvents: "return_shipment_tracking_events",
   authChallenges: "auth_challenges",
   passwordResetTokens: "password_reset_tokens",
   wishlists: "wishlists",
@@ -163,6 +166,16 @@ export type RefundStatus = (typeof REFUND_STATUS_VALUES)[number];
 export const REPLACEMENT_STATUS_VALUES = ["stock_unavailable", "processing", "completed"] as const;
 export type ReplacementStatus = (typeof REPLACEMENT_STATUS_VALUES)[number];
 
+// Reverse (customer -> warehouse) courier lifecycle for an approved
+// ReturnRequest — Phase F.1. Deliberately a separate, coarser vocabulary
+// from SHIPMENT_STATUS_VALUES (no rto_*/ndr/provider_status_unknown split):
+// a reverse pickup has no RTO-of-an-RTO concept, and any courier-reported
+// exception (undelivered pickup, lost, damaged) normalizes to "failed" —
+// see ReturnShipmentModels/return-shipment.service.ts's own status-mapping
+// comment for the full reasoning.
+export const RETURN_SHIPMENT_STATUS_VALUES = ["pending", "approved", "pickup_scheduled", "picked_up", "in_transit", "delivered", "failed", "cancelled"] as const;
+export type ReturnShipmentStatus = (typeof RETURN_SHIPMENT_STATUS_VALUES)[number];
+
 export const CONTACT_ENQUIRY_STATUS_VALUES = ["new", "in_progress", "resolved", "closed"] as const;
 export type ContactEnquiryStatus = (typeof CONTACT_ENQUIRY_STATUS_VALUES)[number];
 
@@ -207,7 +220,14 @@ export const NOTIFICATION_EVENT_TYPE_VALUES = [
   // see CommerceNotifications.deliveryAttemptFailed's own doc comment.
   "SHIPMENT_CREATED",
   "SHIPMENT_RTO_INITIATED",
-  "SHIPMENT_DELIVERY_FAILED"
+  "SHIPMENT_DELIVERY_FAILED",
+  // Reverse (return) shipment lifecycle — Phase F.1. RETURN_PICKUP_CREATED
+  // fires once iThink accepts the reverse booking (AWB assigned);
+  // RETURN_PICKED_UP/RETURN_DELIVERED fire from the same tracking-sync
+  // ingest path once the courier's own scans report those milestones.
+  "RETURN_PICKUP_CREATED",
+  "RETURN_PICKED_UP",
+  "RETURN_DELIVERED"
 ] as const;
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPE_VALUES)[number];
 
@@ -217,7 +237,7 @@ export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPE_VALUES)[numb
 // PAYMENT_FAILED is keyed by "payment" (each distinct failed attempt is its
 // own real, customer-meaningful event). See commerce-notifications.service.ts
 // for the full per-event rationale.
-export const NOTIFICATION_ENTITY_TYPE_VALUES = ["order", "payment", "return", "refund", "replacement", "shipment"] as const;
+export const NOTIFICATION_ENTITY_TYPE_VALUES = ["order", "payment", "return", "refund", "replacement", "shipment", "return_shipment"] as const;
 export type NotificationEntityType = (typeof NOTIFICATION_ENTITY_TYPE_VALUES)[number];
 
 export const NOTIFICATION_STATUS_VALUES = ["pending", "sent", "failed", "skipped"] as const;
@@ -237,3 +257,12 @@ export const MONEY_SCALE = 2;
 // Future logistics/shipping-rate integration must replace this backend-owned
 // calculation before PayU initiation uses non-zero shipping.
 export const V1_FREE_SHIPPING_FEE = "0.00";
+
+// Phase E.2: a non-GST customer receipt only. "invoice" is deliberately not
+// added here yet — a future GST-invoice phase adds it as a new ENUM value
+// (the same additive-extension pattern already used for e.g.
+// PAYMENT_STATUS_VALUES/NOTIFICATION_EVENT_TYPE_VALUES) once seller
+// GSTIN/HSN/tax data actually exists, reusing this same order_documents
+// table rather than a parallel one.
+export const ORDER_DOCUMENT_TYPE_VALUES = ["receipt"] as const;
+export type OrderDocumentType = (typeof ORDER_DOCUMENT_TYPE_VALUES)[number];

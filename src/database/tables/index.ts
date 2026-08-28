@@ -13,6 +13,7 @@ import { OrderNote, initializeOrderNoteTable } from "./OrderNoteTable/index.js";
 import { MediaAsset, initializeMediaAssetTable } from "./MediaAssetTable/index.js";
 import { NewsletterSubscriber, initializeNewsletterSubscriberTable } from "./NewsletterSubscriberTable/index.js";
 import { NotificationLog, initializeNotificationLogTable } from "./NotificationLogTable/index.js";
+import { OrderDocument, initializeOrderDocumentTable } from "./OrderDocumentTable/index.js";
 import { PasswordResetToken, initializePasswordResetTokenTable } from "./PasswordResetTokenTable/index.js";
 import { Payment, initializePaymentTable } from "./PaymentTable/index.js";
 import { Product, initializeProductTable } from "./ProductTable/index.js";
@@ -28,6 +29,8 @@ import { Replacement, initializeReplacementTable } from "./ReplacementTable/inde
 import { Refund, initializeRefundTable } from "./RefundTable/index.js";
 import { ReturnNote, initializeReturnNoteTable } from "./ReturnNoteTable/index.js";
 import { ReturnRequest, initializeReturnRequestTable } from "./ReturnRequestTable/index.js";
+import { ReturnShipment, initializeReturnShipmentTable } from "./ReturnShipmentTable/index.js";
+import { ReturnShipmentTrackingEvent, initializeReturnShipmentTrackingEventTable } from "./ReturnShipmentTrackingEventTable/index.js";
 import { Shipment, initializeShipmentTable } from "./ShipmentTable/index.js";
 import { ShipmentTrackingEvent, initializeShipmentTrackingEventTable } from "./ShipmentTrackingEventTable/index.js";
 import { StoreSetting, initializeStoreSettingTable } from "./StoreSettingTable/index.js";
@@ -46,6 +49,7 @@ export {
   NewsletterSubscriber,
   NotificationLog,
   Order,
+  OrderDocument,
   OrderItem,
   OrderNote,
   PasswordResetToken,
@@ -63,6 +67,8 @@ export {
   Refund,
   ReturnNote,
   ReturnRequest,
+  ReturnShipment,
+  ReturnShipmentTrackingEvent,
   Shipment,
   ShipmentTrackingEvent,
   StoreSetting,
@@ -87,6 +93,7 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "Cart",
   "CartItem",
   "Order",
+  "OrderDocument",
   "OrderItem",
   "OrderNote",
   "ProductReview",
@@ -95,6 +102,8 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "ShipmentTrackingEvent",
   "ReturnRequest",
   "ReturnNote",
+  "ReturnShipment",
+  "ReturnShipmentTrackingEvent",
   "Refund",
   "Replacement",
   "ContactEnquiry",
@@ -125,6 +134,7 @@ export type DatabaseModelRegistry = Readonly<{
   Cart: typeof Cart;
   CartItem: typeof CartItem;
   Order: typeof Order;
+  OrderDocument: typeof OrderDocument;
   OrderItem: typeof OrderItem;
   OrderNote: typeof OrderNote;
   ProductReview: typeof ProductReview;
@@ -133,6 +143,8 @@ export type DatabaseModelRegistry = Readonly<{
   ShipmentTrackingEvent: typeof ShipmentTrackingEvent;
   ReturnRequest: typeof ReturnRequest;
   ReturnNote: typeof ReturnNote;
+  ReturnShipment: typeof ReturnShipment;
+  ReturnShipmentTrackingEvent: typeof ReturnShipmentTrackingEvent;
   Refund: typeof Refund;
   Replacement: typeof Replacement;
   ContactEnquiry: typeof ContactEnquiry;
@@ -167,6 +179,7 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeCartTable(sequelize);
   initializeCartItemTable(sequelize);
   initializeOrderTable(sequelize);
+  initializeOrderDocumentTable(sequelize);
   initializeOrderItemTable(sequelize);
   initializeOrderNoteTable(sequelize);
   initializeProductReviewTable(sequelize);
@@ -175,6 +188,8 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeShipmentTrackingEventTable(sequelize);
   initializeReturnRequestTable(sequelize);
   initializeReturnNoteTable(sequelize);
+  initializeReturnShipmentTable(sequelize);
+  initializeReturnShipmentTrackingEventTable(sequelize);
   initializeRefundTable(sequelize);
   initializeReplacementTable(sequelize);
   initializeContactEnquiryTable(sequelize);
@@ -202,6 +217,7 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     Cart,
     CartItem,
     Order,
+    OrderDocument,
     OrderItem,
     OrderNote,
     ProductReview,
@@ -210,6 +226,8 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     ShipmentTrackingEvent,
     ReturnRequest,
     ReturnNote,
+    ReturnShipment,
+    ReturnShipmentTrackingEvent,
     Refund,
     Replacement,
     ContactEnquiry,

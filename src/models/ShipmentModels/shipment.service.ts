@@ -11,6 +11,7 @@ import { IdSequenceService } from "../../database/sequences/id-sequence.service.
 import { buildBusinessReference } from "../../utils/reference-generator.js";
 import { formatMoney } from "../../utils/product-money.js";
 import { IThinkClient, IThinkClientError, type IThinkPackageInput, type IThinkTrackingEvent } from "./ithink.client.js";
+import { PaymentService } from "../PaymentModels/payment.service.js";
 import { ShipmentActionNotAllowedError, ShipmentCourierSelectionInvalidError, ShipmentNotEligibleError, ShipmentNotFoundError, ShipmentPackageDataError, ShipmentProviderError, ShipmentProviderNotConfiguredError, ShipmentServiceabilityError, ShipmentValidationError } from "./shipment.errors.js";
 import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import type { AdminShipmentListResult, CreateShipmentSelectionInput, OrderShipmentSummaryJSON, ReattemptInput, RtoInput, ShipmentFailureReasonJSON, ShipmentJSON, ShipmentQuoteResultJSON } from "./shipment.types.js";
@@ -102,6 +103,8 @@ function toJSON(shipment: Shipment): ShipmentJSON {
     providerCost: shipment.shipping_charge,
     currency: shipment.currency,
     package: { weightGrams: shipment.weight_grams, lengthCm: shipment.length_cm, widthCm: shipment.width_cm, heightCm: shipment.height_cm },
+    deliveryTat: shipment.delivery_tat ?? null,
+    estimatedDelivery: shipment.estimated_delivery_min_date && shipment.estimated_delivery_max_date ? { min: shipment.estimated_delivery_min_date, max: shipment.estimated_delivery_max_date } : null,
     shippedAt: shipment.shipped_at?.toISOString() ?? null,
     deliveredAt: shipment.delivered_at?.toISOString() ?? null,
     cancelledAt: shipment.cancelled_at?.toISOString() ?? null,
@@ -282,7 +285,8 @@ async function prepare(sourceType: ShipmentSourceType, sourceId: number): Promis
       replacement_id: replacement?.id ?? null, method: "standard", provider: "ithink", provider_order_id: null, provider_shipment_id: null,
       carrier: null, tracking_number: null, service_type: null, status: "pending", provider_status: null, provider_status_code: null,
       pickup_warehouse_id: shippingConfig.pickupAddressId!, weight_grams: parcel.weightGrams, length_cm: parcel.lengthCm, width_cm: parcel.widthCm,
-      height_cm: parcel.heightCm, shipping_charge: null, currency: order.currency, shipped_at: null, delivered_at: null, cancelled_at: null,
+      height_cm: parcel.heightCm, shipping_charge: null, currency: order.currency, delivery_tat: null, estimated_delivery_min_date: null,
+      estimated_delivery_max_date: null, shipped_at: null, delivered_at: null, cancelled_at: null,
       rto_at: null, last_synced_at: null, raw_payload: null
     }, { transaction });
     if (sourceType === "order" && order.fulfilment_status === "unfulfilled") { order.fulfilment_status = "processing"; await order.save({ transaction }); }
@@ -332,7 +336,7 @@ async function quote(sourceType: ShipmentSourceType, sourceId: number): Promise<
     const options = rates
       .filter((rate) => serviceable.includes(rate.courier.toLowerCase()))
       .sort((a, b) => Number(a.rate) - Number(b.rate))
-      .map((rate) => ({ carrier: rate.courier, serviceType: rate.serviceType, rate: rate.rate }));
+      .map((rate) => ({ carrier: rate.courier, serviceType: rate.serviceType, rate: rate.rate, deliveryTat: rate.deliveryTat ?? null, estimatedDelivery: rate.estimatedDelivery ?? null }));
     return { options };
   } catch (error) {
     if (error instanceof IThinkClientError) {
@@ -462,6 +466,13 @@ async function create(sourceType: ShipmentSourceType, sourceId: number, selectio
     prepared.shipment.shipping_charge = formatMoney(selected.rate);
     prepared.shipment.carrier = selected.courier;
     prepared.shipment.service_type = selected.serviceType || null;
+    // Captured from the exact candidate actually booked — the same fresh
+    // getRates() call this create() attempt already re-ran above (never the
+    // caller's stale, earlier quote() result — see this function's own
+    // comment on why selection is always re-verified against a fresh list).
+    prepared.shipment.delivery_tat = selected.deliveryTat ?? null;
+    prepared.shipment.estimated_delivery_min_date = selected.estimatedDelivery?.min ?? null;
+    prepared.shipment.estimated_delivery_max_date = selected.estimatedDelivery?.max ?? null;
     await prepared.shipment.save();
 
     const result = await IThinkClient.createShipment(createInput(prepared, selected.courier, selected.serviceType));
@@ -522,7 +533,15 @@ async function applyFulfilment(shipment: Shipment, next: ShipmentStatus, transac
     const order = await Order.findByPk(shipment.order_id, { transaction, lock: transaction.LOCK.UPDATE });
     if (!order) return;
     if (["picked_up", "in_transit", "out_for_delivery"].includes(next)) { order.fulfilment_status = "shipped"; if (["confirmed", "processing"].includes(order.status)) order.status = "shipped"; }
-    if (next === "delivered") { order.fulfilment_status = "delivered"; if (order.status !== "return_requested") order.status = "delivered"; }
+    if (next === "delivered") {
+      order.fulfilment_status = "delivered";
+      if (order.status !== "return_requested") order.status = "delivered";
+      // COD funds are only actually collected at the door — courier-confirmed
+      // delivery is that collection event. Mutates order.payment_status in
+      // place (no-op for PayU Orders, already "paid") so the save() below
+      // persists status/fulfilment_status/payment_status together.
+      await PaymentService.markCodDelivered(order, shipment.delivered_at!, transaction);
+    }
     await order.save({ transaction });
   } else if (next === "delivered" && shipment.replacement_id) {
     const replacement = await Replacement.findByPk(shipment.replacement_id, { transaction, lock: transaction.LOCK.UPDATE });
@@ -534,12 +553,25 @@ async function applyFulfilment(shipment: Shipment, next: ShipmentStatus, transac
   }
 }
 
-async function ingest(shipmentId: number, courier: string | null, currentStatus: string, currentStatusCode: string | null, events: IThinkTrackingEvent[]): Promise<void> {
+async function ingest(shipmentId: number, courier: string | null, currentStatus: string | null, currentStatusCode: string | null, events: IThinkTrackingEvent[]): Promise<void> {
   let advancedTo: { sourceType: ShipmentSourceType; next: ShipmentStatus; orderId: number; replacementId: number | null } | null = null;
 
   await sequelize.transaction(async (transaction) => {
     const shipment = await Shipment.findByPk(shipmentId, { transaction, lock: transaction.LOCK.UPDATE });
     if (!shipment) throw new ShipmentNotFoundError(shipmentId);
+
+    // currentStatus === null is IThinkClient.track()'s explicit "no tracking
+    // data at all for this AWB yet" signal (see its own comment) — not a
+    // provider failure, but also nothing to ingest: there is no real scan to
+    // record and no new status to compare against what this Shipment already
+    // has. Only last_synced_at moves, so a "no scans yet" refresh can never
+    // fabricate a tracking event or a status change on every poll.
+    if (currentStatus === null) {
+      shipment.last_synced_at = new Date();
+      await shipment.save({ transaction });
+      return;
+    }
+
     const fallbackAt = events.at(-1)?.eventAt ?? shipment.last_synced_at?.toISOString() ?? shipment.created_at.toISOString();
     const allEvents = events.some((event) => event.status === currentStatus) ? events : [...events, { status: currentStatus, statusCode: currentStatusCode, location: null, message: null, eventAt: fallbackAt }];
     for (const event of allEvents.sort((a, b) => providerDate(a.eventAt).getTime() - providerDate(b.eventAt).getTime())) {

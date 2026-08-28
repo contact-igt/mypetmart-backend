@@ -372,8 +372,8 @@ describe("Shipment Reliability Phase 1A", () => {
       const result = await ShipmentService.quoteForOrder(order.id);
 
       expect(result.options).toEqual([
-        { carrier: "Courier B", serviceType: "Air", rate: "48.00" },
-        { carrier: "Courier A", serviceType: "Surface", rate: "87.50" }
+        { carrier: "Courier B", serviceType: "Air", rate: "48.00", deliveryTat: null, estimatedDelivery: null },
+        { carrier: "Courier A", serviceType: "Surface", rate: "87.50", deliveryTat: null, estimatedDelivery: null }
       ]);
       expect(createSpy).not.toHaveBeenCalled();
       expect(await Shipment.count({ where: { order_id: order.id } })).toBe(0);
@@ -535,6 +535,82 @@ describe("Shipment Reliability Phase 1A", () => {
       const retried = await ShipmentService.retry(failed!.id);
 
       expect(retried.carrier).toBe("Courier B"); // cheapest, automatic — retry() takes no selection argument at all
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Phase 2A.2 — Rate-based ETA capture
+  // -------------------------------------------------------------------
+  describe("ETA capture", () => {
+    it("returns deliveryTat and estimatedDelivery on quote options when iThink supplies them", async () => {
+      const { order } = await createOrder();
+      vi.spyOn(IThinkClient, "checkServiceability").mockResolvedValue(["courier a", "courier b"]);
+      vi.spyOn(IThinkClient, "getRates").mockResolvedValue([
+        { courier: "Courier A", serviceType: "Surface", rate: "87.50", deliveryTat: 4, estimatedDelivery: { min: "2026-08-29", max: "2026-09-01" } },
+        { courier: "Courier B", serviceType: "Air", rate: "48.00", deliveryTat: 2, estimatedDelivery: { min: "2026-08-29", max: "2026-09-01" } }
+      ]);
+
+      const result = await ShipmentService.quoteForOrder(order.id);
+
+      expect(result.options).toEqual([
+        { carrier: "Courier B", serviceType: "Air", rate: "48.00", deliveryTat: 2, estimatedDelivery: { min: "2026-08-29", max: "2026-09-01" } },
+        { carrier: "Courier A", serviceType: "Surface", rate: "87.50", deliveryTat: 4, estimatedDelivery: { min: "2026-08-29", max: "2026-09-01" } }
+      ]);
+    });
+
+    it("returns null deliveryTat/estimatedDelivery on quote options when iThink omits them — never a guess", async () => {
+      const { order } = await createOrder();
+      vi.spyOn(IThinkClient, "checkServiceability").mockResolvedValue(["courier a"]);
+      vi.spyOn(IThinkClient, "getRates").mockResolvedValue([{ courier: "Courier A", serviceType: "Surface", rate: "87.50" }]);
+
+      const result = await ShipmentService.quoteForOrder(order.id);
+
+      expect(result.options).toEqual([{ carrier: "Courier A", serviceType: "Surface", rate: "87.50", deliveryTat: null, estimatedDelivery: null }]);
+    });
+
+    it("persists the booked candidate's deliveryTat/estimatedDelivery onto the Shipment", async () => {
+      const { order } = await createOrder();
+      vi.spyOn(IThinkClient, "checkServiceability").mockResolvedValue(["courier a"]);
+      vi.spyOn(IThinkClient, "getRates").mockResolvedValue([{ courier: "Courier A", serviceType: "Surface", rate: "87.50", deliveryTat: 4, estimatedDelivery: { min: "2026-08-29", max: "2026-09-01" } }]);
+      vi.spyOn(IThinkClient, "createShipment").mockResolvedValue({ awb: "AWB-ETA", reference: "REF-ETA", courier: "Courier A", trackingUrl: null });
+
+      const result = await ShipmentService.createForOrder(order.id);
+
+      expect(result.deliveryTat).toBe(4);
+      expect(result.estimatedDelivery).toEqual({ min: "2026-08-29", max: "2026-09-01" });
+      const row = await Shipment.findByPk(result.id);
+      expect(row).toMatchObject({ delivery_tat: 4, estimated_delivery_min_date: "2026-08-29", estimated_delivery_max_date: "2026-09-01" });
+    });
+
+    it("leaves deliveryTat/estimatedDelivery null when iThink's candidate doesn't supply them — old-shipment shape keeps working", async () => {
+      const { order } = await createOrder();
+      mockSuccessfulProvider(); // this file's own baseline mock never sets deliveryTat/estimatedDelivery
+
+      const result = await ShipmentService.createForOrder(order.id);
+
+      expect(result.deliveryTat).toBeNull();
+      expect(result.estimatedDelivery).toBeNull();
+      // Re-fetching through getById/getForOrder must also stay null-safe.
+      await expect(ShipmentService.getById(result.id)).resolves.toMatchObject({ deliveryTat: null, estimatedDelivery: null });
+      await expect(ShipmentService.getForOrder(order.id)).resolves.toMatchObject({ deliveryTat: null, estimatedDelivery: null });
+    });
+
+    it("captures fresh ETA on a successful retry, from that retry's own rate response", async () => {
+      const { order } = await createOrder();
+      vi.spyOn(IThinkClient, "checkServiceability").mockResolvedValue(["courier a"]);
+      vi.spyOn(IThinkClient, "getRates").mockResolvedValue([{ courier: "Courier A", serviceType: "Surface", rate: "87.50" }]);
+      vi.spyOn(IThinkClient, "createShipment").mockRejectedValueOnce(new IThinkClientError("CREATE_REJECTED", "temporary"));
+      await expect(ShipmentService.createForOrder(order.id)).rejects.toBeDefined();
+      const failed = await Shipment.findOne({ where: { order_id: order.id } });
+      expect(failed?.delivery_tat ?? null).toBeNull();
+
+      vi.spyOn(IThinkClient, "getRates").mockResolvedValue([{ courier: "Courier A", serviceType: "Surface", rate: "87.50", deliveryTat: 3, estimatedDelivery: { min: "2026-08-30", max: "2026-09-02" } }]);
+      vi.spyOn(IThinkClient, "createShipment").mockResolvedValue({ awb: "AWB-RETRY-ETA", reference: "REF-RETRY-ETA", courier: "Courier A", trackingUrl: null });
+
+      const retried = await ShipmentService.retry(failed!.id);
+
+      expect(retried.deliveryTat).toBe(3);
+      expect(retried.estimatedDelivery).toEqual({ min: "2026-08-30", max: "2026-09-02" });
     });
   });
 });

@@ -1038,15 +1038,24 @@ export const AdminOrderService = {
       }
       // fulfilment_status/shipment are still never touched here — those
       // remain independent state machines (V1 locked rule). payment_status
-      // is likewise never hand-set directly; when isPaidCancellation is
-      // true it instead moves later, through the same PayU-verified refund
-      // finalization path the Return flow already uses.
+      // is likewise never hand-set directly here, with one narrow exception:
+      // "delivered" runs it through PaymentService.markCodDelivered below,
+      // the same COD-collection-at-the-door reconciliation the automatic
+      // shipment-tracking path already applies (shipment.service.ts's
+      // applyFulfilment) — an admin manually marking an Order delivered must
+      // reach the same outcome, or a COD Order fulfilled outside shipment
+      // tracking would stay "pending" forever. A PayU Order's payment_status
+      // still only ever moves through the verified refund finalization path
+      // the Return flow already uses (isPaidCancellation below).
 
       let pendingRefundId: number | null = null;
       if (isPaidCancellation) {
         await restoreStockForCancelledOrder(order.id, t);
         const refund = await RefundService.createPendingCancellationRefund(admin.id, order, t);
         pendingRefundId = refund.id;
+      }
+      if (nextStatus === "delivered") {
+        await PaymentService.markCodDelivered(order, new Date(), t);
       }
 
       await order.save({ transaction: t });
@@ -1157,6 +1166,11 @@ export const AdminOrderService = {
           await restoreStockForCancelledOrder(order.id, t);
           const refund = await RefundService.createPendingCancellationRefund(admin.id, order, t);
           pendingRefundIds.push(refund.id);
+        }
+        if (nextStatus === "delivered") {
+          // Same COD-collection-at-the-door reconciliation as the single-order
+          // updateStatus() path above — a no-op for PayU Orders (already "paid").
+          await PaymentService.markCodDelivered(order, new Date(), t);
         }
 
         await order.save({ transaction: t });

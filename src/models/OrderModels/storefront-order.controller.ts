@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 
 import { sendSuccess } from "../../utils/api-response.js";
 import type { CartIdentity } from "../CartModels/cart.types.js";
+import { ReceiptService } from "../DocumentModels/receipt.service.js";
 import { OrderService } from "./order.service.js";
 import { createOrderSchema, customerOrderListQuerySchema, parseGuestOrderToken, parseOrderId } from "./order.validation.js";
 import type { CreateOrderInput, CustomerOrderListQuery } from "./order.types.js";
@@ -58,6 +59,30 @@ export async function handleGetCustomerOrder(req: Request, res: Response, next: 
     const orderId = parseOrderId(req.params.orderId);
     const order = await OrderService.getCustomerOrder(requireCustomerId(req), orderId);
     sendSuccess(res, 200, order);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Binary response — deliberately not sendSuccess()'s {success,data} JSON
+// envelope. Ownership is entirely enforced by ReceiptService/OrderService
+// (OrderNotFoundError on any mismatch, same as handleGetCustomerOrder above)
+// before any PDF is ever rendered.
+export async function handleDownloadCustomerReceipt(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const orderId = parseOrderId(req.params.orderId);
+    const { buffer, filename } = await ReceiptService.generateForCustomer(requireCustomerId(req), orderId);
+    res.status(200).setHeader("Content-Type", "application/pdf").setHeader("Content-Disposition", `attachment; filename="${filename}"`).send(buffer);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleDownloadGuestReceipt(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const token = parseGuestOrderToken(req.params.token);
+    const { buffer, filename } = await ReceiptService.generateForGuest(token);
+    res.status(200).setHeader("Content-Type", "application/pdf").setHeader("Content-Disposition", `attachment; filename="${filename}"`).send(buffer);
   } catch (error) {
     next(error);
   }

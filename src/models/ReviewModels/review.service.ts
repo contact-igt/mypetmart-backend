@@ -7,6 +7,7 @@ import { OrderItem } from "../../database/tables/OrderItemTable/index.js";
 import { Product } from "../../database/tables/ProductTable/index.js";
 import { ProductReview } from "../../database/tables/ProductReviewTable/index.js";
 import { User } from "../../database/tables/UserTable/index.js";
+import { loadPrimaryProductImages } from "../../utils/storefront-product-summary.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
 import { ProductNotFoundError } from "../ProductModels/product.errors.js";
 import { DuplicateReviewError, ReviewNotEligibleError, ReviewNotFoundError } from "./review.errors.js";
@@ -25,6 +26,7 @@ import type {
   ReviewEligibilityJSON,
   ReviewRatingDistribution,
   ReviewSummaryJSON,
+  StorefrontReviewFeedResult,
   UpdateReviewInput
 } from "./review.types.js";
 
@@ -303,6 +305,51 @@ export class ReviewService {
 
   static async getReviewSummary(productId: number): Promise<ReviewSummaryJSON> {
     return await computeReviewSummary(productId);
+  }
+
+  static async listPublicReviewsGlobal(query: PublicReviewListQuery): Promise<StorefrontReviewFeedResult> {
+    const page = Math.max(1, query.page || 1);
+    const pageSize = Math.min(50, Math.max(1, query.pageSize || 10));
+    const offset = (page - 1) * pageSize;
+
+    let order: Array<[string, string]> = [["created_at", "DESC"], ["id", "DESC"]];
+    if (query.sort === "highest") order = [["rating", "DESC"], ["created_at", "DESC"], ["id", "DESC"]];
+    if (query.sort === "lowest") order = [["rating", "ASC"], ["created_at", "DESC"], ["id", "DESC"]];
+
+    const { count, rows } = await ProductReview.findAndCountAll({
+      where: { status: "approved" },
+      include: [
+        { model: Product, as: "product", required: true, where: { status: "active" }, attributes: ["id", "name", "slug"] },
+        { model: User, as: "user", required: false, attributes: ["name"] }
+      ],
+      order,
+      limit: pageSize,
+      offset,
+      distinct: true
+    });
+
+    const imageByProduct = await loadPrimaryProductImages(rows.map((review) => review.product_id));
+    const reviews = rows.flatMap((review) => {
+      const product = review.product;
+      if (!product) return [];
+      const publicReview = toPublicReviewJSON(review);
+      return [{
+        id: publicReview.id,
+        rating: publicReview.rating,
+        title: publicReview.title,
+        review: publicReview.review,
+        customerName: publicReview.customerName,
+        verifiedPurchase: publicReview.verifiedPurchase,
+        product: {
+          id: product.id,
+          name: product.name,
+          slug: product.slug,
+          image: imageByProduct.get(product.id) ?? null
+        }
+      }];
+    });
+
+    return { reviews, page, pageSize, total: count, totalPages: Math.ceil(count / pageSize) };
   }
 
   static async listAdminReviews(query: AdminReviewListQuery): Promise<AdminReviewListResult> {

@@ -4,6 +4,7 @@ import { paymentConfig } from "../../config/payment.config.js";
 import { sequelize } from "../../database/index.js";
 import { Order } from "../../database/tables/OrderTable/index.js";
 import { OrderItem } from "../../database/tables/OrderItemTable/index.js";
+import { Payment } from "../../database/tables/PaymentTable/index.js";
 import { Refund } from "../../database/tables/RefundTable/index.js";
 import { Replacement } from "../../database/tables/ReplacementTable/index.js";
 import { ReturnNote } from "../../database/tables/ReturnNoteTable/index.js";
@@ -17,6 +18,7 @@ import { formatMoney } from "../../utils/product-money.js";
 import { getValidNextOrderStatuses } from "../OrderModels/order.constants.js";
 import { OrderNotFoundError } from "../OrderModels/order.errors.js";
 import { ReplacementService } from "../ReplacementModels/replacement.service.js";
+import { ReturnShipmentService } from "../ReturnShipmentModels/return-shipment.service.js";
 import { ShipmentService } from "../ShipmentModels/shipment.service.js";
 import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import {
@@ -38,6 +40,7 @@ import type {
   ReturnRequestDetailJSON,
   ReturnRequestJSON
 } from "./return.types.js";
+import type { ReturnShipmentJSON } from "../ReturnShipmentModels/return-shipment.types.js";
 
 // Return process states that still "hold" their quantity against the
 // OrderItem — a rejected request releases its quantity back to the pool
@@ -46,7 +49,7 @@ import type {
 // room for a second one).
 const QUANTITY_HOLDING_STATUSES = ["requested", "approved", "resolved"] as const;
 
-function toJSON(returnRequest: ReturnRequest, order: Order, orderItem: OrderItem, refunds: Refund[], replacement: Replacement | null, shipment: Shipment | null = null): ReturnRequestJSON {
+function toJSON(returnRequest: ReturnRequest, order: Order, orderItem: OrderItem, refunds: Refund[], replacement: Replacement | null, shipment: Shipment | null = null, returnShipment: ReturnShipmentJSON | null = null): ReturnRequestJSON {
   return {
     id: returnRequest.id,
     returnNumber: returnRequest.return_number,
@@ -75,17 +78,23 @@ function toJSON(returnRequest: ReturnRequest, order: Order, orderItem: OrderItem
       failedAt: refund.failed_at ? refund.failed_at.toISOString() : null,
       failureMessage: refund.failure_message
     })),
-    replacement: replacement ? ReplacementService.toJSON(replacement, shipment ? ShipmentService.toJSON(shipment) : null) : null
+    replacement: replacement ? ReplacementService.toJSON(replacement, shipment ? ShipmentService.toJSON(shipment) : null) : null,
+    returnShipment
   };
 }
 
 async function loadDetail(returnRequest: ReturnRequest): Promise<ReturnRequestDetailJSON> {
-  const [order, orderItem, refunds, replacement, notes] = await Promise.all([
+  const [order, orderItem, refunds, replacement, notes, returnShipment, payment] = await Promise.all([
     Order.findByPk(returnRequest.order_id),
     OrderItem.findByPk(returnRequest.order_item_id),
     Refund.findAll({ where: { return_request_id: returnRequest.id }, order: [["id", "DESC"]] }),
     Replacement.findOne({ where: { return_request_id: returnRequest.id } }),
-    ReturnNote.findAll({ where: { return_request_id: returnRequest.id }, include: [{ model: User, as: "author" }], order: [["created_at", "ASC"]] })
+    ReturnNote.findAll({ where: { return_request_id: returnRequest.id }, include: [{ model: User, as: "author" }], order: [["created_at", "ASC"]] }),
+    ReturnShipmentService.getForReturnRequest(returnRequest.id),
+    Payment.findOne({
+      where: { order_id: returnRequest.order_id, status: ["paid", "partially_refunded"] },
+      order: [["id", "DESC"]]
+    })
   ]);
 
   if (!order || !orderItem) {
@@ -95,13 +104,15 @@ async function loadDetail(returnRequest: ReturnRequest): Promise<ReturnRequestDe
   }
 
   const shipment = replacement ? await Shipment.findOne({ where: { replacement_id: replacement.id }, include: [{ model: ShipmentTrackingEvent, as: "trackingEvents" }] }) : null;
-  const base = toJSON(returnRequest, order, orderItem, refunds, replacement, shipment);
+  const base = toJSON(returnRequest, order, orderItem, refunds, replacement, shipment, returnShipment);
   const maxRefundableAmount = formatMoney(Number(orderItem.unit_price) * returnRequest.quantity);
 
   return {
     ...base,
     maxRefundableAmount,
     currency: order.currency,
+    paymentProvider: payment?.provider ?? null,
+    paymentMethod: payment?.method ?? null,
     notes: notes.map((note) => ({
       id: note.id,
       message: note.message,

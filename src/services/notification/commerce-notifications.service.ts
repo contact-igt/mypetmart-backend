@@ -11,7 +11,7 @@
 // guards content correctness, NotificationService's durable dedupe guards
 // against ever sending the same milestone twice).
 import { environmentConfig } from "../../config/environment.config.js";
-import { Order, OrderItem, Payment, Refund, Replacement, ReturnRequest, Shipment } from "../../database/tables/index.js";
+import { Order, OrderItem, Payment, Refund, Replacement, ReturnRequest, ReturnShipment, Shipment } from "../../database/tables/index.js";
 import type { Order as OrderModel } from "../../database/tables/OrderTable/index.js";
 import type { OrderItem as OrderItemModel } from "../../database/tables/OrderItemTable/index.js";
 import { formatMoney } from "../../utils/product-money.js";
@@ -390,6 +390,62 @@ export const CommerceNotifications = {
           awbNumber: shipment.tracking_number,
           trackUrl: orderViewUrl(loaded.order)
         })
+    });
+  },
+
+  /** Fires once a reverse pickup genuinely has an AWB (ReturnShipmentService.createForApprovedReturn's success path). */
+  async returnPickupCreated(returnShipmentId: number): Promise<void> {
+    const returnShipment = await ReturnShipment.findByPk(returnShipmentId);
+    if (!returnShipment || !returnShipment.awb_number) return;
+    const returnRequest = await ReturnRequest.findByPk(returnShipment.return_request_id);
+    if (!returnRequest) return;
+    const loaded = await loadOrderAndItem(returnRequest.order_id, returnRequest.order_item_id);
+    if (!loaded) return;
+    await NotificationService.notify({
+      eventType: "RETURN_PICKUP_CREATED",
+      entityType: "return_shipment",
+      entityId: returnShipment.id,
+      recipientEmail: loaded.order.contact_email,
+      build: () => templates.getReturnPickupCreatedTemplate({ returnNumber: returnRequest.return_number, itemName: itemLabel(loaded.orderItem), carrier: returnShipment.carrier, awbNumber: returnShipment.awb_number })
+    });
+  },
+
+  /** Courier-reported pickup — fires from the same tracking-sync ingest path ORDER_SHIPPED/orderShipped uses on the forward side. */
+  async returnPickedUp(returnShipmentId: number): Promise<void> {
+    const returnShipment = await ReturnShipment.findByPk(returnShipmentId);
+    if (!returnShipment || returnShipment.status !== "picked_up") return;
+    const returnRequest = await ReturnRequest.findByPk(returnShipment.return_request_id);
+    if (!returnRequest) return;
+    const loaded = await loadOrderAndItem(returnRequest.order_id, returnRequest.order_item_id);
+    if (!loaded) return;
+    await NotificationService.notify({
+      eventType: "RETURN_PICKED_UP",
+      entityType: "return_shipment",
+      entityId: returnShipment.id,
+      recipientEmail: loaded.order.contact_email,
+      build: () => templates.getReturnPickedUpTemplate({ returnNumber: returnRequest.return_number, itemName: itemLabel(loaded.orderItem) })
+    });
+  },
+
+  /**
+   * Courier-reported arrival at the warehouse — informational only. Never
+   * implies a refund has started; that stays a separate, manual admin
+   * action gated on ReturnRequest.item_received_at (see return.service.ts),
+   * which this notification does not touch.
+   */
+  async returnDelivered(returnShipmentId: number): Promise<void> {
+    const returnShipment = await ReturnShipment.findByPk(returnShipmentId);
+    if (!returnShipment || returnShipment.status !== "delivered") return;
+    const returnRequest = await ReturnRequest.findByPk(returnShipment.return_request_id);
+    if (!returnRequest) return;
+    const loaded = await loadOrderAndItem(returnRequest.order_id, returnRequest.order_item_id);
+    if (!loaded) return;
+    await NotificationService.notify({
+      eventType: "RETURN_DELIVERED",
+      entityType: "return_shipment",
+      entityId: returnShipment.id,
+      recipientEmail: loaded.order.contact_email,
+      build: () => templates.getReturnDeliveredTemplate({ returnNumber: returnRequest.return_number, itemName: itemLabel(loaded.orderItem) })
     });
   },
 

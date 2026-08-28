@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 
+import type { Transaction } from "sequelize";
+
 import { paymentConfig } from "../../config/payment.config.js";
 import { sequelize } from "../../database/index.js";
 import { Order } from "../../database/tables/OrderTable/index.js";
@@ -45,6 +47,49 @@ function buildCodResult(order: Order, payment: Payment): CodConfirmationResultJS
     amount: payment.amount,
     currency: payment.currency
   };
+}
+
+/**
+ * Completes the COD payment lifecycle once an Order is confirmed delivered.
+ * Cash on Delivery funds are only actually collected at the door — this is
+ * the reconciliation step deferred by confirmCodOrder() below (see its own
+ * comment: "status stays 'pending' forever in Phase 1... collection
+ * reconciliation is a future admin action"), now closed by treating courier-
+ * confirmed (or admin-confirmed) delivery as that collection event.
+ *
+ * Idempotent no-op when this Order has no COD Payment (a PayU Order, for
+ * example — never touched by this function) or when its COD Payment has
+ * already left "pending" (already paid by an earlier call, or independently
+ * failed/refunded/cancelled) — safe to call from every code path that can
+ * ever drive an Order to "delivered" (automatic shipment-tracking sync AND
+ * manual admin status update) without risking a double-apply.
+ *
+ * Mutates the passed `order` instance's payment_status in place rather than
+ * writing it directly — every caller already loads the Order row locked
+ * (LOCK.UPDATE) and calls order.save() itself right after setting
+ * status/fulfilment_status, so this piggybacks on that same single write
+ * instead of issuing a second, separately-racing UPDATE. Must be called
+ * inside that same transaction, on that same locked row, so the "delivered"
+ * transition and the payment reconciliation can never observably diverge.
+ */
+async function markCodDelivered(order: Order, deliveredAt: Date, transaction: Transaction): Promise<void> {
+  const payment = await Payment.findOne({
+    where: { order_id: order.id, provider: "cod" },
+    transaction,
+    lock: transaction.LOCK.UPDATE
+  });
+  if (!payment) {
+    return;
+  }
+  if (payment.status !== "pending") {
+    return;
+  }
+
+  payment.status = "paid";
+  payment.paid_at = deliveredAt;
+  await payment.save({ transaction });
+
+  order.payment_status = "paid";
 }
 
 /**
@@ -97,6 +142,7 @@ async function reconcilePendingAttempt(payment: Payment): Promise<void> {
 
 export const PaymentService = {
   reconcilePendingAttempt,
+  markCodDelivered,
 
   /**
    * Creates a new Payment Attempt for a given Order.

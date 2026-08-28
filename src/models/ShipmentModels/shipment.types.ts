@@ -42,6 +42,14 @@ export type ShipmentJSON = {
   providerCost: string | null;
   currency: string;
   package: { weightGrams: number; lengthCm: string; widthCm: string; heightCm: string };
+  // Captured once, from the courier candidate actually booked (iThink's
+  // Rate API — verified live in Phase 2A.1). Deliberately NOT refreshed from
+  // tracking sync — Track Order ETA fields are unconfirmed for this account
+  // (Phase 2A.2 scope) and must not be implemented until verified the same
+  // way. Null on every shipment created before this field existed, and on
+  // any candidate iThink didn't supply an estimate for — never fabricated.
+  deliveryTat: number | null;
+  estimatedDelivery: { min: string; max: string } | null;
   shippedAt: string | null;
   deliveredAt: string | null;
   cancelledAt: string | null;
@@ -74,12 +82,14 @@ export type ReattemptInput = { date: string; time: string };
 export type RtoInput = { reason: string };
 
 // A single courier candidate from iThink's own Rate API response, field for
-// field — nothing invented (no id/ETA/COD-charge: iThink's rate response
-// doesn't carry a distinct courier id, and this integration doesn't parse
-// ETA or a per-courier COD-charge field). "carrier" (not the client's own
-// "courier" key) to match the naming ShipmentJSON.carrier already uses for
-// the same concept once a courier is actually booked.
-export type ShipmentQuoteOptionJSON = { carrier: string; serviceType: string; rate: string };
+// field — nothing invented (no id/COD-charge: iThink's rate response
+// doesn't carry a distinct courier id or a per-courier COD-charge field).
+// "carrier" (not the client's own "courier" key) to match the naming
+// ShipmentJSON.carrier already uses for the same concept once a courier is
+// actually booked. deliveryTat/estimatedDelivery ARE parsed (Phase 2A.2,
+// live-verified against the configured account) — null only when iThink's
+// own response didn't supply them for this candidate/request, never guessed.
+export type ShipmentQuoteOptionJSON = { carrier: string; serviceType: string; rate: string; deliveryTat: number | null; estimatedDelivery: { min: string; max: string } | null };
 export type ShipmentQuoteResultJSON = { options: ShipmentQuoteOptionJSON[] };
 
 // Optional — a manual pick from a prior quote's options. Omitted entirely

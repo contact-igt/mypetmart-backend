@@ -15,6 +15,7 @@ import { normalizeInitiateResponse, normalizeStatusApiResponse } from "./refund-
 import { RefundFinalizationService } from "./refund-finalization.service.js";
 import {
   RefundAlreadyInitiatedError,
+  RefundCodManualProcessingRequiredError,
   RefundExceedsRefundableBalanceError,
   RefundNoPaidPaymentFoundError,
   RefundNotFoundError,
@@ -31,6 +32,15 @@ import type { InitiateRefundResultJSON, RefundFinalizationOutcome } from "./refu
 // initiation disabled"). Only "failed" leaves room for a genuinely new
 // attempt (a fresh logical action, with its own new token).
 const ACTIVE_REFUND_STATUSES = ["pending", "processing", "succeeded"] as const;
+
+function assertOnlineRefundPayment(payment: Payment): void {
+  if (payment.provider.toLowerCase() === "cod" || payment.method?.toLowerCase() === "cod") {
+    throw new RefundCodManualProcessingRequiredError(payment.id);
+  }
+  if (!payment.provider_payment_id) {
+    throw new RefundPaymentMissingProviderIdError(payment.id);
+  }
+}
 
 async function loadRefundedTotalPaise(paymentId: number): Promise<number> {
   const total = (await Refund.sum("amount", { where: { payment_id: paymentId, status: "succeeded" } })) ?? 0;
@@ -81,10 +91,6 @@ export const RefundService = {
    * check above is what actually enforces "one at a time" on retry.
    */
   async initiateRefund(adminId: number, returnRequestId: number): Promise<InitiateRefundResultJSON> {
-    if (!paymentConfig.refundReady) {
-      throw new RefundProviderNotConfiguredError();
-    }
-
     const refund = await sequelize.transaction(async (t) => {
       const returnRequest = await ReturnRequest.findByPk(returnRequestId, { transaction: t, lock: t.LOCK.UPDATE });
       if (!returnRequest) {
@@ -128,8 +134,9 @@ export const RefundService = {
       if (!payment) {
         throw new RefundNoPaidPaymentFoundError(returnRequest.order_id);
       }
-      if (!payment.provider_payment_id) {
-        throw new RefundPaymentMissingProviderIdError(payment.id);
+      assertOnlineRefundPayment(payment);
+      if (!paymentConfig.refundReady) {
+        throw new RefundProviderNotConfiguredError();
       }
 
       const amount = formatMoney(Number(orderItem.unit_price) * returnRequest.quantity);
@@ -204,10 +211,6 @@ export const RefundService = {
    * PayU network call must never happen inside an open DB transaction.
    */
   async createPendingCancellationRefund(adminId: number, order: Order, transaction: Transaction): Promise<Refund> {
-    if (!paymentConfig.refundReady) {
-      throw new RefundProviderNotConfiguredError();
-    }
-
     // Most recent paid Payment for this Order — never a client-supplied
     // Payment id. Locked so a concurrent cancellation attempt (shouldn't be
     // possible once the Order's own row is locked by the caller, but this
@@ -221,8 +224,9 @@ export const RefundService = {
     if (!payment) {
       throw new RefundNoPaidPaymentFoundError(order.id);
     }
-    if (!payment.provider_payment_id) {
-      throw new RefundPaymentMissingProviderIdError(payment.id);
+    assertOnlineRefundPayment(payment);
+    if (!paymentConfig.refundReady) {
+      throw new RefundProviderNotConfiguredError();
     }
 
     const existingActive = await Refund.findOne({

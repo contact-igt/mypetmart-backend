@@ -16,6 +16,7 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
     Category,
     MediaAsset,
     Order,
+    OrderDocument,
     OrderItem,
     OrderNote,
     PasswordResetToken,
@@ -33,6 +34,8 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
     Refund,
     ReturnNote,
     ReturnRequest,
+    ReturnShipment,
+    ReturnShipmentTrackingEvent,
     Shipment,
     ShipmentTrackingEvent,
     User,
@@ -108,6 +111,9 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
   Order.hasMany(OrderItem, { foreignKey: "order_id", as: "items" });
   OrderItem.belongsTo(Order, { foreignKey: "order_id", as: "order" });
 
+  Order.hasMany(OrderDocument, { foreignKey: "order_id", as: "documents" });
+  OrderDocument.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+
   Product.hasMany(OrderItem, { foreignKey: "product_id", as: "orderItems" });
   OrderItem.belongsTo(Product, { foreignKey: "product_id", as: "product" });
 
@@ -165,6 +171,11 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
 
   User.hasMany(Refund, { foreignKey: "initiated_by_admin_id", as: "initiatedRefunds" });
   Refund.belongsTo(User, { foreignKey: "initiated_by_admin_id", as: "initiatedBy" });
+
+  ReturnRequest.hasOne(ReturnShipment, { foreignKey: "return_request_id", as: "returnShipment" });
+  ReturnShipment.belongsTo(ReturnRequest, { foreignKey: "return_request_id", as: "returnRequest" });
+  ReturnShipment.hasMany(ReturnShipmentTrackingEvent, { foreignKey: "return_shipment_id", as: "trackingEvents" });
+  ReturnShipmentTrackingEvent.belongsTo(ReturnShipment, { foreignKey: "return_shipment_id", as: "returnShipment" });
 
   ReturnRequest.hasOne(Replacement, { foreignKey: "return_request_id", as: "replacement" });
   Replacement.belongsTo(ReturnRequest, { foreignKey: "return_request_id", as: "returnRequest" });

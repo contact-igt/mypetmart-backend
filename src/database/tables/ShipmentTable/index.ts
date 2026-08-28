@@ -30,6 +30,14 @@ export class Shipment extends Model<InferAttributes<Shipment>, InferCreationAttr
   declare height_cm: string;
   declare shipping_charge: string | null;
   declare currency: CreationOptional<string>;
+  // Captured from the booked courier candidate's Rate API response (Phase
+  // 2A.2) — never from Track Order (unconfirmed for this account, out of
+  // scope). estimated_delivery_*_date are DATEONLY: Sequelize returns them
+  // as plain "YYYY-MM-DD" strings with no timezone conversion, matching
+  // iThink's own edd_date shape exactly.
+  declare delivery_tat: number | null;
+  declare estimated_delivery_min_date: string | null;
+  declare estimated_delivery_max_date: string | null;
   declare shipped_at: Date | null;
   declare delivered_at: Date | null;
   declare cancelled_at: Date | null;
@@ -71,6 +79,9 @@ export function initializeShipmentTable(sequelize: Sequelize): typeof Shipment {
       height_cm: { type: DataTypes.DECIMAL(8, 2), allowNull: false, validate: { min: 0.01 } },
       shipping_charge: { type: DataTypes.DECIMAL(MONEY_PRECISION, MONEY_SCALE), allowNull: true, validate: { isNonNegative: (value: string) => { if (!isNonNegativeDecimal(value)) throw new Error("Shipping charge cannot be negative."); } } },
       currency: { type: DataTypes.STRING(3), allowNull: false, defaultValue: DEFAULT_CURRENCY_CODE },
+      delivery_tat: { type: DataTypes.SMALLINT.UNSIGNED, allowNull: true, validate: { min: 1 } },
+      estimated_delivery_min_date: { type: DataTypes.DATEONLY, allowNull: true },
+      estimated_delivery_max_date: { type: DataTypes.DATEONLY, allowNull: true },
       shipped_at: { type: DataTypes.DATE, allowNull: true },
       delivered_at: { type: DataTypes.DATE, allowNull: true },
       cancelled_at: { type: DataTypes.DATE, allowNull: true },

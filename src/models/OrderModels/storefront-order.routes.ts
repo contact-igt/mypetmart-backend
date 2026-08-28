@@ -3,7 +3,7 @@ import { Router } from "express";
 import { authenticate } from "../../middlewares/auth/authenticate.middleware.js";
 import { authRateLimiter } from "../../middlewares/auth/rate-limiter.middleware.js";
 import { resolveCartIdentity } from "../../middlewares/cart/resolve-cart-identity.middleware.js";
-import { handleCreateOrder, handleGetCustomerOrder, handleGetGuestOrder, handleListCustomerOrders } from "./storefront-order.controller.js";
+import { handleCreateOrder, handleDownloadCustomerReceipt, handleDownloadGuestReceipt, handleGetCustomerOrder, handleGetGuestOrder, handleListCustomerOrders } from "./storefront-order.controller.js";
 
 export const storefrontOrderRouter = Router();
 
@@ -25,6 +25,13 @@ storefrontOrderRouter.get("/guest/:token", authRateLimiter, (req, res, next) => 
   void handleGetGuestOrder(req, res, next);
 });
 
+// Same token-gated, pre-auth-gate placement as guest Order recovery above —
+// PDF generation is heavier than a JSON lookup, so this shares that route's
+// rate limit rather than being left unlimited.
+storefrontOrderRouter.get("/guest/:token/receipt", authRateLimiter, (req, res, next) => {
+  void handleDownloadGuestReceipt(req, res, next);
+});
+
 // Order history/detail remain customer-authenticated only — guest Order
 // recovery uses the dedicated token-gated route above instead.
 storefrontOrderRouter.use(authenticate("customer"));
@@ -35,4 +42,8 @@ storefrontOrderRouter.get("/", (req, res, next) => {
 
 storefrontOrderRouter.get("/:orderId", (req, res, next) => {
   void handleGetCustomerOrder(req, res, next);
+});
+
+storefrontOrderRouter.get("/:orderId/receipt", (req, res, next) => {
+  void handleDownloadCustomerReceipt(req, res, next);
 });

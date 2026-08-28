@@ -53,6 +53,10 @@ export const paymentConfig = Object.freeze({
   // in .env.example keep working unchanged if a future provider replaces PayU.
   payuKey: environmentConfig.PAYMENT_KEY_ID,
   payuSalt: environmentConfig.PAYMENT_KEY_SECRET,
+  breezeMerchantId: environmentConfig.BREEZE_MERCHANT_ID,
+  breezeEnvironment: environmentConfig.BREEZE_ENVIRONMENT,
+  breezeWebhookSecret: environmentConfig.BREEZE_WEBHOOK_SECRET,
+  breezePublicKey: environmentConfig.BREEZE_PUBLIC_KEY,
   gatewayUrl: resolveGatewayUrl(),
   verifyApiUrl: resolveVerifyApiUrl(),
   // Trusted, backend-configured browser return targets — never a
@@ -81,6 +85,7 @@ export const paymentConfig = Object.freeze({
     Boolean(environmentConfig.PAYMENT_KEY_ID) &&
     Boolean(environmentConfig.PAYMENT_KEY_SECRET) &&
     Boolean(environmentConfig.PAYMENT_WEBHOOK_SECRET),
+  breezeReady: Boolean(environmentConfig.BREEZE_MERCHANT_ID) && Boolean(environmentConfig.BREEZE_ENVIRONMENT) && Boolean(environmentConfig.BREEZE_WEBHOOK_SECRET),
   // Refund initiation additionally requires a reachable public callback URL —
   // never silently degrades to "no webhook" for a real-money operation.
   refundReady: Boolean(environmentConfig.PAYMENT_PROVIDER) && Boolean(environmentConfig.PAYMENT_KEY_ID) && Boolean(environmentConfig.PAYMENT_KEY_SECRET) && Boolean(environmentConfig.BACKEND_PUBLIC_ORIGIN)

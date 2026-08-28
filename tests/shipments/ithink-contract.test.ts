@@ -77,7 +77,7 @@ describe("iThink Logistics V3 request contracts", () => {
       { logistic_name: "Courier B", logistic_service_type: "Air", prepaid: "N", cod: "Y", pickup: "Y", rate: "99.00" }
     ] }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(IThinkClient.getRates({ toPincode: "400001", lengthCm: "10.00", widthCm: "8.00", heightCm: "6.00", weightKg: "0.500", productMrp: "999.00", paymentMode: "prepaid" })).resolves.toEqual([{ courier: "Courier A", serviceType: "Surface", rate: "87.50" }]);
+    await expect(IThinkClient.getRates({ toPincode: "400001", lengthCm: "10.00", widthCm: "8.00", heightCm: "6.00", weightKg: "0.500", productMrp: "999.00", paymentMode: "prepaid" })).resolves.toEqual([{ courier: "Courier A", serviceType: "Surface", rate: "87.50", deliveryTat: null, estimatedDelivery: null }]);
     const request = sentRequest(fetchMock);
     expect(request.data).toMatchObject({ from_pincode: "600001", to_pincode: "400001", shipping_weight_kg: "0.500", order_type: "forward", payment_method: "prepaid", delivery_type: "0" });
     expect(request.data).not.toHaveProperty("store_id");
@@ -89,9 +89,34 @@ describe("iThink Logistics V3 request contracts", () => {
       { logistic_name: "Courier B", logistic_service_type: "Air", prepaid: "N", cod: "Y", pickup: "Y", rate: "99.00" }
     ] }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(IThinkClient.getRates({ toPincode: "400001", lengthCm: "10.00", widthCm: "8.00", heightCm: "6.00", weightKg: "0.500", productMrp: "999.00", paymentMode: "cod" })).resolves.toEqual([{ courier: "Courier B", serviceType: "Air", rate: "99.00" }]);
+    await expect(IThinkClient.getRates({ toPincode: "400001", lengthCm: "10.00", widthCm: "8.00", heightCm: "6.00", weightKg: "0.500", productMrp: "999.00", paymentMode: "cod" })).resolves.toEqual([{ courier: "Courier B", serviceType: "Air", rate: "99.00", deliveryTat: null, estimatedDelivery: null }]);
     const request = sentRequest(fetchMock);
     expect(request.data).toMatchObject({ payment_method: "cod" });
+  });
+
+  // Phase 2A.2 — live-verified against the configured account (Phase 2A.1):
+  // delivery_tat is per courier, edd_date is one shared min/max window for
+  // the whole rate-check response.
+  it("parses delivery_tat and edd_date.min_edd/max_edd from the Rate API response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: [
+      { logistic_name: "Courier A", logistic_service_type: "Surface", prepaid: "Y", cod: "N", pickup: "Y", rate: "87.50", delivery_tat: "4" },
+      { logistic_name: "Courier B", logistic_service_type: "Air", prepaid: "Y", cod: "N", pickup: "Y", rate: "99.00", delivery_tat: "2" }
+    ], zone: "C", expected_delivery_date: "2 to 5 Days", edd_date: { min_edd: "2026-08-29", max_edd: "2026-09-01" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(IThinkClient.getRates({ toPincode: "400001", lengthCm: "10.00", widthCm: "8.00", heightCm: "6.00", weightKg: "0.500", productMrp: "999.00", paymentMode: "prepaid" })).resolves.toEqual([
+      { courier: "Courier A", serviceType: "Surface", rate: "87.50", deliveryTat: 4, estimatedDelivery: { min: "2026-08-29", max: "2026-09-01" } },
+      { courier: "Courier B", serviceType: "Air", rate: "99.00", deliveryTat: 2, estimatedDelivery: { min: "2026-08-29", max: "2026-09-01" } }
+    ]);
+  });
+
+  it("treats a missing or malformed edd_date/delivery_tat as no estimate, never a guess", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: [
+      { logistic_name: "Courier A", logistic_service_type: "Surface", prepaid: "Y", cod: "N", pickup: "Y", rate: "87.50", delivery_tat: "not-a-number" }
+    ], edd_date: { min_edd: "not-a-date", max_edd: "2026-09-01" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(IThinkClient.getRates({ toPincode: "400001", lengthCm: "10.00", widthCm: "8.00", heightCm: "6.00", weightKg: "0.500", productMrp: "999.00", paymentMode: "prepaid" })).resolves.toEqual([
+      { courier: "Courier A", serviceType: "Surface", rate: "87.50", deliveryTat: null, estimatedDelivery: null }
+    ]);
   });
 
   it("maps a forward prepaid shipment without changing the commerce total", async () => {
@@ -131,6 +156,40 @@ describe("iThink Logistics V3 request contracts", () => {
     const request = sentRequest(fetchMock);
     expect(request.data).toMatchObject({ awb_number_list: "AWB123" });
     expect(request.data).not.toHaveProperty("store_id");
+  });
+
+  // Phase E.3 — a freshly-created/manifested AWB the courier hasn't scanned
+  // yet is not a provider failure; see ithink.client.ts's track() comment.
+  describe("Empty tracking data (AWB created, no scans yet)", () => {
+    it("resolves with events=[] and no fabricated status when data is an empty array", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: [] })));
+      await expect(IThinkClient.track("AWB123")).resolves.toEqual({ awb: "AWB123", courier: null, currentStatus: null, currentStatusCode: null, events: [] });
+    });
+
+    it("resolves with events=[] when data is an empty object (no entry for this AWB yet)", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: {} })));
+      await expect(IThinkClient.track("AWB123")).resolves.toEqual({ awb: "AWB123", courier: null, currentStatus: null, currentStatusCode: null, events: [] });
+    });
+
+    it("still throws when data is empty but the top-level response reports a real rejection", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "error", data: [], message: "invalid awb" })));
+      await expect(IThinkClient.track("AWB123")).rejects.toMatchObject({ code: "TRACKING_UNAVAILABLE" });
+    });
+
+    it("still throws when the response has no data key at all and reports an explicit error", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "error", message: "invalid awb" })));
+      await expect(IThinkClient.track("AWB123")).rejects.toMatchObject({ code: "TRACKING_UNAVAILABLE" });
+    });
+
+    it("still throws INVALID_RESPONSE for a genuinely malformed/non-JSON body — real failures are never hidden", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not json", { status: 200, headers: { "content-type": "text/html" } })));
+      await expect(IThinkClient.track("AWB123")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    });
+
+    it("still throws PROVIDER_UNAVAILABLE for a real HTTP failure", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "error" }, 503)));
+      await expect(IThinkClient.track("AWB123")).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+    });
   });
 
   it("maps cancellation and NDR actions to their V3 endpoints", async () => {
@@ -318,6 +377,20 @@ describe("ShipmentService fulfilment invariants", () => {
     expect(await ShipmentTrackingEvent.count({ where: { shipment_id: shipment.id } })).toBe(1);
     await order.reload();
     expect(order).toMatchObject({ status: "delivered", fulfilment_status: "delivered", payment_status: "paid" });
+  });
+
+  it("refresh succeeds without change when iThink reports no tracking data yet (AWB created, no scans)", async () => {
+    const { order } = await createOrder();
+    mockSuccessfulProvider();
+    const shipment = await ShipmentService.createForOrder(order.id);
+    vi.spyOn(IThinkClient, "track").mockResolvedValue({ awb: shipment.awbNumber!, courier: null, currentStatus: null, currentStatusCode: null, events: [] });
+
+    const refreshed = await ShipmentService.refresh(shipment.id);
+
+    expect(refreshed.status).toBe(shipment.status); // unchanged — "awb_assigned"
+    expect(refreshed.providerStatus).toBe(shipment.providerStatus); // unchanged, not clobbered with a fabricated value
+    expect(refreshed.lastSyncedAt).not.toBeNull();
+    expect(await ShipmentTrackingEvent.count({ where: { shipment_id: shipment.id } })).toBe(0);
   });
 
   it("claims cancellation before the network call so concurrent clicks dispatch once", async () => {
