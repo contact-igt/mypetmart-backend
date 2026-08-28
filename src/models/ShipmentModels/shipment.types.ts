@@ -96,3 +96,23 @@ export type ShipmentQuoteResultJSON = { options: ShipmentQuoteOptionJSON[] };
 // (both fields undefined) means "use the existing automatic cheapest-pick
 // fallback", exactly as every caller behaved before this feature existed.
 export type CreateShipmentSelectionInput = { carrier: string; serviceType: string } | undefined;
+
+// Customer-facing result of the storefront Product Detail "check delivery to
+// your pincode" pre-purchase check. Deliberately a normalized, minimal shape:
+// no courier names, no per-courier rate rows, no raw provider fields.
+//   - serviceable:false  -> a valid pincode iThink cannot deliver to.
+//     (A technical/provider failure is NOT this — it throws
+//     DeliveryCheckUnavailableError instead, so the frontend can tell the two
+//     apart per the "don't say 'unavailable' when the API is down" rule.)
+//   - estimatedDelivery  -> iThink Rate API edd_date.min_edd / max_edd
+//     verbatim (calendar dates), or null when the provider didn't supply a
+//     window / the product has no package dimensions to rate against.
+//   - deliveryCharge     -> the existing V1 storefront shipping rule
+//     (V1_FREE_SHIPPING_FEE), never a new calculation and never the raw
+//     per-courier iThink rate. null when not serviceable.
+export type DeliveryCheckResultJSON = {
+  pincode: string;
+  serviceable: boolean;
+  estimatedDelivery: { min: string; max: string } | null;
+  deliveryCharge: { free: boolean; amount: string; currency: string } | null;
+};

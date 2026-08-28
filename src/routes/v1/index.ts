@@ -35,6 +35,7 @@ import { adminReturnRouter } from "../../models/ReturnModels/admin-return.routes
 import { adminRefundRouter } from "../../models/RefundModels/admin-refund.routes.js";
 import { payuRefundWebhookRouter } from "../../models/RefundModels/payu-refund-webhook.routes.js";
 import { adminShipmentRouter } from "../../models/ShipmentModels/admin-shipment.routes.js";
+import { storefrontDeliveryRouter } from "../../models/ShipmentModels/storefront-serviceability.routes.js";
 import { storefrontNewsletterRouter } from "../../models/NewsletterModels/storefront-newsletter.routes.js";
 import { adminNewsletterRouter } from "../../models/NewsletterModels/admin-newsletter.routes.js";
 import { adminSettingsRouter } from "../../models/SettingsModels/admin-settings.routes.js";
@@ -69,6 +70,7 @@ v1Router.use("/admin/dashboard", adminDashboardRouter);
 v1Router.use("/storefront/cart", storefrontCartRouter);
 v1Router.use("/storefront/addresses", storefrontAddressRouter);
 v1Router.use("/storefront/checkout", storefrontCheckoutRouter);
+v1Router.use("/storefront/delivery", storefrontDeliveryRouter);
 v1Router.use("/storefront/orders", storefrontOrderRouter);
 v1Router.use("/admin/orders", adminOrderRouter);
 v1Router.use("/storefront/wishlist", storefrontWishlistRouter);
