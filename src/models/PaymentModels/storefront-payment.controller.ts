@@ -3,7 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import { sendSuccess } from "../../utils/api-response.js";
 import { PaymentService } from "./payment.service.js";
 import { initiatePaymentSchema } from "./payment.validation.js";
-import type { InitiatePaymentInput, PaymentInitiationCaller } from "./payment.types.js";
+import type { ConfirmCodOrderInput, InitiatePaymentInput, PaymentInitiationCaller } from "./payment.types.js";
 
 function resolveCaller(req: Request): PaymentInitiationCaller {
   // Set by optionalAuthenticate() ahead of this route when a valid customer
@@ -25,6 +25,18 @@ export async function handleGetPaymentStatus(req: Request, res: Response, next: 
   try {
     const input = initiatePaymentSchema.parse(req.body) as InitiatePaymentInput;
     const result = await PaymentService.getPaymentStatus(resolveCaller(req), input);
+    sendSuccess(res, 200, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Same exactly-one-of-orderId/guestAccessToken shape as /initiate — reuses
+// initiatePaymentSchema rather than a parallel schema (Phase 1 COD scope).
+export async function handleConfirmCodOrder(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const input = initiatePaymentSchema.parse(req.body) as ConfirmCodOrderInput;
+    const result = await PaymentService.confirmCodOrder(resolveCaller(req), input);
     sendSuccess(res, 200, result);
   } catch (error) {
     next(error);

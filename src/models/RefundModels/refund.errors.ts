@@ -48,6 +48,18 @@ export class RefundPaymentMissingProviderIdError extends RefundError {
   }
 }
 
+export class RefundCodManualProcessingRequiredError extends RefundError {
+  public constructor(paymentId: number) {
+    super(
+      "REFUND_COD_MANUAL_PROCESSING_REQUIRED",
+      "COD refunds are handled manually and cannot be initiated through the online refund flow.",
+      422,
+      { paymentId }
+    );
+    this.name = "RefundCodManualProcessingRequiredError";
+  }
+}
+
 export class RefundExceedsRefundableBalanceError extends RefundError {
   public constructor(requested: string, refundable: string) {
     super(

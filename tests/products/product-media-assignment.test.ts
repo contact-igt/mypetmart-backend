@@ -7,6 +7,8 @@ import { app } from "../../src/app.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
 import { MediaAsset } from "../../src/database/tables/MediaAssetTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
+import { ProductContentBlock } from "../../src/database/tables/ProductContentBlockTable/index.js";
+import { ProductFaq } from "../../src/database/tables/ProductFaqTable/index.js";
 import { ProductFeature } from "../../src/database/tables/ProductFeatureTable/index.js";
 import { ProductImage } from "../../src/database/tables/ProductImageTable/index.js";
 import { ProductMediaAssignment } from "../../src/database/tables/ProductMediaAssignmentTable/index.js";
@@ -65,6 +67,8 @@ describe("Product Video Assignment — Backend Integration Tests", () => {
     await ProductFeature.destroy({ where: {}, truncate: false, force: true });
     await ProductImage.destroy({ where: {}, truncate: false, force: true });
     await ProductVariant.destroy({ where: {}, truncate: false, force: true });
+    await ProductContentBlock.destroy({ where: {}, truncate: false, force: true });
+    await ProductFaq.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await MediaAsset.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });

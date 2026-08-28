@@ -156,6 +156,20 @@ export class ProductFeatureNotFoundError extends ProductError {
   }
 }
 
+export class InvalidFaqIdError extends ProductError {
+  public constructor() {
+    super("INVALID_FAQ_ID", "FAQ ID must be a positive safe integer.", 400);
+    this.name = "InvalidFaqIdError";
+  }
+}
+
+export class ProductFaqNotFoundError extends ProductError {
+  public constructor(faqId: number) {
+    super("PRODUCT_FAQ_NOT_FOUND", `Product FAQ '${faqId}' was not found.`, 404);
+    this.name = "ProductFaqNotFoundError";
+  }
+}
+
 export class ProductImageMediaTypeNotAllowedError extends ProductError {
   public constructor() {
     super("PRODUCT_IMAGE_MEDIA_TYPE_NOT_ALLOWED", "Only image Media Assets can be attached as a Product image. This asset is a video.", 422);
@@ -181,6 +195,59 @@ export class ProductMediaAssignmentTypeNotAllowedError extends ProductError {
   public constructor() {
     super("PRODUCT_MEDIA_ASSIGNMENT_TYPE_NOT_ALLOWED", "Only video Media Assets can be assigned as a Product video or Testimonial video.", 422);
     this.name = "ProductMediaAssignmentTypeNotAllowedError";
+  }
+}
+
+export class InvalidSpecificationIdError extends ProductError {
+  public constructor() {
+    super("INVALID_SPECIFICATION_ID", "Specification ID must be a positive safe integer.", 400);
+    this.name = "InvalidSpecificationIdError";
+  }
+}
+
+export class ProductSpecificationNotFoundError extends ProductError {
+  public constructor(specificationId: number) {
+    super("PRODUCT_SPECIFICATION_NOT_FOUND", `Product specification '${specificationId}' was not found.`, 404);
+    this.name = "ProductSpecificationNotFoundError";
+  }
+}
+
+export class DuplicateSpecificationLabelError extends ProductError {
+  public constructor(label: string) {
+    super("DUPLICATE_SPECIFICATION_LABEL", `A specification labeled '${label}' already exists on this Product.`, 409);
+    this.name = "DuplicateSpecificationLabelError";
+  }
+}
+
+export class ReservedSpecificationLabelError extends ProductError {
+  public constructor(label: string) {
+    super(
+      "RESERVED_SPECIFICATION_LABEL",
+      `'${label}' is already managed by the Product's own SKU, price, MRP, or stock fields and cannot be used as a custom specification label.`,
+      422
+    );
+    this.name = "ReservedSpecificationLabelError";
+  }
+}
+
+export class InvalidContentBlockIdError extends ProductError {
+  public constructor() {
+    super("INVALID_CONTENT_BLOCK_ID", "Content block ID must be a positive safe integer.", 400);
+    this.name = "InvalidContentBlockIdError";
+  }
+}
+
+export class ProductContentBlockNotFoundError extends ProductError {
+  public constructor(blockId: number) {
+    super("PRODUCT_CONTENT_BLOCK_NOT_FOUND", `Product content block '${blockId}' was not found.`, 404);
+    this.name = "ProductContentBlockNotFoundError";
+  }
+}
+
+export class EmptyContentBlockError extends ProductError {
+  public constructor() {
+    super("EMPTY_CONTENT_BLOCK", "A content block needs at least one of: media, heading, or description.", 422);
+    this.name = "EmptyContentBlockError";
   }
 }
 

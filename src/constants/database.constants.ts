@@ -7,7 +7,11 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   productVariants: "product_variants",
   productImages: "product_images",
   productFeatures: "product_features",
+  productSpecifications: "product_specifications",
   productMediaAssignments: "product_media_assignments",
+  productContentBlocks: "product_content_blocks",
+  productReviews: "product_reviews",
+  productFaqs: "product_faqs",
   carts: "carts",
   cartItems: "cart_items",
   orders: "orders",
@@ -22,6 +26,9 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   replacements: "replacements",
   contactEnquiries: "contact_enquiries",
   storeSettings: "store_settings",
+  orderDocuments: "order_documents",
+  returnShipments: "return_shipments",
+  returnShipmentTrackingEvents: "return_shipment_tracking_events",
   authChallenges: "auth_challenges",
   passwordResetTokens: "password_reset_tokens",
   wishlists: "wishlists",
@@ -60,6 +67,27 @@ export type MediaAssetType = (typeof MEDIA_ASSET_TYPE_VALUES)[number];
 // product_media_assignments schema comment.
 export const PRODUCT_MEDIA_ROLE_VALUES = ["product_video", "testimonial_video"] as const;
 export type ProductMediaRole = (typeof PRODUCT_MEDIA_ROLE_VALUES)[number];
+
+// Enhanced Product Content (Phase — ProductContentBlock). A tightly
+// constrained, code-controlled layout set — never free CSS/column widths
+// from the DB. See product_content_blocks schema comment.
+export const PRODUCT_CONTENT_LAYOUT_VALUES = ["media_left", "media_right", "media_full"] as const;
+export type ProductContentLayout = (typeof PRODUCT_CONTENT_LAYOUT_VALUES)[number];
+
+// Written Product Reviews (V1). Moderation-gated: only "approved" Reviews are
+// ever shown to the Storefront or counted in the rating summary — see
+// review.service.ts. Reused product statuses ("pending"/"approved"/"rejected")
+// deliberately match ReturnRequest's REVIEW_STATUS-shaped values so the
+// existing Admin StatusBadge tone map already covers these for free.
+export const REVIEW_STATUS_VALUES = ["pending", "approved", "rejected"] as const;
+export type ReviewStatus = (typeof REVIEW_STATUS_VALUES)[number];
+
+// Distinguishes a genuine customer-submitted Review (verified_purchase tied
+// to a real delivered OrderItem) from a manually-entered Admin Review (no
+// User/OrderItem, verified_purchase always false — see review.service.ts's
+// createAdminReview).
+export const REVIEW_SOURCE_VALUES = ["customer", "admin"] as const;
+export type ReviewSource = (typeof REVIEW_SOURCE_VALUES)[number];
 
 export const CART_STATUS_VALUES = ["active", "ordered", "abandoned"] as const;
 export type CartStatus = (typeof CART_STATUS_VALUES)[number];
@@ -138,6 +166,16 @@ export type RefundStatus = (typeof REFUND_STATUS_VALUES)[number];
 export const REPLACEMENT_STATUS_VALUES = ["stock_unavailable", "processing", "completed"] as const;
 export type ReplacementStatus = (typeof REPLACEMENT_STATUS_VALUES)[number];
 
+// Reverse (customer -> warehouse) courier lifecycle for an approved
+// ReturnRequest — Phase F.1. Deliberately a separate, coarser vocabulary
+// from SHIPMENT_STATUS_VALUES (no rto_*/ndr/provider_status_unknown split):
+// a reverse pickup has no RTO-of-an-RTO concept, and any courier-reported
+// exception (undelivered pickup, lost, damaged) normalizes to "failed" —
+// see ReturnShipmentModels/return-shipment.service.ts's own status-mapping
+// comment for the full reasoning.
+export const RETURN_SHIPMENT_STATUS_VALUES = ["pending", "approved", "pickup_scheduled", "picked_up", "in_transit", "delivered", "failed", "cancelled"] as const;
+export type ReturnShipmentStatus = (typeof RETURN_SHIPMENT_STATUS_VALUES)[number];
+
 export const CONTACT_ENQUIRY_STATUS_VALUES = ["new", "in_progress", "resolved", "closed"] as const;
 export type ContactEnquiryStatus = (typeof CONTACT_ENQUIRY_STATUS_VALUES)[number];
 
@@ -173,7 +211,23 @@ export const NOTIFICATION_EVENT_TYPE_VALUES = [
   "REPLACEMENT_APPROVED",
   "REPLACEMENT_STOCK_UNAVAILABLE",
   "REPLACEMENT_SHIPPED",
-  "REPLACEMENT_COMPLETED"
+  "REPLACEMENT_COMPLETED",
+  // Shipment lifecycle events (Phase 1D.2) — SHIPMENT_CREATED fires once an
+  // AWB is booked (ShipmentService.create()'s success path), distinct from
+  // ORDER_SHIPPED which fires later once the courier's own tracking reports
+  // pickup. SHIPMENT_DELIVERY_FAILED collapses both "ndr" and
+  // "delivery_exception" Shipment statuses into one customer-facing event —
+  // see CommerceNotifications.deliveryAttemptFailed's own doc comment.
+  "SHIPMENT_CREATED",
+  "SHIPMENT_RTO_INITIATED",
+  "SHIPMENT_DELIVERY_FAILED",
+  // Reverse (return) shipment lifecycle — Phase F.1. RETURN_PICKUP_CREATED
+  // fires once iThink accepts the reverse booking (AWB assigned);
+  // RETURN_PICKED_UP/RETURN_DELIVERED fire from the same tracking-sync
+  // ingest path once the courier's own scans report those milestones.
+  "RETURN_PICKUP_CREATED",
+  "RETURN_PICKED_UP",
+  "RETURN_DELIVERED"
 ] as const;
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPE_VALUES)[number];
 
@@ -183,7 +237,7 @@ export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPE_VALUES)[numb
 // PAYMENT_FAILED is keyed by "payment" (each distinct failed attempt is its
 // own real, customer-meaningful event). See commerce-notifications.service.ts
 // for the full per-event rationale.
-export const NOTIFICATION_ENTITY_TYPE_VALUES = ["order", "payment", "return", "refund", "replacement", "shipment"] as const;
+export const NOTIFICATION_ENTITY_TYPE_VALUES = ["order", "payment", "return", "refund", "replacement", "shipment", "return_shipment"] as const;
 export type NotificationEntityType = (typeof NOTIFICATION_ENTITY_TYPE_VALUES)[number];
 
 export const NOTIFICATION_STATUS_VALUES = ["pending", "sent", "failed", "skipped"] as const;
@@ -203,3 +257,12 @@ export const MONEY_SCALE = 2;
 // Future logistics/shipping-rate integration must replace this backend-owned
 // calculation before PayU initiation uses non-zero shipping.
 export const V1_FREE_SHIPPING_FEE = "0.00";
+
+// Phase E.2: a non-GST customer receipt only. "invoice" is deliberately not
+// added here yet — a future GST-invoice phase adds it as a new ENUM value
+// (the same additive-extension pattern already used for e.g.
+// PAYMENT_STATUS_VALUES/NOTIFICATION_EVENT_TYPE_VALUES) once seller
+// GSTIN/HSN/tax data actually exists, reusing this same order_documents
+// table rather than a parallel one.
+export const ORDER_DOCUMENT_TYPE_VALUES = ["receipt"] as const;
+export type OrderDocumentType = (typeof ORDER_DOCUMENT_TYPE_VALUES)[number];

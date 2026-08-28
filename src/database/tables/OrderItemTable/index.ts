@@ -4,6 +4,7 @@ import { DATABASE_TABLE_NAMES, MONEY_PRECISION, MONEY_SCALE } from "../../../con
 import { isModelInitialized, isNonNegativeDecimal, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { Order } from "../OrderTable/index.js";
 import type { Product } from "../ProductTable/index.js";
+import type { ProductReview } from "../ProductReviewTable/index.js";
 import type { ProductVariant } from "../ProductVariantTable/index.js";
 import type { ReturnRequest } from "../ReturnRequestTable/index.js";
 
@@ -27,6 +28,7 @@ export class OrderItem extends Model<InferAttributes<OrderItem>, InferCreationAt
   declare product?: NonAttribute<Product>;
   declare variant?: NonAttribute<ProductVariant>;
   declare returnRequests?: NonAttribute<ReturnRequest[]>;
+  declare review?: NonAttribute<ProductReview>;
 }
 
 function nonNegativeMoneyValidator(fieldName: string) {

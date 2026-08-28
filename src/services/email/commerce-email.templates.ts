@@ -157,6 +157,51 @@ export function getOrderDeliveredTemplate(input: { orderNumber: string; viewOrde
   return { subject, text, html };
 }
 
+// Deliberately distinct subject/copy from getOrderShippedTemplate above —
+// that one fires later, once the COURIER reports its own "picked up" scan
+// (ShipmentModels/shipment.service.ts ingest()); this one fires the moment
+// booking with iThink succeeds and an AWB exists (ShipmentService.create()),
+// which happens first. Using the same "has shipped" wording for both would
+// read as two identical, confusing emails at two different times.
+export function getShipmentCreatedTemplate(input: { orderNumber: string; carrier: string | null; awbNumber: string | null; trackOrderUrl: string | null }): EmailTemplate {
+  const subject = `Order ${input.orderNumber} — shipment booked`;
+  const trackingLine = input.carrier && input.awbNumber ? `Carrier: ${input.carrier}\nTracking number: ${input.awbNumber}\n\n` : "";
+  const text = `Shipment booked\n\nWe've booked a courier for order ${input.orderNumber}. We'll email you again once it's picked up.\n\n${trackingLine}${input.trackOrderUrl ? `Track your order: ${input.trackOrderUrl}` : ""}`;
+  const html = shell(`
+    <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Shipment booked</p>
+    <p style="font-size: 14px; line-height: 1.5; color: #35221b;">We've booked a courier for order <strong>${input.orderNumber}</strong>. We'll email you again once it's picked up.</p>
+    ${input.carrier && input.awbNumber ? `<p style="font-size: 13px; color: #35221b;"><strong>Carrier:</strong> ${input.carrier}<br/><strong>Tracking number:</strong> ${input.awbNumber}</p>` : ""}
+    ${input.trackOrderUrl ? ctaButton(input.trackOrderUrl, "Track Order") : ""}
+  `);
+  return { subject, text, html };
+}
+
+export function getOrderReturnedToOriginTemplate(input: { orderNumber: string; viewOrderUrl: string | null }): EmailTemplate {
+  const subject = `Order ${input.orderNumber} is being returned to us`;
+  const text = `Shipment returning to origin\n\nOrder ${input.orderNumber}'s shipment could not be delivered and is on its way back to us. We'll be in touch once it arrives.${input.viewOrderUrl ? `\n\nView your order: ${input.viewOrderUrl}` : ""}`;
+  const html = shell(`
+    <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Shipment returning to origin</p>
+    <p style="font-size: 14px; line-height: 1.5; color: #35221b;">Order <strong>${input.orderNumber}</strong>'s shipment could not be delivered and is on its way back to us. We'll be in touch once it arrives.</p>
+    ${input.viewOrderUrl ? ctaButton(input.viewOrderUrl, "View Order") : ""}
+  `);
+  return { subject, text, html };
+}
+
+// Deliberately generic — never includes the raw courier remark/reason text
+// (NDR/delivery-exception messages from iThink can be internal logistics
+// jargon, e.g. "Consignee refused", "ODA", not something to forward verbatim
+// to a customer). Points them at tracking for whatever detail is safe to show.
+export function getDeliveryAttemptFailedTemplate(input: { orderNumber: string; trackOrderUrl: string | null }): EmailTemplate {
+  const subject = `Delivery attempt failed - Order ${input.orderNumber}`;
+  const text = `Delivery attempt failed\n\nA delivery attempt for order ${input.orderNumber} was unsuccessful. The courier will typically retry.${input.trackOrderUrl ? `\n\nTrack your order: ${input.trackOrderUrl}` : ""}`;
+  const html = shell(`
+    <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Delivery attempt failed</p>
+    <p style="font-size: 14px; line-height: 1.5; color: #35221b;">A delivery attempt for order <strong>${input.orderNumber}</strong> was unsuccessful. The courier will typically retry.</p>
+    ${input.trackOrderUrl ? ctaButton(input.trackOrderUrl, "Track Order") : ""}
+  `);
+  return { subject, text, html };
+}
+
 // ---------------------------------------------------------------------------
 // RETURN
 // ---------------------------------------------------------------------------
@@ -190,6 +235,42 @@ export function getReturnRejectedTemplate(input: { returnNumber: string; itemNam
     <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Return not approved</p>
     <p style="font-size: 14px; line-height: 1.5; color: #35221b;">Your return request <strong>${input.returnNumber}</strong> for <strong>${input.itemName}</strong> was not approved.</p>
     ${input.reason ? `<p style="font-size: 13px; color: #35221b;"><strong>Reason:</strong> ${input.reason}</p>` : ""}
+  `);
+  return { subject, text, html };
+}
+
+export function getReturnPickupCreatedTemplate(input: { returnNumber: string; itemName: string; carrier: string | null; awbNumber: string | null }): EmailTemplate {
+  const subject = `Pickup scheduled for return ${input.returnNumber}`;
+  const trackingLine = input.carrier && input.awbNumber ? `Carrier: ${input.carrier}\nAWB: ${input.awbNumber}\n\n` : "";
+  const text = `Return pickup scheduled\n\nWe've scheduled a courier pickup for your return ${input.returnNumber} (${input.itemName}). Please keep the item ready for handover.\n\n${trackingLine}We'll email you again once it's picked up.`;
+  const html = shell(`
+    <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Return pickup scheduled</p>
+    <p style="font-size: 14px; line-height: 1.5; color: #35221b;">We've scheduled a courier pickup for your return <strong>${input.returnNumber}</strong> (${input.itemName}). Please keep the item ready for handover.</p>
+    ${input.carrier && input.awbNumber ? `<p style="font-size: 13px; color: #35221b;"><strong>Carrier:</strong> ${input.carrier}<br/><strong>AWB:</strong> ${input.awbNumber}</p>` : ""}
+  `);
+  return { subject, text, html };
+}
+
+export function getReturnPickedUpTemplate(input: { returnNumber: string; itemName: string }): EmailTemplate {
+  const subject = `Return ${input.returnNumber} picked up`;
+  const text = `Return picked up\n\nThe courier has picked up your return ${input.returnNumber} (${input.itemName}). We'll email you again once it reaches our warehouse.`;
+  const html = shell(`
+    <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Return picked up</p>
+    <p style="font-size: 14px; line-height: 1.5; color: #35221b;">The courier has picked up your return <strong>${input.returnNumber}</strong> (${input.itemName}). We'll email you again once it reaches our warehouse.</p>
+  `);
+  return { subject, text, html };
+}
+
+// Deliberately never claims a refund has started here — "delivered" only
+// means the parcel reached the warehouse; refund initiation is a separate,
+// later admin action (see ReturnDetailView's own Item Received / Refund
+// sections) that this email must not get ahead of.
+export function getReturnDeliveredTemplate(input: { returnNumber: string; itemName: string }): EmailTemplate {
+  const subject = `Return ${input.returnNumber} received at our warehouse`;
+  const text = `Return received\n\nYour return ${input.returnNumber} (${input.itemName}) has reached our warehouse. Our team will inspect it and follow up on your refund shortly.`;
+  const html = shell(`
+    <p style="font-size: 16px; line-height: 1.5; font-weight: bold; color: #35221b;">Return received</p>
+    <p style="font-size: 14px; line-height: 1.5; color: #35221b;">Your return <strong>${input.returnNumber}</strong> (${input.itemName}) has reached our warehouse. Our team will inspect it and follow up on your refund shortly.</p>
   `);
   return { subject, text, html };
 }

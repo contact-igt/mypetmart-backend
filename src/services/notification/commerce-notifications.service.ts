@@ -11,7 +11,7 @@
 // guards content correctness, NotificationService's durable dedupe guards
 // against ever sending the same milestone twice).
 import { environmentConfig } from "../../config/environment.config.js";
-import { Order, OrderItem, Payment, Refund, Replacement, ReturnRequest, Shipment } from "../../database/tables/index.js";
+import { Order, OrderItem, Payment, Refund, Replacement, ReturnRequest, ReturnShipment, Shipment } from "../../database/tables/index.js";
 import type { Order as OrderModel } from "../../database/tables/OrderTable/index.js";
 import type { OrderItem as OrderItemModel } from "../../database/tables/OrderItemTable/index.js";
 import { formatMoney } from "../../utils/product-money.js";
@@ -176,6 +176,73 @@ export const CommerceNotifications = {
     });
   },
 
+  /**
+   * Fires once a Shipment genuinely has an AWB (ShipmentService.create()'s
+   * success path, called after that transaction commits) — distinct from
+   * orderShipped below, which instead fires later once the COURIER reports
+   * its own "picked up" scan (ingest()). Re-verifies tracking_number is
+   * actually set before sending: create() calls this unconditionally after
+   * its AWB-persistence transaction, including the "accepted without AWB,
+   * reconciliation required" outcome, which must not email a tracking
+   * number that doesn't exist. Order-sourced only, matching this module's
+   * existing order-vs-replacement split (replacementShipped is the
+   * Replacement-side equivalent, fired at the same courier-pickup point
+   * orderShipped uses — this module does not yet have a Replacement
+   * equivalent of "booked", matching the same asymmetry already present
+   * before this addition).
+   */
+  async shipmentCreated(shipmentId: number): Promise<void> {
+    const shipment = await Shipment.findByPk(shipmentId);
+    if (!shipment || shipment.source_type !== "order" || !shipment.tracking_number) return;
+    const order = await Order.findByPk(shipment.order_id);
+    if (!order) return;
+    await NotificationService.notify({
+      eventType: "SHIPMENT_CREATED",
+      entityType: "shipment",
+      entityId: shipment.id,
+      recipientEmail: order.contact_email,
+      build: () => templates.getShipmentCreatedTemplate({ orderNumber: order.order_number, carrier: shipment.carrier, awbNumber: shipment.tracking_number, trackOrderUrl: orderViewUrl(order) })
+    });
+  },
+
+  /** Fires once a Shipment's tracking first reports RTO initiated — called from ingest()'s notification block, same order-sourced scope as orderShipped/orderOutForDelivery/orderDelivered in that same block. */
+  async orderReturnedToOrigin(shipmentId: number): Promise<void> {
+    const shipment = await Shipment.findByPk(shipmentId);
+    if (!shipment || shipment.source_type !== "order" || shipment.status !== "rto_initiated") return;
+    const order = await Order.findByPk(shipment.order_id);
+    if (!order) return;
+    await NotificationService.notify({
+      eventType: "SHIPMENT_RTO_INITIATED",
+      entityType: "shipment",
+      entityId: shipment.id,
+      recipientEmail: order.contact_email,
+      build: () => templates.getOrderReturnedToOriginTemplate({ orderNumber: order.order_number, viewOrderUrl: orderViewUrl(order) })
+    });
+  },
+
+  /**
+   * Fires on a failed delivery attempt ("ndr") or a courier-reported
+   * delivery exception — both collapse into the same customer-facing event
+   * (SHIPMENT_DELIVERY_FAILED), so a shipment that later toggles between the
+   * two (e.g. ndr -> delivery_exception on a retry) still only ever emails
+   * once, per NotificationService's per-(event,entity) dedupe — the same
+   * "several distinct transitions, one email" precedent orderShipped above
+   * already establishes for picked_up/in_transit/out_for_delivery.
+   */
+  async deliveryAttemptFailed(shipmentId: number): Promise<void> {
+    const shipment = await Shipment.findByPk(shipmentId);
+    if (!shipment || shipment.source_type !== "order" || (shipment.status !== "ndr" && shipment.status !== "delivery_exception")) return;
+    const order = await Order.findByPk(shipment.order_id);
+    if (!order) return;
+    await NotificationService.notify({
+      eventType: "SHIPMENT_DELIVERY_FAILED",
+      entityType: "shipment",
+      entityId: shipment.id,
+      recipientEmail: order.contact_email,
+      build: () => templates.getDeliveryAttemptFailedTemplate({ orderNumber: order.order_number, trackOrderUrl: orderViewUrl(order) })
+    });
+  },
+
   async returnRequested(returnRequestId: number): Promise<void> {
     const returnRequest = await ReturnRequest.findByPk(returnRequestId);
     if (!returnRequest) return;
@@ -323,6 +390,62 @@ export const CommerceNotifications = {
           awbNumber: shipment.tracking_number,
           trackUrl: orderViewUrl(loaded.order)
         })
+    });
+  },
+
+  /** Fires once a reverse pickup genuinely has an AWB (ReturnShipmentService.createForApprovedReturn's success path). */
+  async returnPickupCreated(returnShipmentId: number): Promise<void> {
+    const returnShipment = await ReturnShipment.findByPk(returnShipmentId);
+    if (!returnShipment || !returnShipment.awb_number) return;
+    const returnRequest = await ReturnRequest.findByPk(returnShipment.return_request_id);
+    if (!returnRequest) return;
+    const loaded = await loadOrderAndItem(returnRequest.order_id, returnRequest.order_item_id);
+    if (!loaded) return;
+    await NotificationService.notify({
+      eventType: "RETURN_PICKUP_CREATED",
+      entityType: "return_shipment",
+      entityId: returnShipment.id,
+      recipientEmail: loaded.order.contact_email,
+      build: () => templates.getReturnPickupCreatedTemplate({ returnNumber: returnRequest.return_number, itemName: itemLabel(loaded.orderItem), carrier: returnShipment.carrier, awbNumber: returnShipment.awb_number })
+    });
+  },
+
+  /** Courier-reported pickup — fires from the same tracking-sync ingest path ORDER_SHIPPED/orderShipped uses on the forward side. */
+  async returnPickedUp(returnShipmentId: number): Promise<void> {
+    const returnShipment = await ReturnShipment.findByPk(returnShipmentId);
+    if (!returnShipment || returnShipment.status !== "picked_up") return;
+    const returnRequest = await ReturnRequest.findByPk(returnShipment.return_request_id);
+    if (!returnRequest) return;
+    const loaded = await loadOrderAndItem(returnRequest.order_id, returnRequest.order_item_id);
+    if (!loaded) return;
+    await NotificationService.notify({
+      eventType: "RETURN_PICKED_UP",
+      entityType: "return_shipment",
+      entityId: returnShipment.id,
+      recipientEmail: loaded.order.contact_email,
+      build: () => templates.getReturnPickedUpTemplate({ returnNumber: returnRequest.return_number, itemName: itemLabel(loaded.orderItem) })
+    });
+  },
+
+  /**
+   * Courier-reported arrival at the warehouse — informational only. Never
+   * implies a refund has started; that stays a separate, manual admin
+   * action gated on ReturnRequest.item_received_at (see return.service.ts),
+   * which this notification does not touch.
+   */
+  async returnDelivered(returnShipmentId: number): Promise<void> {
+    const returnShipment = await ReturnShipment.findByPk(returnShipmentId);
+    if (!returnShipment || returnShipment.status !== "delivered") return;
+    const returnRequest = await ReturnRequest.findByPk(returnShipment.return_request_id);
+    if (!returnRequest) return;
+    const loaded = await loadOrderAndItem(returnRequest.order_id, returnRequest.order_item_id);
+    if (!loaded) return;
+    await NotificationService.notify({
+      eventType: "RETURN_DELIVERED",
+      entityType: "return_shipment",
+      entityId: returnShipment.id,
+      recipientEmail: loaded.order.contact_email,
+      build: () => templates.getReturnDeliveredTemplate({ returnNumber: returnRequest.return_number, itemName: itemLabel(loaded.orderItem) })
     });
   },
 

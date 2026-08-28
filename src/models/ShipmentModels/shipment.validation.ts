@@ -22,3 +22,18 @@ export const reattemptSchema = z.object({
 });
 
 export const rtoSchema = z.object({ reason: z.string().trim().min(3).max(500) });
+
+// Both fields optional, but must appear together — an admin who picked a
+// courier from a quote sends both; a caller doing the existing automatic
+// flow (including ShipmentService.retry(), and any client that predates
+// this feature) sends neither, which parses to { carrier: undefined,
+// serviceType: undefined } and is treated as "no selection" downstream.
+export const createShipmentSchema = z
+  .object({
+    carrier: z.string().trim().min(1).max(120).optional(),
+    serviceType: z.string().trim().min(1).max(120).optional()
+  })
+  .refine((data) => (data.carrier === undefined) === (data.serviceType === undefined), {
+    message: "Provide both carrier and serviceType, or neither.",
+    path: ["serviceType"]
+  });

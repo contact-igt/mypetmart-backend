@@ -1,8 +1,17 @@
 import { z } from "zod";
-import { PET_TYPE_VALUES, PRODUCT_MEDIA_ROLE_VALUES, PRODUCT_STATUS_VALUES } from "../../constants/database.constants.js";
+import { PET_TYPE_VALUES, PRODUCT_CONTENT_LAYOUT_VALUES, PRODUCT_MEDIA_ROLE_VALUES, PRODUCT_STATUS_VALUES } from "../../constants/database.constants.js";
 import { formatMoney, isCompareAtPriceValid } from "../../utils/product-money.js";
 import { SKU_REGEX } from "./catalog-sku.service.js";
-import { InvalidFeatureIdError, InvalidImageIdError, InvalidMediaAssignmentIdError, InvalidProductIdError, InvalidVariantIdError } from "./product.errors.js";
+import {
+  InvalidContentBlockIdError,
+  InvalidFaqIdError,
+  InvalidFeatureIdError,
+  InvalidImageIdError,
+  InvalidMediaAssignmentIdError,
+  InvalidProductIdError,
+  InvalidSpecificationIdError,
+  InvalidVariantIdError
+} from "./product.errors.js";
 
 export function slugify(text: string): string {
   return text
@@ -53,6 +62,45 @@ export function parseFeatureId(rawId: unknown): number {
     }
   }
   throw new InvalidFeatureIdError();
+}
+
+export function parseSpecificationId(rawId: unknown): number {
+  if (typeof rawId === "number" && Number.isSafeInteger(rawId) && rawId > 0) {
+    return rawId;
+  }
+  if (typeof rawId === "string" && /^\d+$/.test(rawId.trim())) {
+    const parsed = Number(rawId.trim());
+    if (Number.isSafeInteger(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  throw new InvalidSpecificationIdError();
+}
+
+export function parseFaqId(rawId: unknown): number {
+  if (typeof rawId === "number" && Number.isSafeInteger(rawId) && rawId > 0) {
+    return rawId;
+  }
+  if (typeof rawId === "string" && /^\d+$/.test(rawId.trim())) {
+    const parsed = Number(rawId.trim());
+    if (Number.isSafeInteger(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  throw new InvalidFaqIdError();
+}
+
+export function parseContentBlockId(rawId: unknown): number {
+  if (typeof rawId === "number" && Number.isSafeInteger(rawId) && rawId > 0) {
+    return rawId;
+  }
+  if (typeof rawId === "string" && /^\d+$/.test(rawId.trim())) {
+    const parsed = Number(rawId.trim());
+    if (Number.isSafeInteger(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  throw new InvalidContentBlockIdError();
 }
 
 export function parseMediaAssignmentId(rawId: unknown): number {
@@ -182,6 +230,61 @@ export const updateFeatureSchema = z.object({
   displayOrder: z.number().int().min(0).optional()
 });
 
+// Labels already owned by the Product's own structured commerce fields (see
+// CLAUDE.md Product Specifications §5/§6) — rejected as a custom specification
+// label so Admins cannot accidentally duplicate SKU/Price/MRP/Stock as
+// free-form text that could drift out of sync with the real field.
+export const RESERVED_SPECIFICATION_LABELS = ["sku", "price", "mrp", "compare at price", "compare-at price", "stock"] as const;
+
+export function normalizeSpecificationLabel(label: string): string {
+  return label.trim().toLowerCase();
+}
+
+export const createSpecificationSchema = z
+  .object({
+    label: z.string().trim().min(1, "Specification label is required").max(80, "Specification label max 80 characters"),
+    value: z.string().trim().min(1, "Specification value is required").max(200, "Specification value max 200 characters"),
+    // Deliberately no `.default(0)` here (unlike createFeatureSchema): a
+    // schema-level default would resolve before the create-Product loop's
+    // `input.displayOrder ?? i` fallback ever sees `undefined`, silently
+    // collapsing every inline specification's order to 0. Left genuinely
+    // optional so that fallback assigns each row its array index.
+    displayOrder: z.number().int().min(0).optional()
+  })
+  .refine((data) => !RESERVED_SPECIFICATION_LABELS.includes(normalizeSpecificationLabel(data.label) as (typeof RESERVED_SPECIFICATION_LABELS)[number]), {
+    message: "This label is already managed by the Product's own SKU, price, MRP, or stock fields.",
+    path: ["label"]
+  });
+
+export const updateSpecificationSchema = z
+  .object({
+    label: z.string().trim().min(1, "Specification label is required").max(80, "Specification label max 80 characters").optional(),
+    value: z.string().trim().min(1, "Specification value is required").max(200, "Specification value max 200 characters").optional(),
+    displayOrder: z.number().int().min(0).optional()
+  })
+  .refine(
+    (data) => data.label === undefined || !RESERVED_SPECIFICATION_LABELS.includes(normalizeSpecificationLabel(data.label) as (typeof RESERVED_SPECIFICATION_LABELS)[number]),
+    {
+      message: "This label is already managed by the Product's own SKU, price, MRP, or stock fields.",
+      path: ["label"]
+    }
+  );
+
+export const createFaqSchema = z.object({
+  question: z.string().trim().min(1, "FAQ question is required").max(200, "FAQ question max 200 characters"),
+  answer: z.string().trim().min(1, "FAQ answer is required").max(2000, "FAQ answer max 2000 characters"),
+  // Deliberately no `.default(0)` here — same reasoning as createSpecificationSchema.displayOrder:
+  // a schema-level default would collapse every inline FAQ's order to 0 before the
+  // create-Product loop's `input.displayOrder ?? i` fallback ever sees `undefined`.
+  displayOrder: z.number().int().min(0).optional()
+});
+
+export const updateFaqSchema = z.object({
+  question: z.string().trim().min(1, "FAQ question is required").max(200, "FAQ question max 200 characters").optional(),
+  answer: z.string().trim().min(1, "FAQ answer is required").max(2000, "FAQ answer max 2000 characters").optional(),
+  displayOrder: z.number().int().min(0).optional()
+});
+
 export const createMediaAssignmentSchema = z.object({
   mediaAssetId: z.number().int().positive("Media asset ID must be positive"),
   mediaRole: z.enum(PRODUCT_MEDIA_ROLE_VALUES),
@@ -194,6 +297,44 @@ export const createMediaAssignmentSchema = z.object({
 export const updateMediaAssignmentSchema = z.object({
   title: z.string().trim().max(190, "Title max 190 characters").nullable().optional(),
   caption: z.string().trim().max(500, "Caption max 500 characters").nullable().optional(),
+  displayOrder: z.number().int().min(0).optional(),
+  active: z.boolean().optional()
+});
+
+// Shared by howToUse/careInstructions/safetyInfo — plain text, optional,
+// generous length cap. Trim only; empty/whitespace-only -> null normalization
+// happens in product.service.ts (`value || null`, mirroring the existing
+// brand convention) so intentional internal line breaks survive untouched.
+const optionalLongTextSchema = z.string().trim().max(5000, "Must be 5000 characters or fewer").nullable().optional();
+
+// A block needs at least one of media/heading/description — a completely
+// empty block is meaningless and rejected (see CLAUDE.md Enhanced Product
+// Content §4). Checked against the already-trimmed/normalized values so a
+// whitespace-only heading/description does not count as "present".
+function hasContentBlockContent(data: { mediaAssetId?: number | null | undefined; heading?: string | null | undefined; description?: string | null | undefined }): boolean {
+  return data.mediaAssetId != null || Boolean(data.heading?.trim()) || Boolean(data.description?.trim());
+}
+
+export const createContentBlockSchema = z
+  .object({
+    mediaAssetId: z.number().int().positive("Media asset ID must be positive").nullable().optional(),
+    heading: z.string().trim().max(160, "Heading max 160 characters").nullable().optional(),
+    description: optionalLongTextSchema,
+    layout: z.enum(PRODUCT_CONTENT_LAYOUT_VALUES).optional().default("media_left"),
+    // Deliberately no `.default(0)` here — see the identical reasoning on
+    // createSpecificationSchema.displayOrder: a schema-level default would
+    // resolve before the create-Product loop's `input.displayOrder ?? i`
+    // fallback ever sees `undefined`, collapsing every inline block's order to 0.
+    displayOrder: z.number().int().min(0).optional(),
+    active: z.boolean().optional().default(true)
+  })
+  .refine(hasContentBlockContent, { message: "A content block needs at least one of: media, heading, or description.", path: ["heading"] });
+
+export const updateContentBlockSchema = z.object({
+  mediaAssetId: z.number().int().positive("Media asset ID must be positive").nullable().optional(),
+  heading: z.string().trim().max(160, "Heading max 160 characters").nullable().optional(),
+  description: optionalLongTextSchema,
+  layout: z.enum(PRODUCT_CONTENT_LAYOUT_VALUES).optional(),
   displayOrder: z.number().int().min(0).optional(),
   active: z.boolean().optional()
 });
@@ -225,9 +366,21 @@ export const createProductSchema = z
     lengthCm: shippingMeasurementSchema,
     widthCm: shippingMeasurementSchema,
     heightCm: shippingMeasurementSchema,
+    howToUse: optionalLongTextSchema,
+    careInstructions: optionalLongTextSchema,
+    safetyInfo: optionalLongTextSchema,
     variants: z.array(createVariantSchema).optional(),
     features: z.array(createFeatureSchema).optional(),
-    mediaAssignments: z.array(createMediaAssignmentSchema).optional()
+    specifications: z
+      .array(createSpecificationSchema)
+      .optional()
+      .refine(
+        (specs) => !specs || new Set(specs.map((s) => normalizeSpecificationLabel(s.label))).size === specs.length,
+        "Specification labels must be unique on a Product (case/whitespace-insensitive)"
+      ),
+    contentBlocks: z.array(createContentBlockSchema).optional(),
+    mediaAssignments: z.array(createMediaAssignmentSchema).optional(),
+    faqs: z.array(createFaqSchema).optional()
   })
   .refine(
     (data) => {
@@ -261,7 +414,10 @@ export const updateProductSchema = z.object({
   weightGrams: z.number().int().min(1).nullable().optional(),
   lengthCm: shippingMeasurementSchema,
   widthCm: shippingMeasurementSchema,
-  heightCm: shippingMeasurementSchema
+  heightCm: shippingMeasurementSchema,
+  howToUse: optionalLongTextSchema,
+  careInstructions: optionalLongTextSchema,
+  safetyInfo: optionalLongTextSchema
 });
 
 const positiveQueryInteger = z.preprocess(

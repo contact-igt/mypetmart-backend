@@ -1,4 +1,4 @@
-import type { MediaAssetType, PetType, ProductMediaRole, ProductStatus } from "../../constants/database.constants.js";
+import type { MediaAssetType, PetType, ProductContentLayout, ProductMediaRole, ProductStatus } from "../../constants/database.constants.js";
 
 export type StorefrontCategorySummaryJSON = {
   id: number;
@@ -48,6 +48,65 @@ export type ProductFeatureJSON = {
   updatedAt: string;
 };
 
+// Storefront shape omits `id` — the storefront has no need to reference a
+// specification row individually (see AdminProductSpecificationJSON for the
+// Admin shape, which does).
+export type ProductSpecificationJSON = {
+  label: string;
+  value: string;
+  displayOrder: number;
+};
+
+export type AdminProductSpecificationJSON = ProductSpecificationJSON & {
+  id: number;
+};
+
+// Storefront shape omits `id` — same rationale as ProductSpecificationJSON
+// above (see AdminProductFaqJSON for the Admin shape, which keeps it for CRUD).
+export type ProductFaqJSON = {
+  question: string;
+  answer: string;
+  displayOrder: number;
+};
+
+export type AdminProductFaqJSON = ProductFaqJSON & {
+  id: number;
+};
+
+// Media summary shared by a content block's `media` field — a subset of
+// MediaAssetJSON (never storageKey/internal storage metadata; see CLAUDE.md
+// Enhanced Product Content §9).
+export type ProductContentBlockMediaJSON = {
+  id: number;
+  publicUrl: string;
+  mediaType: MediaAssetType;
+  mimeType: string;
+  title: string | null;
+  originalName: string;
+};
+
+// Storefront shape omits `id`/`mediaAssetId`/`active` — the storefront has no
+// need to reference a block individually and only ever receives active blocks
+// (see AdminProductContentBlockJSON for the Admin shape, which keeps all four).
+export type ProductContentBlockJSON = {
+  heading: string | null;
+  description: string | null;
+  layout: ProductContentLayout;
+  displayOrder: number;
+  media: Omit<ProductContentBlockMediaJSON, "id" | "originalName"> | null;
+};
+
+export type AdminProductContentBlockJSON = {
+  id: number;
+  mediaAssetId: number | null;
+  heading: string | null;
+  description: string | null;
+  layout: ProductContentLayout;
+  displayOrder: number;
+  active: boolean;
+  media: ProductContentBlockMediaJSON | null;
+};
+
 export type ProductMediaAssignmentMediaJSON = {
   id: number;
   publicUrl: string;
@@ -73,6 +132,7 @@ export type StorefrontProductListItemJSON = {
   name: string;
   slug: string;
   brand: string | null;
+  description: string;
   petType: PetType;
   price: string;
   compareAtPrice: string | null;
@@ -94,11 +154,18 @@ export type StorefrontProductDetailJSON = StorefrontProductListItemJSON & {
   lengthCm: string | null;
   widthCm: string | null;
   heightCm: string | null;
+  howToUse: string | null;
+  careInstructions: string | null;
+  safetyInfo: string | null;
   variants: ProductVariantJSON[];
   images: ProductImageJSON[];
   features: ProductFeatureJSON[];
+  specifications: ProductSpecificationJSON[];
+  contentBlocks: ProductContentBlockJSON[];
   productVideos: ProductMediaAssignmentJSON[];
   testimonialVideos: ProductMediaAssignmentJSON[];
+  relatedProducts: StorefrontProductListItemJSON[];
+  faqs: ProductFaqJSON[];
 };
 
 export type AdminProductListItemJSON = {
@@ -134,11 +201,17 @@ export type AdminProductDetailJSON = AdminProductListItemJSON & {
   tags: string[];
   metaTitle: string | null;
   metaDescription: string | null;
+  howToUse: string | null;
+  careInstructions: string | null;
+  safetyInfo: string | null;
   variants: ProductVariantJSON[];
   images: ProductImageJSON[];
   features: ProductFeatureJSON[];
+  specifications: AdminProductSpecificationJSON[];
+  contentBlocks: AdminProductContentBlockJSON[];
   productVideos: ProductMediaAssignmentJSON[];
   testimonialVideos: ProductMediaAssignmentJSON[];
+  faqs: AdminProductFaqJSON[];
 };
 
 export type CreateFeatureInput = {
@@ -147,6 +220,33 @@ export type CreateFeatureInput = {
 };
 
 export type UpdateFeatureInput = Partial<CreateFeatureInput>;
+
+export type CreateSpecificationInput = {
+  label: string;
+  value: string;
+  displayOrder?: number;
+};
+
+export type UpdateSpecificationInput = Partial<CreateSpecificationInput>;
+
+export type CreateFaqInput = {
+  question: string;
+  answer: string;
+  displayOrder?: number;
+};
+
+export type UpdateFaqInput = Partial<CreateFaqInput>;
+
+export type CreateContentBlockInput = {
+  mediaAssetId?: number | null;
+  heading?: string | null;
+  description?: string | null;
+  layout?: ProductContentLayout;
+  displayOrder?: number;
+  active?: boolean;
+};
+
+export type UpdateContentBlockInput = Partial<CreateContentBlockInput>;
 
 export type CreateMediaAssignmentInput = {
   mediaAssetId: number;
@@ -203,9 +303,15 @@ export type CreateProductInput = {
   lengthCm?: string | number | null;
   widthCm?: string | number | null;
   heightCm?: string | number | null;
+  howToUse?: string | null;
+  careInstructions?: string | null;
+  safetyInfo?: string | null;
   variants?: CreateVariantInput[];
   features?: CreateFeatureInput[];
+  specifications?: CreateSpecificationInput[];
+  contentBlocks?: CreateContentBlockInput[];
   mediaAssignments?: CreateMediaAssignmentInput[];
+  faqs?: CreateFaqInput[];
 };
 
 export type UpdateProductInput = {
@@ -226,6 +332,9 @@ export type UpdateProductInput = {
   lengthCm?: string | number | null;
   widthCm?: string | number | null;
   heightCm?: string | number | null;
+  howToUse?: string | null;
+  careInstructions?: string | null;
+  safetyInfo?: string | null;
 };
 
 export type AdminProductSummaryJSON = {

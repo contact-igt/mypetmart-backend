@@ -1,5 +1,6 @@
 import type { ReturnStatus } from "../../constants/database.constants.js";
 import type { ReplacementJSON } from "../ReplacementModels/replacement.types.js";
+import type { ReturnShipmentJSON } from "../ReturnShipmentModels/return-shipment.types.js";
 
 // Guest Returns are explicitly deferred (no approved guest-Order-recovery
 // path for post-delivery service actions exists yet — see the Returns +
@@ -53,10 +54,16 @@ export type ReturnRequestJSON = {
   itemReceivedAt: string | null;
   refunds: ReturnRefundSummaryJSON[];
   replacement: ReplacementJSON | null;
+  // null in list views (never fetched there, matching replacement.shipment's
+  // own "richer detail, lighter list" split) and null when no reverse
+  // pickup has been created yet for this return — never fabricated.
+  returnShipment: ReturnShipmentJSON | null;
 };
 
 export type ReturnRequestDetailJSON = ReturnRequestJSON & {
   notes: ReturnNoteJSON[];
+  paymentProvider: string | null;
+  paymentMethod: string | null;
   // Backend-computed, echoed back for the Admin refund-initiation UI —
   // never client-suppliable (spec §14: refund amount is always
   // backend-derived from the immutable OrderItem price snapshot).

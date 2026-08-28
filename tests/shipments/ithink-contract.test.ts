@@ -1,25 +1,29 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../src/config/shipping.config.js", () => ({
-  shippingConfig: {
-    provider: "ithink",
-    accessToken: "test-access-token",
-    secretKey: "test-secret-key",
-    apiBaseUrl: "https://pre-alpha.ithinklogistics.com",
-    trackingBaseUrl: "https://pre-alpha.ithinklogistics.com",
-    pickupAddressId: "warehouse-1",
-    returnAddressId: "returns-1",
-    originPincode: "600001",
-    timeoutMs: 1_000,
-    ready: true
-  }
+const mockedShippingConfig = vi.hoisted(() => ({
+  provider: "ithink",
+  accessToken: "test-access-token",
+  secretKey: "test-secret-key",
+  apiBaseUrl: "https://pre-alpha.ithinklogistics.com",
+  trackingBaseUrl: "https://pre-alpha.ithinklogistics.com",
+  storeId: "27377",
+  pickupAddressId: "warehouse-1",
+  returnAddressId: "returns-1",
+  originPincode: "600001",
+  timeoutMs: 1_000,
+  ready: true
 }));
 
-import { IThinkClient, IThinkClientError } from "../../src/models/ShipmentModels/ithink.client.js";
+vi.mock("../../src/config/shipping.config.js", () => ({
+  shippingConfig: mockedShippingConfig
+}));
+
+import { IThinkClient, IThinkClientError, type IThinkPackageInput } from "../../src/models/ShipmentModels/ithink.client.js";
 import { canAdvanceShipmentStatus, normalizeIThinkStatus } from "../../src/models/ShipmentModels/shipment.service.js";
 import { ShipmentService } from "../../src/models/ShipmentModels/shipment.service.js";
 import { connectDatabase, disconnectDatabase } from "../../src/database/index.js";
-import { Category, Order, OrderItem, Product, ProductFeature, ProductMediaAssignment, Replacement, ReturnRequest, Shipment, ShipmentTrackingEvent, User } from "../../src/database/tables/index.js";
+import { Category, Order, OrderItem, Product, ProductFeature, ProductMediaAssignment, ProductReview, Replacement, ReturnRequest, Shipment, ShipmentTrackingEvent, User } from "../../src/database/tables/index.js";
+import { buildBusinessReference } from "../../src/utils/reference-generator.js";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -31,53 +35,161 @@ function sentRequest(fetchMock: ReturnType<typeof vi.fn>): { url: string; data: 
   return { url, data: (JSON.parse(init.body) as { data: Record<string, unknown> }).data };
 }
 
+function createShipmentInput(orderNumber = "ORD-1"): IThinkPackageInput {
+  return {
+    orderNumber, orderDate: "2026-08-18", totalAmount: "999.00",
+    recipient: { name: "Alex", address1: "Line 1", address2: "Line 2", pincode: "400001", city: "Mumbai", state: "Maharashtra", country: "India", phone: "9876543210", email: "alex@example.com" },
+    products: [{ name: "Dog Food", sku: "DOG-1", quantity: 2, price: "499.50" }],
+    lengthCm: "10.00", widthCm: "8.00", heightCm: "12.00", weightKg: "1.000", logistics: "Courier A", serviceType: "Surface",
+    paymentMode: "Prepaid", codAmount: "0"
+  };
+}
+
 describe("iThink Logistics V3 request contracts", () => {
-  beforeEach(() => { vi.restoreAllMocks(); });
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    mockedShippingConfig.storeId = "27377";
+  });
 
   it("maps serviceability to the official pincode endpoint and keeps only prepaid pickup couriers", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: { "400001": { BlueDart: { prepaid: "Y", pickup: "Y" }, CodOnly: { prepaid: "N", pickup: "Y" } } } }));
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: { "400001": { BlueDart: { prepaid: "Y", cod: "N", pickup: "Y" }, CodOnly: { prepaid: "N", cod: "Y", pickup: "Y" } } } }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(IThinkClient.checkServiceability("400001")).resolves.toEqual(["bluedart"]);
+    await expect(IThinkClient.checkServiceability("400001", "prepaid")).resolves.toEqual(["bluedart"]);
     const request = sentRequest(fetchMock);
     expect(request.url).toBe("https://pre-alpha.ithinklogistics.com/api_v3/pincode/check.json");
     expect(request.data).toMatchObject({ pincode: "400001", access_token: "test-access-token", secret_key: "test-secret-key" });
   });
 
-  it("surfaces a provider-side serviceability rejection instead of treating it as no couriers", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "error", html_message: "Access Token Not Match." })));
-    await expect(IThinkClient.checkServiceability("400001")).rejects.toMatchObject({ code: "SERVICEABILITY_CHECK_FAILED", message: "Access Token Not Match." });
+  it("keeps only COD-capable couriers when checking serviceability for a COD Order", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: { "400001": { BlueDart: { prepaid: "Y", cod: "N", pickup: "Y" }, CodOnly: { prepaid: "N", cod: "Y", pickup: "Y" } } } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(IThinkClient.checkServiceability("400001", "cod")).resolves.toEqual(["codonly"]);
   });
 
-  it("maps rate inputs and accepts only prepaid pickup services", async () => {
+  it("surfaces a provider-side serviceability rejection instead of treating it as no couriers", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "error", html_message: "Access Token Not Match." })));
+    await expect(IThinkClient.checkServiceability("400001", "prepaid")).rejects.toMatchObject({ code: "SERVICEABILITY_CHECK_FAILED", message: "Access Token Not Match." });
+  });
+
+  it("maps rate inputs and accepts only prepaid pickup services for a Prepaid Order", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: [
-      { logistic_name: "Courier A", logistic_service_type: "Surface", prepaid: "Y", pickup: "Y", rate: "87.50" },
-      { logistic_name: "Courier B", logistic_service_type: "Air", prepaid: "N", pickup: "Y", rate: "99.00" }
+      { logistic_name: "Courier A", logistic_service_type: "Surface", prepaid: "Y", cod: "N", pickup: "Y", rate: "87.50" },
+      { logistic_name: "Courier B", logistic_service_type: "Air", prepaid: "N", cod: "Y", pickup: "Y", rate: "99.00" }
     ] }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(IThinkClient.getRates({ toPincode: "400001", lengthCm: "10.00", widthCm: "8.00", heightCm: "6.00", weightKg: "0.500", productMrp: "999.00" })).resolves.toEqual([{ courier: "Courier A", serviceType: "Surface", rate: "87.50" }]);
-    expect(sentRequest(fetchMock).data).toMatchObject({ from_pincode: "600001", to_pincode: "400001", shipping_weight_kg: "0.500", order_type: "forward", payment_method: "prepaid", delivery_type: "0" });
+    await expect(IThinkClient.getRates({ toPincode: "400001", lengthCm: "10.00", widthCm: "8.00", heightCm: "6.00", weightKg: "0.500", productMrp: "999.00", paymentMode: "prepaid" })).resolves.toEqual([{ courier: "Courier A", serviceType: "Surface", rate: "87.50", deliveryTat: null, estimatedDelivery: null }]);
+    const request = sentRequest(fetchMock);
+    expect(request.data).toMatchObject({ from_pincode: "600001", to_pincode: "400001", shipping_weight_kg: "0.500", order_type: "forward", payment_method: "prepaid", delivery_type: "0" });
+    expect(request.data).not.toHaveProperty("store_id");
+  });
+
+  it("maps rate inputs and accepts only COD-capable services for a COD Order", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: [
+      { logistic_name: "Courier A", logistic_service_type: "Surface", prepaid: "Y", cod: "N", pickup: "Y", rate: "87.50" },
+      { logistic_name: "Courier B", logistic_service_type: "Air", prepaid: "N", cod: "Y", pickup: "Y", rate: "99.00" }
+    ] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(IThinkClient.getRates({ toPincode: "400001", lengthCm: "10.00", widthCm: "8.00", heightCm: "6.00", weightKg: "0.500", productMrp: "999.00", paymentMode: "cod" })).resolves.toEqual([{ courier: "Courier B", serviceType: "Air", rate: "99.00", deliveryTat: null, estimatedDelivery: null }]);
+    const request = sentRequest(fetchMock);
+    expect(request.data).toMatchObject({ payment_method: "cod" });
+  });
+
+  // Phase 2A.2 — live-verified against the configured account (Phase 2A.1):
+  // delivery_tat is per courier, edd_date is one shared min/max window for
+  // the whole rate-check response.
+  it("parses delivery_tat and edd_date.min_edd/max_edd from the Rate API response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: [
+      { logistic_name: "Courier A", logistic_service_type: "Surface", prepaid: "Y", cod: "N", pickup: "Y", rate: "87.50", delivery_tat: "4" },
+      { logistic_name: "Courier B", logistic_service_type: "Air", prepaid: "Y", cod: "N", pickup: "Y", rate: "99.00", delivery_tat: "2" }
+    ], zone: "C", expected_delivery_date: "2 to 5 Days", edd_date: { min_edd: "2026-08-29", max_edd: "2026-09-01" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(IThinkClient.getRates({ toPincode: "400001", lengthCm: "10.00", widthCm: "8.00", heightCm: "6.00", weightKg: "0.500", productMrp: "999.00", paymentMode: "prepaid" })).resolves.toEqual([
+      { courier: "Courier A", serviceType: "Surface", rate: "87.50", deliveryTat: 4, estimatedDelivery: { min: "2026-08-29", max: "2026-09-01" } },
+      { courier: "Courier B", serviceType: "Air", rate: "99.00", deliveryTat: 2, estimatedDelivery: { min: "2026-08-29", max: "2026-09-01" } }
+    ]);
+  });
+
+  it("treats a missing or malformed edd_date/delivery_tat as no estimate, never a guess", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: [
+      { logistic_name: "Courier A", logistic_service_type: "Surface", prepaid: "Y", cod: "N", pickup: "Y", rate: "87.50", delivery_tat: "not-a-number" }
+    ], edd_date: { min_edd: "not-a-date", max_edd: "2026-09-01" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(IThinkClient.getRates({ toPincode: "400001", lengthCm: "10.00", widthCm: "8.00", heightCm: "6.00", weightKg: "0.500", productMrp: "999.00", paymentMode: "prepaid" })).resolves.toEqual([
+      { courier: "Courier A", serviceType: "Surface", rate: "87.50", deliveryTat: null, estimatedDelivery: null }
+    ]);
   });
 
   it("maps a forward prepaid shipment without changing the commerce total", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: { "1": { status: "success", waybill: "AWB123", refnum: "REF123", logistic_name: "Courier A", tracking_url: "https://track.example/AWB123" } } }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(IThinkClient.createShipment({
-      orderNumber: "ORD-1", orderDate: "2026-08-18", totalAmount: "999.00",
-      recipient: { name: "Alex", address1: "Line 1", address2: "Line 2", pincode: "400001", city: "Mumbai", state: "Maharashtra", country: "India", phone: "9876543210", email: "alex@example.com" },
-      products: [{ name: "Dog Food", sku: "DOG-1", quantity: 2, price: "499.50" }],
-      lengthCm: "10.00", widthCm: "8.00", heightCm: "12.00", weightKg: "1.000", logistics: "Courier A", serviceType: "Surface"
-    })).resolves.toMatchObject({ awb: "AWB123", reference: "REF123", courier: "Courier A" });
+    const shipmentNumber = buildBusinessReference("shipment", 1);
+    await expect(IThinkClient.createShipment(createShipmentInput(shipmentNumber))).resolves.toMatchObject({ awb: "AWB123", reference: "REF123", courier: "Courier A" });
     const request = sentRequest(fetchMock);
     expect(request.url).toContain("/api_v3/order/add.json");
-    expect(request.data).toMatchObject({ pickup_address_id: "warehouse-1", logistics: "Courier A", s_type: "Surface", order_type: "forward" });
-    expect((request.data.shipments as Array<Record<string, unknown>>)[0]).toMatchObject({ order: "ORD-1", total_amount: "999.00", advance_amount: "999.00", cod_amount: "0", payment_mode: "Prepaid", return_address_id: "returns-1" });
+    expect(request.data).toMatchObject({
+      access_token: "test-access-token",
+      secret_key: "test-secret-key",
+      pickup_address_id: "warehouse-1",
+      logistics: "Courier A",
+      s_type: "Surface",
+      order_type: "forward"
+    });
+    const shipment = (request.data.shipments as Array<Record<string, unknown>>)[0];
+    expect(shipment).toMatchObject({ order: "TEST-SHP-000001", total_amount: "999.00", advance_amount: "999.00", cod_amount: "0", payment_mode: "Prepaid", return_address_id: "returns-1", store_id: "27377" });
+    expect(request.data).not.toHaveProperty("store_id");
+    expect(typeof shipment?.store_id).toBe("string");
+    expect(request.data.pickup_address_id).not.toBe(shipment?.store_id);
+  });
+
+  it("fails locally before Add Order when Store ID is missing", async () => {
+    Reflect.deleteProperty(mockedShippingConfig, "storeId");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(IThinkClient.createShipment(createShipmentInput())).rejects.toMatchObject({ code: "NOT_CONFIGURED", message: "iThink store ID is not configured." });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("maps tracking events from the official AWB response", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: { AWB123: { message: "success", awb_no: "AWB123", logistic: "Courier A", current_status: "In Transit", current_status_code: "IT", scan_details: [{ status: "Picked Up", status_code: "PU", scan_location: "Chennai", remark: "Collected", scan_date_time: "2026-08-18 10:30:00" }] } } }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(IThinkClient.track("AWB123")).resolves.toMatchObject({ awb: "AWB123", currentStatus: "In Transit", events: [{ status: "Picked Up", location: "Chennai", eventAt: "2026-08-18 10:30:00" }] });
-    expect(sentRequest(fetchMock).data).toMatchObject({ awb_number_list: "AWB123" });
+    const request = sentRequest(fetchMock);
+    expect(request.data).toMatchObject({ awb_number_list: "AWB123" });
+    expect(request.data).not.toHaveProperty("store_id");
+  });
+
+  // Phase E.3 — a freshly-created/manifested AWB the courier hasn't scanned
+  // yet is not a provider failure; see ithink.client.ts's track() comment.
+  describe("Empty tracking data (AWB created, no scans yet)", () => {
+    it("resolves with events=[] and no fabricated status when data is an empty array", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: [] })));
+      await expect(IThinkClient.track("AWB123")).resolves.toEqual({ awb: "AWB123", courier: null, currentStatus: null, currentStatusCode: null, events: [] });
+    });
+
+    it("resolves with events=[] when data is an empty object (no entry for this AWB yet)", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: {} })));
+      await expect(IThinkClient.track("AWB123")).resolves.toEqual({ awb: "AWB123", courier: null, currentStatus: null, currentStatusCode: null, events: [] });
+    });
+
+    it("still throws when data is empty but the top-level response reports a real rejection", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "error", data: [], message: "invalid awb" })));
+      await expect(IThinkClient.track("AWB123")).rejects.toMatchObject({ code: "TRACKING_UNAVAILABLE" });
+    });
+
+    it("still throws when the response has no data key at all and reports an explicit error", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "error", message: "invalid awb" })));
+      await expect(IThinkClient.track("AWB123")).rejects.toMatchObject({ code: "TRACKING_UNAVAILABLE" });
+    });
+
+    it("still throws INVALID_RESPONSE for a genuinely malformed/non-JSON body — real failures are never hidden", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not json", { status: 200, headers: { "content-type": "text/html" } })));
+      await expect(IThinkClient.track("AWB123")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    });
+
+    it("still throws PROVIDER_UNAVAILABLE for a real HTTP failure", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "error" }, 503)));
+      await expect(IThinkClient.track("AWB123")).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+    });
   });
 
   it("maps cancellation and NDR actions to their V3 endpoints", async () => {
@@ -136,6 +248,7 @@ describe("ShipmentService fulfilment invariants", () => {
     await Shipment.destroy({ where: {}, force: true });
     await Replacement.destroy({ where: {}, force: true });
     await ReturnRequest.destroy({ where: {}, force: true });
+    await ProductReview.destroy({ where: {}, force: true });
     await OrderItem.destroy({ where: {}, force: true });
     await Order.destroy({ where: {}, force: true });
     await ProductFeature.destroy({ where: {}, force: true });
@@ -172,9 +285,30 @@ describe("ShipmentService fulfilment invariants", () => {
     const second = await ShipmentService.createForOrder(order.id);
     expect(second.id).toBe(first.id);
     expect(createSpy).toHaveBeenCalledTimes(1);
-    expect(first).toMatchObject({ sourceType: "order", sourceId: order.id, awbNumber: `AWB-${counter}`, providerCost: "87.50" });
+    expect(first).toMatchObject({ sourceType: "order", sourceId: order.id, awbNumber: `AWB-${counter}`, providerCost: "87.50", shipmentNumber: `TEST-SHP-${String(first.id).padStart(6, "0")}` });
+    expect(first.id).toBeGreaterThan(0);
+    expect(first.awbNumber).not.toBe(first.shipmentNumber);
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ orderNumber: first.shipmentNumber }));
     await order.reload();
     expect(order).toMatchObject({ payment_status: "paid", total: "1000.00", shipping_fee: "0.00", fulfilment_status: "processing" });
+  });
+
+  it("preserves a stored legacy shipment reference across reads and repeat creation", async () => {
+    const { order } = await createOrder();
+    const createSpy = mockSuccessfulProvider();
+    const created = await ShipmentService.createForOrder(order.id);
+    const legacyReference = `SHP-${String(created.id).padStart(6, "0")}`;
+    await Shipment.update({ shipment_number: legacyReference }, { where: { id: created.id } });
+
+    await expect(ShipmentService.getById(created.id)).resolves.toMatchObject({ id: created.id, shipmentNumber: legacyReference });
+    await expect(ShipmentService.createForOrder(order.id)).resolves.toMatchObject({ id: created.id, shipmentNumber: legacyReference });
+    expect(createSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps uniqueness on the complete stored shipment reference", () => {
+    const numberIndex = Shipment.options.indexes?.find((index) => index.name === "shipments_number_unique");
+    expect(numberIndex).toMatchObject({ unique: true, fields: ["shipment_number"] });
+    expect("SHP-000006").not.toBe("TEST-SHP-000006");
   });
 
   it.each([
@@ -192,11 +326,15 @@ describe("ShipmentService fulfilment invariants", () => {
   it("rejects shipment creation for a Product left with blank shipping measurements", async () => {
     // Product-level Create/Edit/Activation intentionally allows null shipping
     // measurements; ShipmentService must still fail clearly instead of
-    // inventing fallback package dimensions.
+    // inventing fallback package dimensions. Reliability Phase 1A replaced
+    // the old fail-on-first-item SHIPMENT_PACKAGE_DATA_INVALID with a single
+    // pre-flight SHIPMENT_VALIDATION_FAILED that collects every missing
+    // field (customer/address/package) into one message before any iThink
+    // call — see ShipmentModels/shipment.service.ts's collectPackageLines.
     const { order, product } = await createOrder();
     await product.update({ weight_grams: null, length_cm: null, width_cm: null, height_cm: null });
     const createSpy = mockSuccessfulProvider();
-    await expect(ShipmentService.createForOrder(order.id)).rejects.toMatchObject({ code: "SHIPMENT_PACKAGE_DATA_INVALID" });
+    await expect(ShipmentService.createForOrder(order.id)).rejects.toMatchObject({ code: "SHIPMENT_VALIDATION_FAILED" });
     expect(await Shipment.count()).toBe(0);
     expect(createSpy).not.toHaveBeenCalled();
   });
@@ -239,6 +377,20 @@ describe("ShipmentService fulfilment invariants", () => {
     expect(await ShipmentTrackingEvent.count({ where: { shipment_id: shipment.id } })).toBe(1);
     await order.reload();
     expect(order).toMatchObject({ status: "delivered", fulfilment_status: "delivered", payment_status: "paid" });
+  });
+
+  it("refresh succeeds without change when iThink reports no tracking data yet (AWB created, no scans)", async () => {
+    const { order } = await createOrder();
+    mockSuccessfulProvider();
+    const shipment = await ShipmentService.createForOrder(order.id);
+    vi.spyOn(IThinkClient, "track").mockResolvedValue({ awb: shipment.awbNumber!, courier: null, currentStatus: null, currentStatusCode: null, events: [] });
+
+    const refreshed = await ShipmentService.refresh(shipment.id);
+
+    expect(refreshed.status).toBe(shipment.status); // unchanged — "awb_assigned"
+    expect(refreshed.providerStatus).toBe(shipment.providerStatus); // unchanged, not clobbered with a fabricated value
+    expect(refreshed.lastSyncedAt).not.toBeNull();
+    expect(await ShipmentTrackingEvent.count({ where: { shipment_id: shipment.id } })).toBe(0);
   });
 
   it("claims cancellation before the network call so concurrent clicks dispatch once", async () => {

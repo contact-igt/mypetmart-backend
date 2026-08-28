@@ -6,7 +6,10 @@ import { app } from "../../src/app.js";
 import { paymentConfig } from "../../src/config/payment.config.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
+import { ProductContentBlock } from "../../src/database/tables/ProductContentBlockTable/index.js";
+import { ProductFaq } from "../../src/database/tables/ProductFaqTable/index.js";
 import { ProductFeature } from "../../src/database/tables/ProductFeatureTable/index.js";
+import { ProductReview } from "../../src/database/tables/ProductReviewTable/index.js";
 import { ProductMediaAssignment } from "../../src/database/tables/ProductMediaAssignmentTable/index.js";
 import { Cart } from "../../src/database/tables/CartTable/index.js";
 import { CartItem } from "../../src/database/tables/CartItemTable/index.js";
@@ -147,6 +150,7 @@ describe("Returns", () => {
     await ReturnNote.destroy({ where: {}, truncate: false, force: true });
     await ReturnRequest.destroy({ where: {}, truncate: false, force: true });
     await Payment.destroy({ where: {}, truncate: false, force: true });
+    await ProductReview.destroy({ where: {}, truncate: false, force: true });
     await OrderItem.destroy({ where: {}, truncate: false, force: true });
     await Order.destroy({ where: {}, truncate: false, force: true });
     await CartItem.destroy({ where: {}, truncate: false, force: true });
@@ -154,6 +158,8 @@ describe("Returns", () => {
     await Address.destroy({ where: {}, truncate: false, force: true });
     await ProductFeature.destroy({ where: {}, truncate: false, force: true });
     await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
+    await ProductContentBlock.destroy({ where: {}, truncate: false, force: true });
+    await ProductFaq.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     await AuthSession.destroy({ where: { user_id: [CUSTOMER_A_ID, CUSTOMER_B_ID, ADMIN_ID, SUPER_ADMIN_ID] }, force: true });
@@ -167,6 +173,7 @@ describe("Returns", () => {
     await ReturnNote.destroy({ where: {}, truncate: false, force: true });
     await ReturnRequest.destroy({ where: {}, truncate: false, force: true });
     await Payment.destroy({ where: {}, truncate: false, force: true });
+    await ProductReview.destroy({ where: {}, truncate: false, force: true });
     await OrderItem.destroy({ where: {}, truncate: false, force: true });
     await Order.destroy({ where: {}, truncate: false, force: true });
     await CartItem.destroy({ where: {}, truncate: false, force: true });
@@ -174,6 +181,8 @@ describe("Returns", () => {
     await Address.destroy({ where: {}, truncate: false, force: true });
     await ProductFeature.destroy({ where: {}, truncate: false, force: true });
     await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
+    await ProductContentBlock.destroy({ where: {}, truncate: false, force: true });
+    await ProductFaq.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     categoryId = await createCategory();

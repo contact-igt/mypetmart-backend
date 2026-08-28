@@ -6,9 +6,12 @@ import { environmentConfig } from "../../config/environment.config.js";
 import { sequelize } from "../../database/index.js";
 import { Category } from "../../database/tables/CategoryTable/index.js";
 import { MediaAsset } from "../../database/tables/MediaAssetTable/index.js";
+import { ProductContentBlock } from "../../database/tables/ProductContentBlockTable/index.js";
+import { ProductFaq } from "../../database/tables/ProductFaqTable/index.js";
 import { ProductFeature } from "../../database/tables/ProductFeatureTable/index.js";
 import { ProductImage } from "../../database/tables/ProductImageTable/index.js";
 import { ProductMediaAssignment } from "../../database/tables/ProductMediaAssignmentTable/index.js";
+import { ProductSpecification } from "../../database/tables/ProductSpecificationTable/index.js";
 import { objectStorageService } from "../../services/object-storage/object-storage.service.js";
 import { Product } from "../../database/tables/ProductTable/index.js";
 import { ProductVariant } from "../../database/tables/ProductVariantTable/index.js";
@@ -32,14 +35,20 @@ import {
 } from "./product.errors.js";
 import type { ProductError } from "./product.errors.js";
 import type {
+  AdminProductContentBlockJSON,
   AdminProductDetailJSON,
+  AdminProductFaqJSON,
   AdminProductListItemJSON,
   AdminProductListQuery,
+  AdminProductSpecificationJSON,
   AdminProductSummaryJSON,
   CreateProductInput,
+  ProductContentBlockJSON,
+  ProductFaqJSON,
   ProductFeatureJSON,
   ProductImageJSON,
   ProductMediaAssignmentJSON,
+  ProductSpecificationJSON,
   ProductVariantJSON,
   StorefrontProductDetailJSON,
   StorefrontProductListItemJSON,
@@ -52,6 +61,31 @@ const DEVELOPMENT_SAFE_TRASH_CUTOFF = new Date("2026-08-11T14:00:00.000Z");
 const SAFE_TRASH_CUTOFF = environmentConfig.PRODUCT_SAFE_TRASH_CUTOFF
   ? new Date(environmentConfig.PRODUCT_SAFE_TRASH_CUTOFF)
   : DEVELOPMENT_SAFE_TRASH_CUTOFF;
+
+// Older catalog imports can contain the JSON column as serialized text rather
+// than the array Sequelize normally returns. Normalize at the API boundary so
+// every consumer, including the Admin edit form, receives the documented
+// `string[]` contract.
+function normalizeProductTags(value: unknown): string[] {
+  let candidates: unknown[] = [];
+
+  if (Array.isArray(value)) {
+    candidates = value;
+  } else if (typeof value === "string" && value.trim()) {
+    const raw = value.trim();
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      candidates = Array.isArray(parsed) ? parsed : typeof parsed === "string" ? [parsed] : [];
+    } catch {
+      candidates = raw.split(",");
+    }
+  }
+
+  return candidates
+    .filter((tag): tag is string => typeof tag === "string")
+    .map((tag) => tag.trim())
+    .filter((tag, index, tags) => tag.length > 0 && tags.indexOf(tag) === index);
+}
 
 function isLegacyTrash(product: Product): boolean {
   return product.deleted_at !== null && product.deleted_at.getTime() < SAFE_TRASH_CUTOFF.getTime();
@@ -269,6 +303,97 @@ export function formatFeatureDTO(f: ProductFeature): ProductFeatureJSON {
   };
 }
 
+// Helper: Format Specification DTO for Admin (includes id, so a row can be
+// referenced for edit/delete/reorder).
+export function formatAdminSpecificationDTO(s: ProductSpecification): AdminProductSpecificationJSON {
+  return {
+    id: s.id,
+    label: s.label,
+    value: s.value,
+    displayOrder: s.display_order
+  };
+}
+
+// Helper: Format Specification DTO for the Storefront — no internal id, matching
+// the DTO boundary in CLAUDE.md Product Specifications §9.
+export function formatSpecificationDTO(s: ProductSpecification): ProductSpecificationJSON {
+  return {
+    label: s.label,
+    value: s.value,
+    displayOrder: s.display_order
+  };
+}
+
+// Helper: Format FAQ DTO for the Storefront — no internal id, matching the
+// same DTO boundary as formatSpecificationDTO (storefront never needs to
+// reference an individual FAQ row).
+export function formatFaqDTO(f: ProductFaq): ProductFaqJSON {
+  return {
+    question: f.question,
+    answer: f.answer,
+    displayOrder: f.display_order
+  };
+}
+
+// Helper: Format FAQ DTO for Admin — includes id, so a row can be referenced
+// for edit/delete/reorder.
+export function formatAdminFaqDTO(f: ProductFaq): AdminProductFaqJSON {
+  return {
+    id: f.id,
+    question: f.question,
+    answer: f.answer,
+    displayOrder: f.display_order
+  };
+}
+
+// Helper: Format Content Block DTO for Admin — includes id/mediaAssetId/active
+// and the full safe media summary. `media` must be eager-loaded (see the
+// `contentBlocks` include below) — this never re-queries.
+export function formatAdminContentBlockDTO(b: ProductContentBlock): AdminProductContentBlockJSON {
+  const asset = b.media ?? null;
+  return {
+    id: b.id,
+    mediaAssetId: b.media_asset_id,
+    heading: b.heading,
+    description: b.description,
+    layout: b.layout,
+    displayOrder: b.display_order,
+    active: b.active,
+    media: asset
+      ? {
+          id: asset.id,
+          publicUrl: objectStorageService.getPublicUrl(asset.storage_key) ?? asset.public_url,
+          mediaType: asset.media_type,
+          mimeType: asset.mime_type,
+          title: asset.title,
+          originalName: asset.original_name
+        }
+      : null
+  };
+}
+
+// Helper: Format Content Block DTO for the Storefront — no internal
+// id/mediaAssetId/active, and the media summary drops id/originalName too
+// (see CLAUDE.md Enhanced Product Content §9 — never expose storageKey or
+// internal storage metadata).
+export function formatContentBlockDTO(b: ProductContentBlock): ProductContentBlockJSON {
+  const asset = b.media ?? null;
+  return {
+    heading: b.heading,
+    description: b.description,
+    layout: b.layout,
+    displayOrder: b.display_order,
+    media: asset
+      ? {
+          publicUrl: objectStorageService.getPublicUrl(asset.storage_key) ?? asset.public_url,
+          mediaType: asset.media_type,
+          mimeType: asset.mime_type,
+          title: asset.title
+        }
+      : null
+  };
+}
+
 // Helper: Format Product media assignment DTO. mediaAsset must be eager-loaded
 // (see the `mediaAssignments` include below) — this never re-queries.
 export function formatMediaAssignmentDTO(a: ProductMediaAssignment): ProductMediaAssignmentJSON {
@@ -304,6 +429,38 @@ export async function assertVideoMediaAsset(mediaAssetId: number, transaction?: 
   }
   return asset;
 }
+
+// Helper: Format Storefront Product list item DTO. `category` (active) and
+// `images` (primary only) must be eager-loaded — this never re-queries.
+// Shared by the Storefront list endpoint and Related Products.
+export function formatStorefrontListItemDTO(p: Product): StorefrontProductListItemJSON {
+  const primaryImg = p.images && p.images.length > 0 && p.images[0] ? formatImageDTO(p.images[0]) : null;
+  return {
+    id: p.id,
+    name: p.name,
+    slug: p.slug,
+    brand: p.brand,
+    description: p.description,
+    petType: p.pet_type,
+    price: formatMoney(p.price),
+    compareAtPrice: p.compare_at_price ? formatMoney(p.compare_at_price) : null,
+    stock: p.stock,
+    hasVariants: p.has_variants,
+    featured: p.featured,
+    inStock: p.stock > 0,
+    category: {
+      id: p.category!.id,
+      name: p.category!.name,
+      slug: p.category!.slug,
+      petType: p.category!.pet_type
+    },
+    primaryImage: primaryImg
+  };
+}
+
+const RELATED_PRODUCTS_LIMIT = 6;
+const RELATED_PRODUCTS_CANDIDATE_POOL = 50;
+const RELATED_PRODUCTS_PRICE_BAND = 0.3;
 
 export class ProductService {
   // Storefront Product List
@@ -377,29 +534,7 @@ export class ProductService {
       distinct: true
     });
 
-    const items: StorefrontProductListItemJSON[] = rows.map((p) => {
-      const primaryImg = p.images && p.images.length > 0 && p.images[0] ? formatImageDTO(p.images[0]) : null;
-      return {
-        id: p.id,
-        name: p.name,
-        slug: p.slug,
-        brand: p.brand,
-        petType: p.pet_type,
-        price: formatMoney(p.price),
-        compareAtPrice: p.compare_at_price ? formatMoney(p.compare_at_price) : null,
-        stock: p.stock,
-        hasVariants: p.has_variants,
-        featured: p.featured,
-        inStock: p.stock > 0,
-        category: {
-          id: p.category!.id,
-          name: p.category!.name,
-          slug: p.category!.slug,
-          petType: p.category!.pet_type
-        },
-        primaryImage: primaryImg
-      };
-    });
+    const items: StorefrontProductListItemJSON[] = rows.map(formatStorefrontListItemDTO);
 
     return {
       items,
@@ -408,6 +543,68 @@ export class ProductService {
       pageSize,
       totalPages: Math.ceil(count / pageSize)
     };
+  }
+
+  // Related Products (V1 — automatic, no manual admin mapping/override yet).
+  // Ranks candidates sharing category/brand/tags/price band with `product`,
+  // then tops up with other active Products if fewer than `limit` matched, so
+  // the section never renders empty placeholders. Two bounded queries total
+  // (candidates + optional top-up) — no N+1, and unrelated to Shop/Home/
+  // Category listing queries.
+  static async getRelatedProducts(product: Product, limit = RELATED_PRODUCTS_LIMIT): Promise<StorefrontProductListItemJSON[]> {
+    const currentTags = normalizeProductTags(product.tags);
+    const currentPrice = parseFloat(product.price);
+
+    const orConditions: Record<string, unknown>[] = [{ category_id: product.category_id }];
+    if (product.brand) {
+      orConditions.push({ brand: product.brand });
+    }
+
+    const candidates = await Product.findAll({
+      where: {
+        id: { [Op.ne]: product.id },
+        status: "active",
+        [Op.or]: orConditions
+      },
+      include: [
+        { model: Category, as: "category", where: { active: true }, attributes: ["id", "name", "slug", "pet_type"] },
+        { model: ProductImage, as: "images", where: { is_primary: true }, required: false }
+      ],
+      order: [["created_at", "DESC"]],
+      limit: RELATED_PRODUCTS_CANDIDATE_POOL
+    });
+
+    const scored = candidates.map((p) => {
+      let score = 0;
+      if (p.category_id === product.category_id) score += 50;
+      if (product.brand && p.brand === product.brand) score += 30;
+      const pTags = normalizeProductTags(p.tags);
+      score += pTags.filter((tag) => currentTags.includes(tag)).length * 10;
+      if (currentPrice > 0) {
+        const candidatePrice = parseFloat(p.price);
+        if (Math.abs(candidatePrice - currentPrice) / currentPrice <= RELATED_PRODUCTS_PRICE_BAND) score += 10;
+      }
+      return { product: p, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score || b.product.created_at.getTime() - a.product.created_at.getTime());
+    const picked = scored.slice(0, limit);
+
+    if (picked.length < limit) {
+      const excludeIds = [product.id, ...picked.map((item) => item.product.id)];
+      const fallback = await Product.findAll({
+        where: { id: { [Op.notIn]: excludeIds }, status: "active" },
+        include: [
+          { model: Category, as: "category", where: { active: true }, attributes: ["id", "name", "slug", "pet_type"] },
+          { model: ProductImage, as: "images", where: { is_primary: true }, required: false }
+        ],
+        order: [["created_at", "DESC"]],
+        limit: limit - picked.length
+      });
+      picked.push(...fallback.map((p) => ({ product: p, score: 0 })));
+    }
+
+    return picked.map(({ product: p }) => formatStorefrontListItemDTO(p));
   }
 
   // Storefront Product Detail by Slug
@@ -437,11 +634,28 @@ export class ProductService {
           required: false
         },
         {
+          model: ProductSpecification,
+          as: "specifications",
+          required: false
+        },
+        {
+          model: ProductContentBlock,
+          as: "contentBlocks",
+          where: { active: true },
+          required: false,
+          include: [{ model: MediaAsset, as: "media" }]
+        },
+        {
           model: ProductMediaAssignment,
           as: "mediaAssignments",
           where: { active: true },
           required: false,
           include: [{ model: MediaAsset, as: "mediaAsset" }]
+        },
+        {
+          model: ProductFaq,
+          as: "faqs",
+          required: false
         }
       ],
       order: [
@@ -449,8 +663,14 @@ export class ProductService {
         [{ model: ProductImage, as: "images" }, "sort_order", "ASC"],
         [{ model: ProductFeature, as: "features" }, "display_order", "ASC"],
         [{ model: ProductFeature, as: "features" }, "id", "ASC"],
+        [{ model: ProductSpecification, as: "specifications" }, "display_order", "ASC"],
+        [{ model: ProductSpecification, as: "specifications" }, "id", "ASC"],
+        [{ model: ProductContentBlock, as: "contentBlocks" }, "display_order", "ASC"],
+        [{ model: ProductContentBlock, as: "contentBlocks" }, "id", "ASC"],
         [{ model: ProductMediaAssignment, as: "mediaAssignments" }, "display_order", "ASC"],
-        [{ model: ProductMediaAssignment, as: "mediaAssignments" }, "id", "ASC"]
+        [{ model: ProductMediaAssignment, as: "mediaAssignments" }, "id", "ASC"],
+        [{ model: ProductFaq, as: "faqs" }, "display_order", "ASC"],
+        [{ model: ProductFaq, as: "faqs" }, "id", "ASC"]
       ]
     });
 
@@ -461,10 +681,14 @@ export class ProductService {
     const variants = (product.variants || []).map(formatVariantDTO);
     const images = (product.images || []).map((img) => formatImageDTO(img, false));
     const features = (product.features || []).map(formatFeatureDTO);
+    const specifications = (product.specifications || []).map(formatSpecificationDTO);
+    const contentBlocks = (product.contentBlocks || []).map(formatContentBlockDTO);
+    const faqs = (product.faqs || []).map(formatFaqDTO);
     const mediaAssignments = (product.mediaAssignments || []).map(formatMediaAssignmentDTO);
     const productVideos = mediaAssignments.filter((a) => a.mediaRole === "product_video");
     const testimonialVideos = mediaAssignments.filter((a) => a.mediaRole === "testimonial_video");
     const primaryImg = images.find((img) => img.isPrimary) || (images.length > 0 ? images[0] : null);
+    const relatedProducts = await ProductService.getRelatedProducts(product);
 
     return {
       id: product.id,
@@ -480,13 +704,16 @@ export class ProductService {
       hasVariants: product.has_variants,
       featured: product.featured,
       inStock: product.stock > 0,
-      tags: (product.tags as string[]) || [],
+      tags: normalizeProductTags(product.tags),
       metaTitle: product.meta_title,
       metaDescription: product.meta_description,
       weightGrams: product.weight_grams,
       lengthCm: product.length_cm ? formatMoney(product.length_cm) : null,
       widthCm: product.width_cm ? formatMoney(product.width_cm) : null,
       heightCm: product.height_cm ? formatMoney(product.height_cm) : null,
+      howToUse: product.how_to_use,
+      careInstructions: product.care_instructions,
+      safetyInfo: product.safety_info,
       category: {
         id: product.category!.id,
         name: product.category!.name,
@@ -497,8 +724,12 @@ export class ProductService {
       variants,
       images,
       features,
+      specifications,
+      contentBlocks,
       productVideos,
-      testimonialVideos
+      testimonialVideos,
+      relatedProducts,
+      faqs
     };
   }
 
@@ -633,11 +864,23 @@ export class ProductService {
         { model: ProductVariant, as: "variants", required: false },
         { model: ProductImage, as: "images", required: false },
         { model: ProductFeature, as: "features", required: false },
+        { model: ProductSpecification, as: "specifications", required: false },
+        {
+          model: ProductContentBlock,
+          as: "contentBlocks",
+          required: false,
+          include: [{ model: MediaAsset, as: "media" }]
+        },
         {
           model: ProductMediaAssignment,
           as: "mediaAssignments",
           required: false,
           include: [{ model: MediaAsset, as: "mediaAsset" }]
+        },
+        {
+          model: ProductFaq,
+          as: "faqs",
+          required: false
         }
       ],
       order: [
@@ -645,8 +888,14 @@ export class ProductService {
         [{ model: ProductImage, as: "images" }, "sort_order", "ASC"],
         [{ model: ProductFeature, as: "features" }, "display_order", "ASC"],
         [{ model: ProductFeature, as: "features" }, "id", "ASC"],
+        [{ model: ProductSpecification, as: "specifications" }, "display_order", "ASC"],
+        [{ model: ProductSpecification, as: "specifications" }, "id", "ASC"],
+        [{ model: ProductContentBlock, as: "contentBlocks" }, "display_order", "ASC"],
+        [{ model: ProductContentBlock, as: "contentBlocks" }, "id", "ASC"],
         [{ model: ProductMediaAssignment, as: "mediaAssignments" }, "display_order", "ASC"],
-        [{ model: ProductMediaAssignment, as: "mediaAssignments" }, "id", "ASC"]
+        [{ model: ProductMediaAssignment, as: "mediaAssignments" }, "id", "ASC"],
+        [{ model: ProductFaq, as: "faqs" }, "display_order", "ASC"],
+        [{ model: ProductFaq, as: "faqs" }, "id", "ASC"]
       ],
       ...(transaction ? { transaction } : {})
     });
@@ -661,6 +910,9 @@ export class ProductService {
     const variants = (product.variants || []).map(formatVariantDTO);
     const images = (product.images || []).map((img) => formatImageDTO(img, true));
     const features = (product.features || []).map(formatFeatureDTO);
+    const specifications = (product.specifications || []).map(formatAdminSpecificationDTO);
+    const contentBlocks = (product.contentBlocks || []).map(formatAdminContentBlockDTO);
+    const faqs = (product.faqs || []).map(formatAdminFaqDTO);
     const mediaAssignments = (product.mediaAssignments || []).map(formatMediaAssignmentDTO);
     const productVideos = mediaAssignments.filter((a) => a.mediaRole === "product_video");
     const testimonialVideos = mediaAssignments.filter((a) => a.mediaRole === "testimonial_video");
@@ -685,8 +937,11 @@ export class ProductService {
       lengthCm: product.length_cm ? formatMoney(product.length_cm) : null,
       widthCm: product.width_cm ? formatMoney(product.width_cm) : null,
       heightCm: product.height_cm ? formatMoney(product.height_cm) : null,
+      howToUse: product.how_to_use,
+      careInstructions: product.care_instructions,
+      safetyInfo: product.safety_info,
       variantCount: variants.length,
-      tags: (product.tags as string[]) || [],
+      tags: normalizeProductTags(product.tags),
       metaTitle: product.meta_title,
       metaDescription: product.meta_description,
       category: {
@@ -699,8 +954,11 @@ export class ProductService {
       variants,
       images,
       features,
+      specifications,
+      contentBlocks,
       productVideos,
       testimonialVideos,
+      faqs,
       createdAt: product.created_at.toISOString(),
       updatedAt: product.updated_at.toISOString(),
       deletedAt: product.deleted_at?.toISOString() ?? null,
@@ -769,7 +1027,10 @@ export class ProductService {
           weight_grams: input.weightGrams || null,
           length_cm: input.lengthCm ? formatMoney(input.lengthCm) : null,
           width_cm: input.widthCm ? formatMoney(input.widthCm) : null,
-          height_cm: input.heightCm ? formatMoney(input.heightCm) : null
+          height_cm: input.heightCm ? formatMoney(input.heightCm) : null,
+          how_to_use: input.howToUse || null,
+          care_instructions: input.careInstructions || null,
+          safety_info: input.safetyInfo || null
         },
         { transaction: t }
       );
@@ -828,6 +1089,60 @@ export class ProductService {
         }
       }
 
+      if (input.specifications && input.specifications.length > 0) {
+        const specificationCount = input.specifications.length;
+        const specificationIds = await IdSequenceService.allocateIdRange(DATABASE_TABLE_NAMES.productSpecifications, specificationCount, t);
+
+        for (let i = 0; i < specificationCount; i++) {
+          const sInput = input.specifications[i]!;
+          const sId = specificationIds[i]!;
+
+          // Reserved-label and intra-request duplicate label checks already ran
+          // in createProductSchema; no existing rows can exist yet for a brand
+          // new Product, so no additional duplicate lookup is needed here.
+          await ProductSpecification.create(
+            {
+              id: sId,
+              product_id: productId,
+              label: sInput.label,
+              value: sInput.value,
+              display_order: sInput.displayOrder ?? i
+            },
+            { transaction: t }
+          );
+        }
+      }
+
+      if (input.contentBlocks && input.contentBlocks.length > 0) {
+        const blockCount = input.contentBlocks.length;
+        const blockIds = await IdSequenceService.allocateIdRange(DATABASE_TABLE_NAMES.productContentBlocks, blockCount, t);
+
+        for (let i = 0; i < blockCount; i++) {
+          const bInput = input.contentBlocks[i]!;
+          const bId = blockIds[i]!;
+          if (bInput.mediaAssetId != null) {
+            const asset = await MediaAsset.findByPk(bInput.mediaAssetId, { transaction: t });
+            if (!asset) {
+              throw new MediaAssetNotFoundError(bInput.mediaAssetId);
+            }
+          }
+
+          await ProductContentBlock.create(
+            {
+              id: bId,
+              product_id: productId,
+              media_asset_id: bInput.mediaAssetId ?? null,
+              heading: bInput.heading || null,
+              description: bInput.description || null,
+              layout: bInput.layout ?? "media_left",
+              display_order: bInput.displayOrder ?? i,
+              active: bInput.active ?? true
+            },
+            { transaction: t }
+          );
+        }
+      }
+
       if (input.mediaAssignments && input.mediaAssignments.length > 0) {
         const assignmentCount = input.mediaAssignments.length;
         const assignmentIds = await IdSequenceService.allocateIdRange(DATABASE_TABLE_NAMES.productMediaAssignments, assignmentCount, t);
@@ -847,6 +1162,27 @@ export class ProductService {
               caption: mInput.caption ?? null,
               display_order: mInput.displayOrder ?? i,
               active: mInput.active ?? true
+            },
+            { transaction: t }
+          );
+        }
+      }
+
+      if (input.faqs && input.faqs.length > 0) {
+        const faqCount = input.faqs.length;
+        const faqIds = await IdSequenceService.allocateIdRange(DATABASE_TABLE_NAMES.productFaqs, faqCount, t);
+
+        for (let i = 0; i < faqCount; i++) {
+          const fInput = input.faqs[i]!;
+          const fId = faqIds[i]!;
+
+          await ProductFaq.create(
+            {
+              id: fId,
+              product_id: productId,
+              question: fInput.question,
+              answer: fInput.answer,
+              display_order: fInput.displayOrder ?? i
             },
             { transaction: t }
           );
@@ -913,6 +1249,9 @@ export class ProductService {
       if (input.lengthCm !== undefined) updates.length_cm = input.lengthCm ? formatMoney(input.lengthCm) : null;
       if (input.widthCm !== undefined) updates.width_cm = input.widthCm ? formatMoney(input.widthCm) : null;
       if (input.heightCm !== undefined) updates.height_cm = input.heightCm ? formatMoney(input.heightCm) : null;
+      if (input.howToUse !== undefined) updates.how_to_use = input.howToUse || null;
+      if (input.careInstructions !== undefined) updates.care_instructions = input.careInstructions || null;
+      if (input.safetyInfo !== undefined) updates.safety_info = input.safetyInfo || null;
 
       if (input.sku !== undefined) {
         const newSku = normalizeAndValidateSku(input.sku);
@@ -1004,7 +1343,10 @@ export class ProductService {
       include: [
         { model: ProductVariant, as: "variants" },
         { model: ProductFeature, as: "features" },
-        { model: ProductMediaAssignment, as: "mediaAssignments" }
+        { model: ProductSpecification, as: "specifications" },
+        { model: ProductContentBlock, as: "contentBlocks" },
+        { model: ProductMediaAssignment, as: "mediaAssignments" },
+        { model: ProductFaq, as: "faqs" }
       ]
     });
 
@@ -1041,7 +1383,10 @@ export class ProductService {
           weight_grams: source.weight_grams,
           length_cm: source.length_cm,
           width_cm: source.width_cm,
-          height_cm: source.height_cm
+          height_cm: source.height_cm,
+          how_to_use: source.how_to_use,
+          care_instructions: source.care_instructions,
+          safety_info: source.safety_info
         },
         { transaction: t }
       );
@@ -1100,6 +1445,53 @@ export class ProductService {
         }
       }
 
+      if (source.specifications && source.specifications.length > 0) {
+        const specificationCount = source.specifications.length;
+        const specificationIds = await IdSequenceService.allocateIdRange(DATABASE_TABLE_NAMES.productSpecifications, specificationCount, t);
+
+        for (let i = 0; i < specificationCount; i++) {
+          const s = source.specifications[i]!;
+          const newSpecificationId = specificationIds[i]!;
+
+          await ProductSpecification.create(
+            {
+              id: newSpecificationId,
+              product_id: newProductId,
+              label: s.label,
+              value: s.value,
+              display_order: s.display_order
+            },
+            { transaction: t }
+          );
+        }
+      }
+
+      if (source.contentBlocks && source.contentBlocks.length > 0) {
+        const blockCount = source.contentBlocks.length;
+        const blockIds = await IdSequenceService.allocateIdRange(DATABASE_TABLE_NAMES.productContentBlocks, blockCount, t);
+
+        for (let i = 0; i < blockCount; i++) {
+          const b = source.contentBlocks[i]!;
+          const newBlockId = blockIds[i]!;
+
+          // Reuses the same media_asset_id — never duplicates the R2 object
+          // (see CLAUDE.md Enhanced Product Content §20).
+          await ProductContentBlock.create(
+            {
+              id: newBlockId,
+              product_id: newProductId,
+              media_asset_id: b.media_asset_id,
+              heading: b.heading,
+              description: b.description,
+              layout: b.layout,
+              display_order: b.display_order,
+              active: b.active
+            },
+            { transaction: t }
+          );
+        }
+      }
+
       if (source.mediaAssignments && source.mediaAssignments.length > 0) {
         const assignmentCount = source.mediaAssignments.length;
         const assignmentIds = await IdSequenceService.allocateIdRange(DATABASE_TABLE_NAMES.productMediaAssignments, assignmentCount, t);
@@ -1118,6 +1510,27 @@ export class ProductService {
               caption: a.caption,
               display_order: a.display_order,
               active: a.active
+            },
+            { transaction: t }
+          );
+        }
+      }
+
+      if (source.faqs && source.faqs.length > 0) {
+        const faqCount = source.faqs.length;
+        const faqIds = await IdSequenceService.allocateIdRange(DATABASE_TABLE_NAMES.productFaqs, faqCount, t);
+
+        for (let i = 0; i < faqCount; i++) {
+          const f = source.faqs[i]!;
+          const newFaqId = faqIds[i]!;
+
+          await ProductFaq.create(
+            {
+              id: newFaqId,
+              product_id: newProductId,
+              question: f.question,
+              answer: f.answer,
+              display_order: f.display_order
             },
             { transaction: t }
           );

@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 import { authenticate } from "../../middlewares/auth/authenticate.middleware.js";
-import { handleAdminAddReturnNote, handleAdminGetReturn, handleAdminListReturns, handleAdminMarkItemReceived, handleAdminReviewReturn, handleAdminUpdateReplacement } from "./admin-return.controller.js";
+import { handleAdminAddReturnNote, handleAdminCreateReturnShipment, handleAdminGetReturn, handleAdminListReturns, handleAdminMarkItemReceived, handleAdminReviewReturn, handleAdminUpdateReplacement } from "./admin-return.controller.js";
 
 export const adminReturnRouter = Router();
 
@@ -35,4 +35,8 @@ adminReturnRouter.post("/:returnId/receive", (req, res, next) => {
 
 adminReturnRouter.patch("/:returnId/replacement", (req, res, next) => {
   void handleAdminUpdateReplacement(req, res, next);
+});
+
+adminReturnRouter.post("/:returnId/create-shipment", (req, res, next) => {
+  void handleAdminCreateReturnShipment(req, res, next);
 });

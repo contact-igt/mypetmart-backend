@@ -96,3 +96,27 @@ export type PaymentStatusResultJSON = {
   currency: string;
   commerceException: string | null;
 };
+
+// ---------------------------------------------------------------------------
+// Cash on Delivery (COD)
+// ---------------------------------------------------------------------------
+
+// COD deliberately reuses initiatePaymentSchema's exactly-one-of shape — a
+// customer identifies the Order by orderId, a guest by their recovery token,
+// exactly like PayU initiation.
+export type ConfirmCodOrderInput = InitiatePaymentInput;
+
+// Payment.status is always "pending" here — a COD Payment is never marked
+// "paid" automatically (Phase 1 scope: collection reconciliation is a future
+// admin action). orderStatus is "confirmed": unlike PayU, there is no
+// external gateway round-trip to wait for, so the Order can move straight
+// from pending -> confirmed once the COD Payment record exists.
+export type CodConfirmationResultJSON = {
+  provider: "cod";
+  paymentId: number;
+  orderId: number;
+  orderStatus: string;
+  paymentStatus: string;
+  amount: string;
+  currency: string;
+};

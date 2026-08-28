@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 
+import type { Transaction } from "sequelize";
+
 import { paymentConfig } from "../../config/payment.config.js";
 import { sequelize } from "../../database/index.js";
 import { Order } from "../../database/tables/OrderTable/index.js";
@@ -9,6 +11,8 @@ import { IdSequenceService } from "../../database/sequences/id-sequence.service.
 import { TokenService } from "../../services/auth/token.service.js";
 import { logger } from "../../utils/logger.js";
 import { formatMoney } from "../../utils/product-money.js";
+import { CartService } from "../CartModels/cart.service.js";
+import { isValidOrderStatusTransition } from "../OrderModels/order.constants.js";
 import { OrderNotFoundError } from "../OrderModels/order.errors.js";
 import {
   OrderAlreadyPaidError,
@@ -18,11 +22,13 @@ import {
   PaymentOrderNotPayableError,
   PaymentProviderNotConfiguredError
 } from "./payment.errors.js";
-import { PaymentFinalizationService } from "./payment-finalization.service.js";
+import { PaymentFinalizationService, lockAndCheckOrderStock } from "./payment-finalization.service.js";
 import { buildPayuRequestHash } from "./payu-hash.util.js";
 import { normalizeVerifyApiResult } from "./payu-result-normalizer.js";
 import { PayuVerifyClient } from "./payu-verify.client.js";
 import type {
+  CodConfirmationResultJSON,
+  ConfirmCodOrderInput,
   CreatePaymentAttemptInput,
   InitiatePaymentInput,
   PaymentAttemptResult,
@@ -30,6 +36,61 @@ import type {
   PaymentInitiationResultJSON,
   PaymentStatusResultJSON
 } from "./payment.types.js";
+
+function buildCodResult(order: Order, payment: Payment): CodConfirmationResultJSON {
+  return {
+    provider: "cod",
+    paymentId: payment.id,
+    orderId: order.id,
+    orderStatus: order.status,
+    paymentStatus: payment.status,
+    amount: payment.amount,
+    currency: payment.currency
+  };
+}
+
+/**
+ * Completes the COD payment lifecycle once an Order is confirmed delivered.
+ * Cash on Delivery funds are only actually collected at the door — this is
+ * the reconciliation step deferred by confirmCodOrder() below (see its own
+ * comment: "status stays 'pending' forever in Phase 1... collection
+ * reconciliation is a future admin action"), now closed by treating courier-
+ * confirmed (or admin-confirmed) delivery as that collection event.
+ *
+ * Idempotent no-op when this Order has no COD Payment (a PayU Order, for
+ * example — never touched by this function) or when its COD Payment has
+ * already left "pending" (already paid by an earlier call, or independently
+ * failed/refunded/cancelled) — safe to call from every code path that can
+ * ever drive an Order to "delivered" (automatic shipment-tracking sync AND
+ * manual admin status update) without risking a double-apply.
+ *
+ * Mutates the passed `order` instance's payment_status in place rather than
+ * writing it directly — every caller already loads the Order row locked
+ * (LOCK.UPDATE) and calls order.save() itself right after setting
+ * status/fulfilment_status, so this piggybacks on that same single write
+ * instead of issuing a second, separately-racing UPDATE. Must be called
+ * inside that same transaction, on that same locked row, so the "delivered"
+ * transition and the payment reconciliation can never observably diverge.
+ */
+async function markCodDelivered(order: Order, deliveredAt: Date, transaction: Transaction): Promise<void> {
+  const payment = await Payment.findOne({
+    where: { order_id: order.id, provider: "cod" },
+    transaction,
+    lock: transaction.LOCK.UPDATE
+  });
+  if (!payment) {
+    return;
+  }
+  if (payment.status !== "pending") {
+    return;
+  }
+
+  payment.status = "paid";
+  payment.paid_at = deliveredAt;
+  await payment.save({ transaction });
+
+  order.payment_status = "paid";
+}
 
 /**
  * Generates the PayU merchant transaction id (txnid) for a Payment Attempt.
@@ -81,6 +142,7 @@ async function reconcilePendingAttempt(payment: Payment): Promise<void> {
 
 export const PaymentService = {
   reconcilePendingAttempt,
+  markCodDelivered,
 
   /**
    * Creates a new Payment Attempt for a given Order.
@@ -114,9 +176,29 @@ export const PaymentService = {
         throw new OrderAlreadyPaidError(order.id);
       }
 
-      // 3. Inspect existing active pending Payment
+      // An Order already confirmed for Cash on Delivery (see
+      // PaymentService.confirmCodOrder) must never also spawn a PayU
+      // attempt — order.payment_status stays "pending" for COD (it is never
+      // marked "paid"), so the check above alone cannot catch this case. A
+      // "cod" Payment's existence is itself the durable marker that this
+      // Order's payment method is already decided.
+      const existingCodPayment = await Payment.findOne({
+        where: { order_id: order.id, provider: "cod" },
+        transaction
+      });
+      if (existingCodPayment) {
+        throw new PaymentOrderNotPayableError(order.id, "the order has already been confirmed for Cash on Delivery.");
+      }
+
+      // 3. Inspect existing active pending Payment. Scoped to provider:
+      // "payu" — every Payment row this method itself ever creates is
+      // already "payu" (see step 5 below), so for a pure-PayU Order history
+      // this filter is a no-op; it only matters now that a second provider
+      // (COD, see PaymentService.confirmCodOrder) can also leave a
+      // long-lived "pending" Payment on the same Order, which must never be
+      // mistaken for — or silently overwritten as — an active PayU attempt.
       const activeAttempt = await Payment.findOne({
-        where: { order_id: order.id, status: "pending" },
+        where: { order_id: order.id, status: "pending", provider: "payu" },
         transaction
       });
 
@@ -166,7 +248,9 @@ export const PaymentService = {
       return await this.createPaymentAttempt({ orderId });
     } catch (error) {
       if (error instanceof PaymentAttemptAlreadyActiveError) {
-        const existing = await Payment.findOne({ where: { order_id: orderId, status: "pending" } });
+        // Scoped to provider: "payu" — see the matching comment on
+        // createPaymentAttempt's own activeAttempt lookup above.
+        const existing = await Payment.findOne({ where: { order_id: orderId, status: "pending", provider: "payu" } });
         if (existing) {
           return existing;
         }
@@ -345,7 +429,12 @@ export const PaymentService = {
     // succeeded on a previous submission gets resubmitted with the same
     // txnid and bounced by PayU's own duplicate-txnid protection, stranding
     // the customer on PayU's raw error page instead of our result page.
-    const existingPendingAttempt = await Payment.findOne({ where: { order_id: order.id, status: "pending" } });
+    // Scoped to provider: "payu" — see the matching comment on
+    // createPaymentAttempt's activeAttempt lookup; a long-lived pending COD
+    // Payment on this Order must never be reconciled against PayU's Verify
+    // Payment API (it has no provider_order_id to verify) or otherwise
+    // treated as this method's own attempt.
+    const existingPendingAttempt = await Payment.findOne({ where: { order_id: order.id, status: "pending", provider: "payu" } });
     if (existingPendingAttempt) {
       await reconcilePendingAttempt(existingPendingAttempt);
     }
@@ -409,5 +498,97 @@ export const PaymentService = {
       currency: payment.currency,
       commerceException: refreshedOrder?.commerce_exception ?? order.commerce_exception
     };
+  },
+
+  /**
+   * Confirms an Order for Cash on Delivery. Unlike initiatePayuCheckout, this
+   * never hands off to an external gateway and never marks anything "paid" —
+   * the created Payment row stays provider:"cod", status:"pending" forever in
+   * Phase 1 (collection reconciliation is a future admin action, out of
+   * scope here). What it DOES do, atomically, is exactly what
+   * PaymentFinalizationService's SUCCESS path does for a verified PayU
+   * payment minus the "paid" marking: lock-and-check stock, decrement it,
+   * and move the Order pending -> confirmed — reusing the same
+   * lockAndCheckOrderStock helper so COD and PayU can never diverge on how
+   * stock is checked/decremented. Order.payment_status is never touched here
+   * (stays "pending"), preserving the existing invariant that "paid" means
+   * only "a provider actually captured funds" (see admin-order.routes.ts).
+   */
+  async confirmCodOrder(caller: PaymentInitiationCaller, input: ConfirmCodOrderInput): Promise<CodConfirmationResultJSON> {
+    const order = await this.resolveAuthorizedOrder(caller, input);
+    const itemCount = await OrderItem.count({ where: { order_id: order.id } });
+    this.assertOrderPayable(order, itemCount);
+
+    return sequelize.transaction(async (t) => {
+      // Lock the Order row to serialize concurrent COD confirmation / PayU
+      // initiation attempts for the same Order — the same precedent
+      // createPaymentAttempt already sets for PayU.
+      const lockedOrder = await Order.findByPk(order.id, { transaction: t, lock: t.LOCK.UPDATE });
+      if (!lockedOrder) {
+        throw new OrderNotFoundError(order.id);
+      }
+
+      if (lockedOrder.payment_status === "paid") {
+        throw new OrderAlreadyPaidError(lockedOrder.id);
+      }
+
+      const activeAttempt = await Payment.findOne({ where: { order_id: lockedOrder.id, status: "pending" }, transaction: t });
+      if (activeAttempt) {
+        if (activeAttempt.provider === "cod") {
+          // Idempotent replay (double-click / retry) — this Order was
+          // already confirmed for COD; a COD Payment's status never leaves
+          // "pending" in Phase 1, so this is the durable marker of "already
+          // done" rather than "still open", unlike a pending PayU attempt.
+          return buildCodResult(lockedOrder, activeAttempt);
+        }
+        // A PayU attempt is still active for this Order — block switching to
+        // COD mid-attempt rather than silently creating a second Payment
+        // Attempt (the same single-active-attempt invariant createPaymentAttempt enforces).
+        throw new PaymentAttemptAlreadyActiveError(lockedOrder.id);
+      }
+
+      if (!isValidOrderStatusTransition(lockedOrder.status, "confirmed")) {
+        throw new PaymentOrderNotPayableError(lockedOrder.id, "the order is not in a state that can be confirmed.");
+      }
+
+      const lockedLines = await lockAndCheckOrderStock(lockedOrder.id, t);
+      if (!lockedLines) {
+        throw new PaymentOrderNotPayableError(lockedOrder.id, "one or more items in this order are no longer in stock.");
+      }
+
+      const paymentId = await IdSequenceService.allocateNextId("payments", t);
+      const payment = await Payment.create(
+        {
+          id: paymentId,
+          order_id: lockedOrder.id,
+          amount: lockedOrder.total,
+          currency: lockedOrder.currency,
+          provider: "cod",
+          status: "pending",
+          provider_order_id: null,
+          provider_payment_id: null,
+          method: "cod",
+          raw_payload: null
+        },
+        { transaction: t }
+      );
+
+      for (const line of lockedLines) {
+        if (line.variant) {
+          line.variant.stock = line.availableStock - line.item.quantity;
+          await line.variant.save({ transaction: t });
+        } else {
+          line.product.stock = line.availableStock - line.item.quantity;
+          await line.product.save({ transaction: t });
+        }
+      }
+
+      lockedOrder.status = "confirmed";
+      await lockedOrder.save({ transaction: t });
+
+      await CartService.finalizeCartForOrder(lockedOrder, t);
+
+      return buildCodResult(lockedOrder, payment);
+    });
   }
 };

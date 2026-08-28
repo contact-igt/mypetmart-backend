@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { connectDatabase, disconnectDatabase, sequelize } from "../../src/database/index.js";
-import { Category, NotificationLog, Order, OrderItem, Payment, Product, ProductFeature, ProductMediaAssignment, Refund, Replacement, ReturnRequest, Shipment, User } from "../../src/database/tables/index.js";
+import { Category, NotificationLog, Order, OrderItem, Payment, Product, ProductFeature, ProductMediaAssignment, ProductReview, Refund, Replacement, ReturnRequest, Shipment, User } from "../../src/database/tables/index.js";
 import { IdSequenceService } from "../../src/database/sequences/id-sequence.service.js";
 import { buildBusinessReference } from "../../src/utils/reference-generator.js";
 import { emailService, type EmailSendOptions } from "../../src/services/email/email.service.js";
@@ -132,7 +132,8 @@ describe("Commerce transactional email notifications", () => {
     await Refund.destroy({ where: {}, force: true });
     await ReturnRequest.destroy({ where: {}, force: true });
     await Payment.destroy({ where: {}, force: true });
-    await OrderItem.destroy({ where: {}, force: true });
+    await ProductReview.destroy({ where: {}, force: true });
+  await OrderItem.destroy({ where: {}, force: true });
     await Order.destroy({ where: { id: createdOrderIds }, force: true });
     await ProductFeature.destroy({ where: { product_id: createdProductIds }, force: true });
     await ProductMediaAssignment.destroy({ where: { product_id: createdProductIds }, force: true });

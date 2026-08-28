@@ -16,19 +16,26 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
     Category,
     MediaAsset,
     Order,
+    OrderDocument,
     OrderItem,
     OrderNote,
     PasswordResetToken,
     Payment,
     Product,
+    ProductContentBlock,
+    ProductFaq,
     ProductFeature,
     ProductImage,
     ProductMediaAssignment,
+    ProductReview,
+    ProductSpecification,
     ProductVariant,
     Replacement,
     Refund,
     ReturnNote,
     ReturnRequest,
+    ReturnShipment,
+    ReturnShipmentTrackingEvent,
     Shipment,
     ShipmentTrackingEvent,
     User,
@@ -59,6 +66,15 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
   Product.hasMany(ProductFeature, { foreignKey: "product_id", as: "features" });
   ProductFeature.belongsTo(Product, { foreignKey: "product_id", as: "product" });
 
+  Product.hasMany(ProductSpecification, { foreignKey: "product_id", as: "specifications" });
+  ProductSpecification.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+
+  Product.hasMany(ProductContentBlock, { foreignKey: "product_id", as: "contentBlocks" });
+  ProductContentBlock.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+
+  Product.hasMany(ProductFaq, { foreignKey: "product_id", as: "faqs" });
+  ProductFaq.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+
   User.hasMany(MediaAsset, { foreignKey: "uploaded_by", as: "uploadedMediaAssets" });
   MediaAsset.belongsTo(User, { foreignKey: "uploaded_by", as: "uploadedBy" });
 
@@ -70,6 +86,9 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
 
   MediaAsset.hasMany(ProductMediaAssignment, { foreignKey: "media_asset_id", as: "productMediaAssignments" });
   ProductMediaAssignment.belongsTo(MediaAsset, { foreignKey: "media_asset_id", as: "mediaAsset" });
+
+  MediaAsset.hasMany(ProductContentBlock, { foreignKey: "media_asset_id", as: "productContentBlocks" });
+  ProductContentBlock.belongsTo(MediaAsset, { foreignKey: "media_asset_id", as: "media" });
 
   User.hasMany(Cart, { foreignKey: "user_id", as: "carts" });
   Cart.belongsTo(User, { foreignKey: "user_id", as: "user" });
@@ -92,11 +111,23 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
   Order.hasMany(OrderItem, { foreignKey: "order_id", as: "items" });
   OrderItem.belongsTo(Order, { foreignKey: "order_id", as: "order" });
 
+  Order.hasMany(OrderDocument, { foreignKey: "order_id", as: "documents" });
+  OrderDocument.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+
   Product.hasMany(OrderItem, { foreignKey: "product_id", as: "orderItems" });
   OrderItem.belongsTo(Product, { foreignKey: "product_id", as: "product" });
 
   ProductVariant.hasMany(OrderItem, { foreignKey: "product_variant_id", as: "orderItems" });
   OrderItem.belongsTo(ProductVariant, { foreignKey: "product_variant_id", as: "variant" });
+
+  Product.hasMany(ProductReview, { foreignKey: "product_id", as: "reviews" });
+  ProductReview.belongsTo(Product, { foreignKey: "product_id", as: "product" });
+
+  User.hasMany(ProductReview, { foreignKey: "user_id", as: "productReviews" });
+  ProductReview.belongsTo(User, { foreignKey: "user_id", as: "user" });
+
+  OrderItem.hasOne(ProductReview, { foreignKey: "order_item_id", as: "review" });
+  ProductReview.belongsTo(OrderItem, { foreignKey: "order_item_id", as: "orderItem" });
 
   Order.hasMany(OrderNote, { foreignKey: "order_id", as: "notes" });
   OrderNote.belongsTo(Order, { foreignKey: "order_id", as: "order" });
@@ -140,6 +171,11 @@ export function initializeDatabaseAssociations(models: DatabaseModelRegistry): v
 
   User.hasMany(Refund, { foreignKey: "initiated_by_admin_id", as: "initiatedRefunds" });
   Refund.belongsTo(User, { foreignKey: "initiated_by_admin_id", as: "initiatedBy" });
+
+  ReturnRequest.hasOne(ReturnShipment, { foreignKey: "return_request_id", as: "returnShipment" });
+  ReturnShipment.belongsTo(ReturnRequest, { foreignKey: "return_request_id", as: "returnRequest" });
+  ReturnShipment.hasMany(ReturnShipmentTrackingEvent, { foreignKey: "return_shipment_id", as: "trackingEvents" });
+  ReturnShipmentTrackingEvent.belongsTo(ReturnShipment, { foreignKey: "return_shipment_id", as: "returnShipment" });
 
   ReturnRequest.hasOne(Replacement, { foreignKey: "return_request_id", as: "replacement" });
   Replacement.belongsTo(ReturnRequest, { foreignKey: "return_request_id", as: "returnRequest" });

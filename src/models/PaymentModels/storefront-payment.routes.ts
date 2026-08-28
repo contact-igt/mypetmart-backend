@@ -2,7 +2,7 @@ import { Router } from "express";
 
 import { authRateLimiter } from "../../middlewares/auth/rate-limiter.middleware.js";
 import { optionalAuthenticate } from "../../middlewares/auth/optional-authenticate.middleware.js";
-import { handleGetPaymentStatus, handleInitiatePayment } from "./storefront-payment.controller.js";
+import { handleConfirmCodOrder, handleGetPaymentStatus, handleInitiatePayment } from "./storefront-payment.controller.js";
 
 export const storefrontPaymentRouter = Router();
 
@@ -18,4 +18,11 @@ storefrontPaymentRouter.post("/initiate", authRateLimiter, optionalAuthenticate(
 // be looked up by id alone without proving Order ownership first).
 storefrontPaymentRouter.post("/status", authRateLimiter, optionalAuthenticate(), (req, res, next) => {
   void handleGetPaymentStatus(req, res, next);
+});
+
+// Cash on Delivery confirmation — same auth shape/precedent as /initiate.
+// Never touches PayU; creates a "cod"/"pending" Payment and confirms the
+// Order directly (see PaymentService.confirmCodOrder).
+storefrontPaymentRouter.post("/cod", authRateLimiter, optionalAuthenticate(), (req, res, next) => {
+  void handleConfirmCodOrder(req, res, next);
 });

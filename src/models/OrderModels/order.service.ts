@@ -16,6 +16,7 @@ import {
   Product,
   ProductImage,
   ProductVariant,
+  Refund,
   ReturnRequest,
   Shipment,
   ShipmentTrackingEvent,
@@ -44,6 +45,7 @@ import {
   OrderInvalidStatusTransitionError,
   OrderNotFoundError,
   OrderProductNotAvailableError,
+  OrderShippingAddressNotEditableError,
   OrderVariantNotAvailableError
 } from "./order.errors.js";
 import type {
@@ -63,11 +65,15 @@ import type {
   CreateOrderResultJSON,
   CustomerOrderListQuery,
   CustomerOrderListResult,
+  CustomerOrderPaymentJSON,
+  CustomerOrderRefundSummaryJSON,
   GuestOrderDetailJSON,
   OrderDetailJSON,
   OrderItemJSON,
   OrderListItemJSON,
-  OrderShippingAddressJSON
+  OrderProductPreviewJSON,
+  OrderShippingAddressJSON,
+  UpdateOrderShippingAddressInput
 } from "./order.types.js";
 
 // ---------------------------------------------------------------------------
@@ -224,8 +230,8 @@ function generateGuestAccessToken(): { rawToken: string; tokenHash: string } {
 // The guest-facing lookup response strips shipping coordinates — a public,
 // unauthenticated recovery link should not carry precise geolocation, unlike
 // the authenticated customer/admin detail views.
-function toGuestOrderDetailJSON(order: Order, items: OrderItem[], shipment: ShipmentJSON | null): GuestOrderDetailJSON {
-  const detail = toOrderDetailJSON(order, items, shipment);
+function toGuestOrderDetailJSON(order: Order, items: OrderItem[], shipment: ShipmentJSON | null, payments: Payment[] = [], refunds: Refund[] = []): GuestOrderDetailJSON {
+  const detail = toOrderDetailJSON(order, items, shipment, payments, refunds);
   const { latitude: _latitude, longitude: _longitude, ...shippingAddress } = detail.shippingAddress;
   return { ...detail, shippingAddress };
 }
@@ -277,7 +283,41 @@ function toOrderListItemJSON(order: Order, itemCount: number): OrderListItemJSON
   };
 }
 
-function toOrderDetailJSON(order: Order, items: OrderItem[], shipment: ShipmentJSON | null = null): OrderDetailJSON {
+// Deliberately its own mapping (not shared with Admin's toAdminOrderPaymentJSON)
+// so a future admin-only field added there can never leak here just by the two
+// staying structurally similar. Omits Payment.id and provider_payment_id (PayU's
+// own internal mihpayid) — providerOrderId (MyPetMart's txnid, already shown to
+// the customer during checkout) is reference enough without exposing PayU's
+// internal id.
+function toCustomerOrderPaymentJSON(payment: Payment): CustomerOrderPaymentJSON {
+  return {
+    provider: payment.provider,
+    method: payment.method,
+    status: payment.status,
+    providerOrderId: payment.provider_order_id,
+    paidAt: payment.paid_at ? payment.paid_at.toISOString() : null,
+    refundedAt: payment.refunded_at ? payment.refunded_at.toISOString() : null
+  };
+}
+
+// Sources from Order.refunds directly (Order hasMany Refund) rather than via
+// ReturnRequest — a paid Order cancelled outside the returns flow still has
+// Refund rows with return_request_id: null, and those must be visible here
+// too. null only when the Order has no Refund rows at all.
+function summarizeRefunds(refunds: Refund[]): CustomerOrderRefundSummaryJSON | null {
+  if (refunds.length === 0) {
+    return null;
+  }
+  const totalRefundedPaise = refunds
+    .filter((refund) => refund.status === "succeeded")
+    .reduce((sum, refund) => sum + parseMoneyToPaise(refund.amount), 0);
+  const hasProcessing = refunds.some((refund) => refund.status === "pending" || refund.status === "processing");
+  const hasSucceeded = refunds.some((refund) => refund.status === "succeeded");
+  const status = hasProcessing ? "processing" : hasSucceeded ? "succeeded" : "failed";
+  return { totalRefunded: formatPaiseAsMoney(totalRefundedPaise), status };
+}
+
+function toOrderDetailJSON(order: Order, items: OrderItem[], shipment: ShipmentJSON | null = null, payments: Payment[] = [], refunds: Refund[] = []): OrderDetailJSON {
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
   return {
     ...toOrderListItemJSON(order, itemCount),
@@ -287,6 +327,8 @@ function toOrderDetailJSON(order: Order, items: OrderItem[], shipment: ShipmentJ
     cancelledAt: order.cancelled_at ? order.cancelled_at.toISOString() : null,
     createdAt: order.created_at.toISOString(),
     updatedAt: order.updated_at.toISOString(),
+    payments: payments.map(toCustomerOrderPaymentJSON),
+    refundSummary: summarizeRefunds(refunds),
     ...(shipment ? { shipment } : {})
   };
 }
@@ -304,6 +346,38 @@ async function getItemCountsByOrderId(orderIds: number[]): Promise<Map<number, n
   const map = new Map<number, number>();
   for (const row of rows as unknown as { order_id: number; itemCount: string }[]) {
     map.set(row.order_id, Number(row.itemCount));
+  }
+  return map;
+}
+
+/**
+ * Batch product-preview loader for the customer order-listing page — one
+ * query for any number of orders (same shape as getItemCountsByOrderId
+ * above), never a full OrderItemJSON per row. Capping to 3 previews per
+ * order happens here in-memory rather than in SQL (no per-order LIMIT in a
+ * single grouped query without a window function), which is still exactly
+ * one round trip regardless of how many orders are being listed.
+ */
+async function getProductPreviewsByOrderId(orderIds: number[]): Promise<Map<number, OrderProductPreviewJSON[]>> {
+  if (orderIds.length === 0) {
+    return new Map();
+  }
+  const rows = await OrderItem.findAll({
+    attributes: ["order_id", "product_name", "product_image"],
+    where: { order_id: { [Op.in]: orderIds } },
+    order: [
+      ["order_id", "ASC"],
+      ["id", "ASC"]
+    ],
+    raw: true
+  });
+  const map = new Map<number, OrderProductPreviewJSON[]>();
+  for (const row of rows as unknown as { order_id: number; product_name: string; product_image: string | null }[]) {
+    const existing = map.get(row.order_id) ?? [];
+    if (existing.length < 3) {
+      existing.push({ name: row.product_name, image: row.product_image });
+    }
+    map.set(row.order_id, existing);
   }
   return map;
 }
@@ -409,6 +483,10 @@ export const OrderService = {
 
         const existingPending = await Order.findOne({
           where: { guest_identity_hash: identity.tokenHash, status: "pending" },
+          include: [
+            { model: Payment, as: "payments" },
+            { model: Refund, as: "refunds" }
+          ],
           transaction: t
         });
         if (existingPending) {
@@ -421,7 +499,10 @@ export const OrderService = {
             order: [["id", "ASC"]],
             transaction: t
           });
-          return { ...toOrderDetailJSON(existingPending, items), guestAccessToken: rawToken };
+          return {
+            ...toOrderDetailJSON(existingPending, items, null, existingPending.payments ?? [], existingPending.refunds ?? []),
+            guestAccessToken: rawToken
+          };
         }
         // No existing pending Order — fall through to address resolution
         // first, preserving the original error precedence (an invalid/missing
@@ -594,7 +675,13 @@ export const OrderService = {
    */
   async getGuestOrder(rawToken: string): Promise<GuestOrderDetailJSON> {
     const tokenHash = TokenService.hashToken(rawToken);
-    const order = await Order.findOne({ where: { guest_access_token_hash: tokenHash, user_id: null } });
+    const order = await Order.findOne({
+      where: { guest_access_token_hash: tokenHash, user_id: null },
+      include: [
+        { model: Payment, as: "payments" },
+        { model: Refund, as: "refunds" }
+      ]
+    });
     if (!order) {
       throw new GuestOrderNotFoundError();
     }
@@ -602,7 +689,7 @@ export const OrderService = {
       OrderItem.findAll({ where: { order_id: order.id }, order: [["id", "ASC"]] }),
       ShipmentService.getForOrder(order.id)
     ]);
-    return toGuestOrderDetailJSON(order, items, shipment);
+    return toGuestOrderDetailJSON(order, items, shipment, order.payments ?? [], order.refunds ?? []);
   },
 
   async listCustomerOrders(userId: number, query: CustomerOrderListQuery): Promise<CustomerOrderListResult> {
@@ -610,8 +697,18 @@ export const OrderService = {
     const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 20));
     const offset = (page - 1) * pageSize;
 
+    const where: Record<string | symbol, unknown> = { user_id: userId };
+    if (query.status) where.status = query.status;
+    if (query.search) where.order_number = { [Op.like]: `%${query.search}%` };
+    if (query.from || query.to) {
+      const range: Record<symbol, Date> = {};
+      if (query.from) range[Op.gte] = new Date(query.from);
+      if (query.to) range[Op.lte] = new Date(query.to);
+      where.placed_at = range;
+    }
+
     const { rows, count } = await Order.findAndCountAll({
-      where: { user_id: userId },
+      where,
       order: [
         ["placed_at", "DESC"],
         ["id", "DESC"]
@@ -620,10 +717,19 @@ export const OrderService = {
       offset
     });
 
-    const counts = await getItemCountsByOrderId(rows.map((row) => row.id));
+    const orderIds = rows.map((row) => row.id);
+    const [counts, previews, shipments] = await Promise.all([
+      getItemCountsByOrderId(orderIds),
+      getProductPreviewsByOrderId(orderIds),
+      ShipmentService.getSummariesForOrders(orderIds)
+    ]);
 
     return {
-      items: rows.map((row) => toOrderListItemJSON(row, counts.get(row.id) ?? 0)),
+      items: rows.map((row) => ({
+        ...toOrderListItemJSON(row, counts.get(row.id) ?? 0),
+        products: previews.get(row.id) ?? [],
+        shipment: shipments.get(row.id) ?? null
+      })),
       total: count,
       page,
       pageSize,
@@ -632,7 +738,13 @@ export const OrderService = {
   },
 
   async getCustomerOrder(userId: number, orderId: number): Promise<OrderDetailJSON> {
-    const order = await Order.findOne({ where: { id: orderId, user_id: userId } });
+    const order = await Order.findOne({
+      where: { id: orderId, user_id: userId },
+      include: [
+        { model: Payment, as: "payments" },
+        { model: Refund, as: "refunds" }
+      ]
+    });
     if (!order) {
       throw new OrderNotFoundError(orderId);
     }
@@ -640,7 +752,7 @@ export const OrderService = {
       OrderItem.findAll({ where: { order_id: order.id }, order: [["id", "ASC"]] }),
       ShipmentService.getForOrder(order.id)
     ]);
-    return toOrderDetailJSON(order, items, shipment);
+    return toOrderDetailJSON(order, items, shipment, order.payments ?? [], order.refunds ?? []);
   }
 };
 
@@ -736,6 +848,7 @@ async function loadAdminOrderDetail(orderId: number, transaction?: Transaction):
       { model: User, as: "user" },
       { model: OrderItem, as: "items" },
       { model: Payment, as: "payments" },
+      { model: Refund, as: "refunds" },
       { model: Shipment, as: "shipments", include: [{ model: ShipmentTrackingEvent, as: "trackingEvents" }] },
       { model: OrderNote, as: "notes", include: [{ model: User, as: "author" }] },
       { model: ReturnRequest, as: "returns" }
@@ -752,7 +865,7 @@ async function loadAdminOrderDetail(orderId: number, transaction?: Transaction):
 
   const items = order.items ?? [];
   const normalShipment = (order.shipments ?? []).find((shipment) => shipment.source_type === "order") ?? null;
-  const base = toOrderDetailJSON(order, items, normalShipment ? ShipmentService.toJSON(normalShipment) : null);
+  const base = toOrderDetailJSON(order, items, normalShipment ? ShipmentService.toJSON(normalShipment) : null, order.payments ?? [], order.refunds ?? []);
 
   return {
     ...base,
@@ -925,15 +1038,24 @@ export const AdminOrderService = {
       }
       // fulfilment_status/shipment are still never touched here — those
       // remain independent state machines (V1 locked rule). payment_status
-      // is likewise never hand-set directly; when isPaidCancellation is
-      // true it instead moves later, through the same PayU-verified refund
-      // finalization path the Return flow already uses.
+      // is likewise never hand-set directly here, with one narrow exception:
+      // "delivered" runs it through PaymentService.markCodDelivered below,
+      // the same COD-collection-at-the-door reconciliation the automatic
+      // shipment-tracking path already applies (shipment.service.ts's
+      // applyFulfilment) — an admin manually marking an Order delivered must
+      // reach the same outcome, or a COD Order fulfilled outside shipment
+      // tracking would stay "pending" forever. A PayU Order's payment_status
+      // still only ever moves through the verified refund finalization path
+      // the Return flow already uses (isPaidCancellation below).
 
       let pendingRefundId: number | null = null;
       if (isPaidCancellation) {
         await restoreStockForCancelledOrder(order.id, t);
         const refund = await RefundService.createPendingCancellationRefund(admin.id, order, t);
         pendingRefundId = refund.id;
+      }
+      if (nextStatus === "delivered") {
+        await PaymentService.markCodDelivered(order, new Date(), t);
       }
 
       await order.save({ transaction: t });
@@ -970,6 +1092,47 @@ export const AdminOrderService = {
     return loadAdminOrderDetail(orderId);
   },
 
+  /**
+   * Full replacement of the Order's own ship_* snapshot — never the
+   * customer's saved Address book entry (a completely separate table; this
+   * method never touches AddressModels/Address at all, exactly like Order
+   * creation's own address snapshot never writes back to the source
+   * Address). Exists specifically so an admin can correct a bad delivery
+   * address after a Shipment failed (e.g. iThink's "no shipping services
+   * available for recipient address") and then retry — ShipmentService.retry
+   * re-reads Order.ship_* fresh on every attempt, so no separate wiring is
+   * needed for the retry to pick up the correction.
+   */
+  async updateShippingAddress(orderId: number, input: UpdateOrderShippingAddressInput, admin: { id: number; role: UserRole }): Promise<AdminOrderDetailJSON> {
+    void admin; // authorization is enforced by authenticate("admin") ahead of this route; no role split needed here (unlike paid-order cancellation)
+    await sequelize.transaction(async (t) => {
+      const order = await Order.findByPk(orderId, { transaction: t, lock: t.LOCK.UPDATE });
+      if (!order) {
+        throw new OrderNotFoundError(orderId);
+      }
+      if (order.status === "cancelled" || order.status === "delivered" || order.status === "return_requested") {
+        throw new OrderShippingAddressNotEditableError(order.id, order.status);
+      }
+
+      order.ship_recipient_name = input.recipientName;
+      order.ship_phone = input.phone;
+      order.ship_line_1 = input.line1;
+      order.ship_line_2 = input.line2 ?? null;
+      order.ship_city = input.city;
+      order.ship_state = input.state;
+      order.ship_postal_code = input.postalCode;
+      // Snapshotted coordinates (if any) described the OLD address text —
+      // keeping them after a text edit would silently mismatch map/geocoded
+      // data against the new address. This endpoint doesn't accept new
+      // coordinates, so clear rather than keep a stale pair.
+      order.ship_latitude = null;
+      order.ship_longitude = null;
+      await order.save({ transaction: t });
+    });
+
+    return loadAdminOrderDetail(orderId);
+  },
+
   async bulkUpdateStatus(ids: number[], nextStatus: OrderStatus, admin: { id: number; role: UserRole }): Promise<BulkUpdateOrderStatusResult> {
     const pendingRefundIds: number[] = [];
     const updatedOrderIds: number[] = [];
@@ -1003,6 +1166,11 @@ export const AdminOrderService = {
           await restoreStockForCancelledOrder(order.id, t);
           const refund = await RefundService.createPendingCancellationRefund(admin.id, order, t);
           pendingRefundIds.push(refund.id);
+        }
+        if (nextStatus === "delivered") {
+          // Same COD-collection-at-the-door reconciliation as the single-order
+          // updateStatus() path above — a no-op for PayU Orders (already "paid").
+          await PaymentService.markCodDelivered(order, new Date(), t);
         }
 
         await order.save({ transaction: t });

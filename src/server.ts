@@ -4,6 +4,9 @@ import { app } from "./app.js";
 import { databaseConfig } from "./config/database.config.js";
 import { serverConfig } from "./config/server.config.js";
 import { connectDatabase, disconnectDatabase } from "./database/index.js";
+import { closePdfRenderer } from "./models/DocumentModels/pdf-renderer.js";
+import { startReturnShipmentSyncScheduler, stopReturnShipmentSyncScheduler } from "./models/ReturnShipmentModels/return-shipment-sync.job.js";
+import { startShipmentSyncScheduler, stopShipmentSyncScheduler } from "./models/ShipmentModels/shipment-sync.job.js";
 import { logger } from "./utils/logger.js";
 
 const server = createServer(app);
@@ -36,6 +39,9 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   shutdownInProgress = true;
   logger.info({ signal }, "Graceful shutdown started");
 
+  stopShipmentSyncScheduler();
+  stopReturnShipmentSyncScheduler();
+
   const safetyTimeout = setTimeout(() => {
     logger.error({ signal }, "Graceful shutdown timed out");
     process.exit(1);
@@ -45,6 +51,9 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     await closeHttpServer();
     httpServerStarted = false;
     logger.info({ signal }, "HTTP server closed");
+
+    await closePdfRenderer();
+    logger.info({ signal }, "PDF renderer closed");
 
     await disconnectDatabase();
     logger.info({ signal }, "Database connection closed");
@@ -81,6 +90,8 @@ async function bootstrap(): Promise<void> {
         },
         "HTTP server started"
       );
+      startShipmentSyncScheduler();
+      startReturnShipmentSyncScheduler();
     });
   } catch (error) {
     logger.fatal({ err: error, database: databaseConfig.database }, "Application startup failed before HTTP listen");

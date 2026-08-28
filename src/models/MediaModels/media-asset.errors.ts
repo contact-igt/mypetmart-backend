@@ -31,7 +31,7 @@ export class MediaAssetInUseError extends MediaAssetError {
   public constructor(usageCount: number, productIds: number[]) {
     super(
       "MEDIA_ASSET_IN_USE",
-      `This media asset is referenced by ${usageCount} Product${usageCount === 1 ? "" : "s"} (as an image and/or a video) and cannot be deleted.`,
+      `This media asset is referenced by ${usageCount} Product${usageCount === 1 ? "" : "s"} (as an image, a video, and/or a content block) and cannot be deleted.`,
       409,
       { usageCount, productIds }
     );

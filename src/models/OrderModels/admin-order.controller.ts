@@ -8,6 +8,7 @@ import {
   adminOrderListQuerySchema,
   bulkUpdateOrderStatusSchema,
   parseOrderId,
+  updateOrderShippingAddressSchema,
   updateOrderStatusSchema
 } from "./order.validation.js";
 import type { AdminOrderListQuery } from "./order.types.js";
@@ -54,6 +55,17 @@ export async function handleAdminUpdateOrderStatus(req: Request, res: Response, 
     const orderId = parseOrderId(req.params.orderId);
     const validated = updateOrderStatusSchema.parse(req.body);
     const order = await AdminOrderService.updateStatus(orderId, validated.status, requireAdmin(req));
+    sendSuccess(res, 200, order);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleAdminUpdateOrderShippingAddress(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const orderId = parseOrderId(req.params.orderId);
+    const validated = updateOrderShippingAddressSchema.parse(req.body);
+    const order = await AdminOrderService.updateShippingAddress(orderId, validated, requireAdmin(req));
     sendSuccess(res, 200, order);
   } catch (error) {
     next(error);

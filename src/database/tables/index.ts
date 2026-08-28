@@ -13,17 +13,24 @@ import { OrderNote, initializeOrderNoteTable } from "./OrderNoteTable/index.js";
 import { MediaAsset, initializeMediaAssetTable } from "./MediaAssetTable/index.js";
 import { NewsletterSubscriber, initializeNewsletterSubscriberTable } from "./NewsletterSubscriberTable/index.js";
 import { NotificationLog, initializeNotificationLogTable } from "./NotificationLogTable/index.js";
+import { OrderDocument, initializeOrderDocumentTable } from "./OrderDocumentTable/index.js";
 import { PasswordResetToken, initializePasswordResetTokenTable } from "./PasswordResetTokenTable/index.js";
 import { Payment, initializePaymentTable } from "./PaymentTable/index.js";
 import { Product, initializeProductTable } from "./ProductTable/index.js";
 import { ProductFeature, initializeProductFeatureTable } from "./ProductFeatureTable/index.js";
 import { ProductImage, initializeProductImageTable } from "./ProductImageTable/index.js";
+import { ProductContentBlock, initializeProductContentBlockTable } from "./ProductContentBlockTable/index.js";
+import { ProductFaq, initializeProductFaqTable } from "./ProductFaqTable/index.js";
 import { ProductMediaAssignment, initializeProductMediaAssignmentTable } from "./ProductMediaAssignmentTable/index.js";
+import { ProductReview, initializeProductReviewTable } from "./ProductReviewTable/index.js";
+import { ProductSpecification, initializeProductSpecificationTable } from "./ProductSpecificationTable/index.js";
 import { ProductVariant, initializeProductVariantTable } from "./ProductVariantTable/index.js";
 import { Replacement, initializeReplacementTable } from "./ReplacementTable/index.js";
 import { Refund, initializeRefundTable } from "./RefundTable/index.js";
 import { ReturnNote, initializeReturnNoteTable } from "./ReturnNoteTable/index.js";
 import { ReturnRequest, initializeReturnRequestTable } from "./ReturnRequestTable/index.js";
+import { ReturnShipment, initializeReturnShipmentTable } from "./ReturnShipmentTable/index.js";
+import { ReturnShipmentTrackingEvent, initializeReturnShipmentTrackingEventTable } from "./ReturnShipmentTrackingEventTable/index.js";
 import { Shipment, initializeShipmentTable } from "./ShipmentTable/index.js";
 import { ShipmentTrackingEvent, initializeShipmentTrackingEventTable } from "./ShipmentTrackingEventTable/index.js";
 import { StoreSetting, initializeStoreSettingTable } from "./StoreSettingTable/index.js";
@@ -42,6 +49,7 @@ export {
   NewsletterSubscriber,
   NotificationLog,
   Order,
+  OrderDocument,
   OrderItem,
   OrderNote,
   PasswordResetToken,
@@ -49,12 +57,18 @@ export {
   Product,
   ProductFeature,
   ProductImage,
+  ProductContentBlock,
+  ProductFaq,
   ProductMediaAssignment,
+  ProductReview,
+  ProductSpecification,
   ProductVariant,
   Replacement,
   Refund,
   ReturnNote,
   ReturnRequest,
+  ReturnShipment,
+  ReturnShipmentTrackingEvent,
   Shipment,
   ShipmentTrackingEvent,
   StoreSetting,
@@ -72,17 +86,24 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "ProductImage",
   "ProductFeature",
   "ProductMediaAssignment",
+  "ProductSpecification",
   "MediaAsset",
+  "ProductContentBlock",
+  "ProductFaq",
   "Cart",
   "CartItem",
   "Order",
+  "OrderDocument",
   "OrderItem",
   "OrderNote",
+  "ProductReview",
   "Payment",
   "Shipment",
   "ShipmentTrackingEvent",
   "ReturnRequest",
   "ReturnNote",
+  "ReturnShipment",
+  "ReturnShipmentTrackingEvent",
   "Refund",
   "Replacement",
   "ContactEnquiry",
@@ -106,17 +127,24 @@ export type DatabaseModelRegistry = Readonly<{
   ProductImage: typeof ProductImage;
   ProductFeature: typeof ProductFeature;
   ProductMediaAssignment: typeof ProductMediaAssignment;
+  ProductSpecification: typeof ProductSpecification;
   MediaAsset: typeof MediaAsset;
+  ProductContentBlock: typeof ProductContentBlock;
+  ProductFaq: typeof ProductFaq;
   Cart: typeof Cart;
   CartItem: typeof CartItem;
   Order: typeof Order;
+  OrderDocument: typeof OrderDocument;
   OrderItem: typeof OrderItem;
   OrderNote: typeof OrderNote;
+  ProductReview: typeof ProductReview;
   Payment: typeof Payment;
   Shipment: typeof Shipment;
   ShipmentTrackingEvent: typeof ShipmentTrackingEvent;
   ReturnRequest: typeof ReturnRequest;
   ReturnNote: typeof ReturnNote;
+  ReturnShipment: typeof ReturnShipment;
+  ReturnShipmentTrackingEvent: typeof ReturnShipmentTrackingEvent;
   Refund: typeof Refund;
   Replacement: typeof Replacement;
   ContactEnquiry: typeof ContactEnquiry;
@@ -144,17 +172,24 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeProductImageTable(sequelize);
   initializeProductFeatureTable(sequelize);
   initializeProductMediaAssignmentTable(sequelize);
+  initializeProductSpecificationTable(sequelize);
   initializeMediaAssetTable(sequelize);
+  initializeProductContentBlockTable(sequelize);
+  initializeProductFaqTable(sequelize);
   initializeCartTable(sequelize);
   initializeCartItemTable(sequelize);
   initializeOrderTable(sequelize);
+  initializeOrderDocumentTable(sequelize);
   initializeOrderItemTable(sequelize);
   initializeOrderNoteTable(sequelize);
+  initializeProductReviewTable(sequelize);
   initializePaymentTable(sequelize);
   initializeShipmentTable(sequelize);
   initializeShipmentTrackingEventTable(sequelize);
   initializeReturnRequestTable(sequelize);
   initializeReturnNoteTable(sequelize);
+  initializeReturnShipmentTable(sequelize);
+  initializeReturnShipmentTrackingEventTable(sequelize);
   initializeRefundTable(sequelize);
   initializeReplacementTable(sequelize);
   initializeContactEnquiryTable(sequelize);
@@ -175,17 +210,24 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     ProductImage,
     ProductFeature,
     ProductMediaAssignment,
+    ProductSpecification,
     MediaAsset,
+    ProductContentBlock,
+    ProductFaq,
     Cart,
     CartItem,
     Order,
+    OrderDocument,
     OrderItem,
     OrderNote,
+    ProductReview,
     Payment,
     Shipment,
     ShipmentTrackingEvent,
     ReturnRequest,
     ReturnNote,
+    ReturnShipment,
+    ReturnShipmentTrackingEvent,
     Refund,
     Replacement,
     ContactEnquiry,

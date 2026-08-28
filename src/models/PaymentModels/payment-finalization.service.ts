@@ -21,7 +21,7 @@ import type { FinalizationOutcome, NormalizedPaymentResult } from "./payment.typ
 // stock decrement).
 const TERMINAL_PAYMENT_STATUSES = new Set(["paid", "failed", "refunded", "cancelled", "partially_refunded"]);
 
-type LockedLine = {
+export type LockedLine = {
   item: OrderItem;
   product: ProductModel;
   variant: ProductVariantModel | null;
@@ -48,7 +48,11 @@ function sanitizeMetadata(result: NormalizedPaymentResult): Record<string, unkno
  * insufficient stock); the caller treats that as all-or-nothing for the
  * whole Order, never a partial decrement.
  */
-async function lockAndCheckOrderStock(orderId: number, transaction: Transaction): Promise<LockedLine[] | null> {
+// Exported for reuse by PaymentService.confirmCodOrder (COD Order
+// confirmation needs the exact same all-or-nothing locked-stock-check this
+// module's own SUCCESS path already relies on) — behavior here is otherwise
+// unchanged from before it was exported.
+export async function lockAndCheckOrderStock(orderId: number, transaction: Transaction): Promise<LockedLine[] | null> {
   const orderItems = await OrderItem.findAll({ where: { order_id: orderId }, transaction });
   const sortedItems = [...orderItems].sort((a, b) => {
     const productDelta = (a.product_id ?? 0) - (b.product_id ?? 0);

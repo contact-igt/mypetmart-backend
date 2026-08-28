@@ -6,6 +6,7 @@ import { app } from "../../src/app.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
 import { ProductFeature } from "../../src/database/tables/ProductFeatureTable/index.js";
+import { ProductFaq } from "../../src/database/tables/ProductFaqTable/index.js";
 import { ProductMediaAssignment } from "../../src/database/tables/ProductMediaAssignmentTable/index.js";
 import { ProductVariant } from "../../src/database/tables/ProductVariantTable/index.js";
 import { ProductImage } from "../../src/database/tables/ProductImageTable/index.js";
@@ -189,6 +190,7 @@ describe("Cart Backend Integration Tests", () => {
     await ProductVariant.destroy({ where: {}, truncate: false, force: true });
     await ProductFeature.destroy({ where: {}, truncate: false, force: true });
     await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
+    await ProductFaq.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     await AuthSession.destroy({ where: { user_id: [99301, 99302] }, force: true });
@@ -203,6 +205,7 @@ describe("Cart Backend Integration Tests", () => {
     await ProductVariant.destroy({ where: {}, truncate: false, force: true });
     await ProductFeature.destroy({ where: {}, truncate: false, force: true });
     await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
+    await ProductFaq.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     categoryId = await createCategory();

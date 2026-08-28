@@ -6,7 +6,10 @@ import { app } from "../../src/app.js";
 import { paymentConfig } from "../../src/config/payment.config.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
 import { Product } from "../../src/database/tables/ProductTable/index.js";
+import { ProductContentBlock } from "../../src/database/tables/ProductContentBlockTable/index.js";
+import { ProductFaq } from "../../src/database/tables/ProductFaqTable/index.js";
 import { ProductFeature } from "../../src/database/tables/ProductFeatureTable/index.js";
+import { ProductReview } from "../../src/database/tables/ProductReviewTable/index.js";
 import { ProductMediaAssignment } from "../../src/database/tables/ProductMediaAssignmentTable/index.js";
 import { Cart } from "../../src/database/tables/CartTable/index.js";
 import { CartItem } from "../../src/database/tables/CartItemTable/index.js";
@@ -25,6 +28,7 @@ import { PasswordService } from "../../src/services/auth/password.service.js";
 import { SessionService } from "../../src/services/auth/session.service.js";
 import { TokenService } from "../../src/services/auth/token.service.js";
 import { buildPayuResponseHash } from "../../src/models/PaymentModels/payu-hash.util.js";
+import { RefundService } from "../../src/models/RefundModels/refund.service.js";
 
 const CART_URL = "/api/v1/storefront/cart";
 const ADDRESS_URL = "/api/v1/storefront/addresses";
@@ -162,6 +166,7 @@ describe("Refunds", () => {
     await ReturnNote.destroy({ where: {}, truncate: false, force: true });
     await ReturnRequest.destroy({ where: {}, truncate: false, force: true });
     await Payment.destroy({ where: {}, truncate: false, force: true });
+    await ProductReview.destroy({ where: {}, truncate: false, force: true });
     await OrderItem.destroy({ where: {}, truncate: false, force: true });
     await Order.destroy({ where: {}, truncate: false, force: true });
     await CartItem.destroy({ where: {}, truncate: false, force: true });
@@ -169,6 +174,8 @@ describe("Refunds", () => {
     await Address.destroy({ where: {}, truncate: false, force: true });
     await ProductFeature.destroy({ where: {}, truncate: false, force: true });
     await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
+    await ProductContentBlock.destroy({ where: {}, truncate: false, force: true });
+    await ProductFaq.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     await AuthSession.destroy({ where: { user_id: [CUSTOMER_A_ID, ADMIN_ID, SUPER_ADMIN_ID] }, force: true });
@@ -182,6 +189,7 @@ describe("Refunds", () => {
     await ReturnNote.destroy({ where: {}, truncate: false, force: true });
     await ReturnRequest.destroy({ where: {}, truncate: false, force: true });
     await Payment.destroy({ where: {}, truncate: false, force: true });
+    await ProductReview.destroy({ where: {}, truncate: false, force: true });
     await OrderItem.destroy({ where: {}, truncate: false, force: true });
     await Order.destroy({ where: {}, truncate: false, force: true });
     await CartItem.destroy({ where: {}, truncate: false, force: true });
@@ -189,6 +197,8 @@ describe("Refunds", () => {
     await Address.destroy({ where: {}, truncate: false, force: true });
     await ProductFeature.destroy({ where: {}, truncate: false, force: true });
     await ProductMediaAssignment.destroy({ where: {}, truncate: false, force: true });
+    await ProductContentBlock.destroy({ where: {}, truncate: false, force: true });
+    await ProductFaq.destroy({ where: {}, truncate: false, force: true });
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     categoryId = await createCategory();
@@ -203,6 +213,54 @@ describe("Refunds", () => {
   // Amount authority, idempotency, balance
   // -------------------------------------------------------------------
   describe("Refund amount + idempotency", () => {
+    it("keeps PayU refund initiation available and exposes its authoritative payment type", async () => {
+      vi.mocked(fetch).mockResolvedValue(jsonResponse({ status: 1, request_id: "req_1" }));
+      const { returnId } = await createApprovedReturn(customerAToken, adminToken);
+
+      const detail = await request(app).get(`${ADMIN_RETURNS_URL}/${returnId}`).set("Authorization", `Bearer ${adminToken}`);
+      expect(detail.body.data.paymentProvider).toBe("payu");
+      expect(detail.body.data.paymentMethod).toBe("UPI");
+
+      const initiated = await request(app).post(`${ADMIN_RETURNS_URL}/${returnId}/refunds`).set("Authorization", `Bearer ${superAdminToken}`).send({});
+      expect(initiated.status).toBe(201);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("blocks COD refunds before creating a Refund or calling PayU", async () => {
+      const { orderId, returnId } = await createApprovedReturn(customerAToken, adminToken);
+      const payment = await Payment.findOne({ where: { order_id: orderId } });
+      payment!.provider = "cod";
+      payment!.method = "cod";
+      payment!.provider_order_id = null;
+      payment!.provider_payment_id = null;
+      await payment!.save();
+
+      const detail = await request(app).get(`${ADMIN_RETURNS_URL}/${returnId}`).set("Authorization", `Bearer ${adminToken}`);
+      expect(detail.body.data.paymentProvider).toBe("cod");
+      expect(detail.body.data.paymentMethod).toBe("cod");
+
+      const res = await request(app).post(`${ADMIN_RETURNS_URL}/${returnId}/refunds`).set("Authorization", `Bearer ${superAdminToken}`).send({});
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe("REFUND_COD_MANUAL_PROCESSING_REQUIRED");
+      expect(res.body.error.message).toBe("COD refunds are handled manually and cannot be initiated through the online refund flow.");
+      expect(fetch).not.toHaveBeenCalled();
+      expect(await Refund.count({ where: { return_request_id: returnId } })).toBe(0);
+
+      const unchangedPayment = await Payment.findByPk(payment!.id);
+      const unchangedOrder = await Order.findByPk(orderId);
+      expect(unchangedPayment!.status).toBe("paid");
+      expect(unchangedPayment!.refunded_at).toBeNull();
+      expect(unchangedOrder!.payment_status).toBe("paid");
+
+      await expect(
+        sequelize.transaction(async (transaction) =>
+          RefundService.createPendingCancellationRefund(SUPER_ADMIN_ID, unchangedOrder!, transaction)
+        )
+      ).rejects.toMatchObject({ code: "REFUND_COD_MANUAL_PROCESSING_REQUIRED" });
+      expect(await Refund.count({ where: { order_id: orderId } })).toBe(0);
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
     it("derives the refund amount from the OrderItem price snapshot × approved quantity — never client-supplied", async () => {
       vi.mocked(fetch).mockResolvedValue(jsonResponse({ status: 1, request_id: "req_1", mihpayid: "mihpay1" }));
       const { returnId } = await createApprovedReturn(customerAToken, adminToken, { unitPrice: "500.00", quantity: 2, returnQuantity: 2 });

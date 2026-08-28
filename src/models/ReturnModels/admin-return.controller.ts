@@ -3,6 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import { sendSuccess } from "../../utils/api-response.js";
 import { ReplacementService } from "../ReplacementModels/replacement.service.js";
 import { updateReplacementSchema } from "../ReplacementModels/replacement.validation.js";
+import { ReturnShipmentService } from "../ReturnShipmentModels/return-shipment.service.js";
 import { ReturnService } from "./return.service.js";
 import { addReturnNoteSchema, adminReviewReturnSchema, listReturnsQuerySchema, parseReturnId } from "./return.validation.js";
 
@@ -74,6 +75,20 @@ export async function handleAdminUpdateReplacement(req: Request, res: Response, 
     const input = updateReplacementSchema.parse(req.body);
     const result = await ReplacementService.updateStatus(requireAdmin(req).id, returnId, input);
     sendSuccess(res, 200, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Open to any admin (not super_admin-only) — booking a reverse pickup moves
+// no money, same "operational fact" tier as markItemReceived above. Real
+// gating is ReturnShipmentService.createForApprovedReturn's own eligibility
+// check (return must already be "approved").
+export async function handleAdminCreateReturnShipment(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const returnId = parseReturnId(req.params.returnId);
+    const result = await ReturnShipmentService.createForApprovedReturn(returnId);
+    sendSuccess(res, 201, result);
   } catch (error) {
     next(error);
   }

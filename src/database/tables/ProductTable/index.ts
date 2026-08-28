@@ -7,7 +7,11 @@ import type { Category } from "../CategoryTable/index.js";
 import type { OrderItem } from "../OrderItemTable/index.js";
 import type { ProductFeature } from "../ProductFeatureTable/index.js";
 import type { ProductImage } from "../ProductImageTable/index.js";
+import type { ProductContentBlock } from "../ProductContentBlockTable/index.js";
+import type { ProductFaq } from "../ProductFaqTable/index.js";
 import type { ProductMediaAssignment } from "../ProductMediaAssignmentTable/index.js";
+import type { ProductReview } from "../ProductReviewTable/index.js";
+import type { ProductSpecification } from "../ProductSpecificationTable/index.js";
 import type { ProductVariant } from "../ProductVariantTable/index.js";
 
 export class Product extends Model<InferAttributes<Product>, InferCreationAttributes<Product>> {
@@ -32,6 +36,9 @@ export class Product extends Model<InferAttributes<Product>, InferCreationAttrib
   declare length_cm: string | null;
   declare width_cm: string | null;
   declare height_cm: string | null;
+  declare how_to_use: string | null;
+  declare care_instructions: string | null;
+  declare safety_info: string | null;
   declare created_at: CreationOptional<Date>;
   declare updated_at: CreationOptional<Date>;
   declare deleted_at: CreationOptional<Date | null>;
@@ -40,6 +47,10 @@ export class Product extends Model<InferAttributes<Product>, InferCreationAttrib
   declare variants?: NonAttribute<ProductVariant[]>;
   declare images?: NonAttribute<ProductImage[]>;
   declare features?: NonAttribute<ProductFeature[]>;
+  declare specifications?: NonAttribute<ProductSpecification[]>;
+  declare contentBlocks?: NonAttribute<ProductContentBlock[]>;
+  declare faqs?: NonAttribute<ProductFaq[]>;
+  declare reviews?: NonAttribute<ProductReview[]>;
   declare mediaAssignments?: NonAttribute<ProductMediaAssignment[]>;
   declare cartItems?: NonAttribute<CartItem[]>;
   declare orderItems?: NonAttribute<OrderItem[]>;
@@ -84,6 +95,9 @@ export function initializeProductTable(sequelize: Sequelize): typeof Product {
       length_cm: { type: DataTypes.DECIMAL(8, 2), allowNull: true, validate: { min: 0.01 } },
       width_cm: { type: DataTypes.DECIMAL(8, 2), allowNull: true, validate: { min: 0.01 } },
       height_cm: { type: DataTypes.DECIMAL(8, 2), allowNull: true, validate: { min: 0.01 } },
+      how_to_use: { type: DataTypes.TEXT, allowNull: true },
+      care_instructions: { type: DataTypes.TEXT, allowNull: true },
+      safety_info: { type: DataTypes.TEXT, allowNull: true },
       created_at: DataTypes.DATE,
       updated_at: DataTypes.DATE,
       deleted_at: DataTypes.DATE
