@@ -31,6 +31,7 @@ export type ReturnShipmentJSON = {
   serviceType: string | null;
   status: ReturnShipmentStatus;
   providerStatus: string | null;
+  providerStatusCode: string | null;
   failureReason: ReturnShipmentFailureReasonJSON;
   trackingUrl: string | null;
   pickedUpAt: string | null;

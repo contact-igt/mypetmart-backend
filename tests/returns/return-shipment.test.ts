@@ -24,8 +24,9 @@ vi.mock("../../src/config/shipping.config.js", () => ({
 import { app } from "../../src/app.js";
 import { IThinkClient, IThinkClientError } from "../../src/models/ShipmentModels/ithink.client.js";
 import { ReturnShipmentService } from "../../src/models/ReturnShipmentModels/return-shipment.service.js";
+import { ReturnService } from "../../src/models/ReturnModels/return.service.js";
 import { connectDatabase, disconnectDatabase } from "../../src/database/index.js";
-import { AuthSession, Category, Order, OrderItem, Product, ReturnRequest, ReturnShipment, ReturnShipmentTrackingEvent, User } from "../../src/database/tables/index.js";
+import { AuthSession, Category, Order, OrderItem, Payment, Product, Refund, ReturnRequest, ReturnShipment, ReturnShipmentTrackingEvent, User } from "../../src/database/tables/index.js";
 import { PasswordService } from "../../src/services/auth/password.service.js";
 import { SessionService } from "../../src/services/auth/session.service.js";
 import { TokenService } from "../../src/services/auth/token.service.js";
@@ -51,6 +52,8 @@ describe("ReturnShipmentService (Phase F.1)", () => {
   async function clean(): Promise<void> {
     await ReturnShipmentTrackingEvent.destroy({ where: {}, force: true });
     await ReturnShipment.destroy({ where: {}, force: true });
+    await Refund.destroy({ where: {}, force: true });
+    await Payment.destroy({ where: {}, force: true });
     await ReturnRequest.destroy({ where: {}, force: true });
     await OrderItem.destroy({ where: {}, force: true });
     await Order.destroy({ where: {}, force: true });
@@ -60,7 +63,7 @@ describe("ReturnShipmentService (Phase F.1)", () => {
     await User.destroy({ where: { id: { [Op.gte]: baseId } }, force: true });
   }
 
-  async function createApprovedReturn(overrides: { status?: "requested" | "approved" | "rejected" | "resolved" } = {}) {
+  async function createApprovedReturn(overrides: { status?: "requested" | "approved" | "rejected" | "resolved" | "cancelled" } = {}) {
     counter += 1;
     const suffix = `${Date.now()}-${counter}`;
     const id = baseId + counter * 100;
@@ -81,6 +84,46 @@ describe("ReturnShipmentService (Phase F.1)", () => {
       type: "return", status: overrides.status ?? "approved", reason: "Damaged", resolution_note: null, evidence_image_key: null, evidence_image_url: null
     });
     return { order, item, returnRequest };
+  }
+
+  async function createRefund(returnRequest: ReturnRequest, status: "pending" | "processing" | "succeeded" | "failed") {
+    const payment = await Payment.create({
+      id: returnRequest.id + 6,
+      order_id: returnRequest.order_id,
+      provider: "payu",
+      provider_order_id: `PAY-${returnRequest.id}`,
+      provider_payment_id: `PAYMENT-${returnRequest.id}`,
+      status: "paid",
+      amount: "1000.00",
+      currency: "INR",
+      method: "card",
+      paid_at: new Date(),
+      failed_at: null,
+      refunded_at: null,
+      raw_payload: null
+    });
+    return Refund.create({
+      id: returnRequest.id + 7,
+      refund_number: `RFD-${returnRequest.id}`,
+      order_id: returnRequest.order_id,
+      payment_id: payment.id,
+      return_request_id: returnRequest.id,
+      provider: "payu",
+      provider_refund_token: `REFUND-TOKEN-${returnRequest.id}`,
+      provider_request_id: null,
+      provider_refund_id: status === "succeeded" ? `PROVIDER-REFUND-${returnRequest.id}` : null,
+      provider_status: null,
+      status,
+      amount: "500.00",
+      currency: "INR",
+      failure_code: null,
+      failure_message: null,
+      initiated_by_admin_id: returnRequest.user_id,
+      initiated_at: new Date(),
+      completed_at: status === "succeeded" ? new Date() : null,
+      failed_at: status === "failed" ? new Date() : null,
+      raw_payload: null
+    });
   }
 
   function mockSuccessfulProvider() {
@@ -244,6 +287,310 @@ describe("ReturnShipmentService (Phase F.1)", () => {
       expect(refreshed.providerStatus).toBe(before.providerStatus);
       expect(refreshed.trackingEvents).toHaveLength(0);
       expect(refreshed.lastSyncedAt).not.toBeNull();
+    });
+  });
+
+  describe("Admin tracking refresh", () => {
+    it("requires authentication", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+
+      const res = await request(app).post(`/api/v1/admin/return-shipments/${shipment.id}/refresh`);
+
+      expect(res.status).toBe(401);
+    });
+
+    it("rejects a customer token", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      const customerToken = await mintCustomerToken(baseId + 10, "rs-refresh-customer@example.com");
+
+      const res = await request(app)
+        .post(`/api/v1/admin/return-shipments/${shipment.id}/refresh`)
+        .set("Authorization", `Bearer ${customerToken}`);
+
+      expect([401, 403]).toContain(res.status);
+    });
+
+    it("refreshes through the Admin endpoint without creating another shipment", async () => {
+      const { order, returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      const adminToken = await mintAdminToken(baseId + 11, "rs-refresh-admin@example.com");
+      vi.spyOn(IThinkClient, "track").mockResolvedValue({
+        awb: shipment.awbNumber!, courier: "Delhivery", currentStatus: "Picked Up", currentStatusCode: "PU",
+        events: [{ status: "Picked Up", statusCode: "PU", location: "Mumbai", message: "Collected", eventAt: "2026-08-20 10:00:00" }]
+      });
+
+      const res = await request(app)
+        .post(`/api/v1/admin/return-shipments/${shipment.id}/refresh`)
+        .set("Authorization", `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ id: shipment.id, status: "picked_up", awbNumber: shipment.awbNumber, providerStatusCode: "PU" });
+      expect(await ReturnShipment.count({ where: { return_request_id: returnRequest.id } })).toBe(1);
+      await order.reload();
+      expect(order.status).toBe("return_requested");
+      expect(order.payment_status).toBe("paid");
+    });
+
+    it("accepts an empty tracking response without fabricating state", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      const before = await ReturnShipmentService.getById(shipment.id);
+      const adminToken = await mintAdminToken(baseId + 12, "rs-empty-admin@example.com");
+      vi.spyOn(IThinkClient, "track").mockResolvedValue({ awb: shipment.awbNumber!, courier: null, currentStatus: null, currentStatusCode: null, events: [] });
+
+      const res = await request(app)
+        .post(`/api/v1/admin/return-shipments/${shipment.id}/refresh`)
+        .set("Authorization", `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ id: shipment.id, status: before.status, providerStatus: before.providerStatus, trackingEvents: [] });
+      expect(res.body.data.lastSyncedAt).not.toBeNull();
+    });
+
+    it("rejects refresh when no AWB is assigned", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      await ReturnShipment.update({ awb_number: null }, { where: { id: shipment.id } });
+      const adminToken = await mintAdminToken(baseId + 13, "rs-no-awb-admin@example.com");
+      const trackSpy = vi.spyOn(IThinkClient, "track");
+
+      const res = await request(app)
+        .post(`/api/v1/admin/return-shipments/${shipment.id}/refresh`)
+        .set("Authorization", `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe("RETURN_SHIPMENT_ACTION_NOT_ALLOWED");
+      expect(trackSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not regress a terminal return shipment", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      await ReturnShipment.update({ status: "delivered" }, { where: { id: shipment.id } });
+      const adminToken = await mintAdminToken(baseId + 14, "rs-terminal-admin@example.com");
+      vi.spyOn(IThinkClient, "track").mockResolvedValue({ awb: shipment.awbNumber!, courier: "Delhivery", currentStatus: "Picked Up", currentStatusCode: "PU", events: [] });
+
+      const res = await request(app)
+        .post(`/api/v1/admin/return-shipments/${shipment.id}/refresh`)
+        .set("Authorization", `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe("delivered");
+    });
+  });
+
+  describe("Return cancellation", () => {
+    it("requires authentication and ownership on the customer cancellation endpoint", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "requested" });
+      const unauthenticated = await request(app).post(`/api/v1/storefront/returns/${returnRequest.id}/cancel`).send({});
+      expect(unauthenticated.status).toBe(401);
+
+      const otherCustomer = await mintCustomerToken(baseId + 30, "rs-other-customer@example.com");
+      const forbidden = await request(app)
+        .post(`/api/v1/storefront/returns/${returnRequest.id}/cancel`)
+        .set("Authorization", `Bearer ${otherCustomer}`)
+        .send({});
+      expect(forbidden.status).toBe(404);
+      expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("requested");
+    });
+
+    it("cancels a return with no reverse shipment without changing order or payment state", async () => {
+      const { order, returnRequest } = await createApprovedReturn({ status: "approved" });
+      const before = { status: order.status, fulfilment_status: order.fulfilment_status, payment_status: order.payment_status };
+      const admin = await mintAdminToken(baseId + 20, "rs-cancel-admin@example.com");
+      const res = await request(app).post(`/api/v1/admin/returns/${returnRequest.id}/cancel`).set("Authorization", `Bearer ${admin}`).send({ reason: "Customer changed their mind" });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ status: "cancelled", cancellationReason: "Customer changed their mind", cancellationSource: "admin" });
+      await order.reload();
+      await returnRequest.reload();
+      expect(order).toMatchObject(before);
+      expect(returnRequest.status).toBe("cancelled");
+      expect(await Refund.count({ where: { return_request_id: returnRequest.id } })).toBe(0);
+      expect(await ReturnShipment.count()).toBe(0);
+    });
+
+    it.each(["requested", "approved"] as const)("allows an eligible %s return with no shipment", async (status) => {
+      const { returnRequest } = await createApprovedReturn({ status });
+      expect((await ReturnService.getAdminReturn(returnRequest.id)).canCancel).toBe(true);
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).resolves.toMatchObject({ status: "cancelled", canCancel: false });
+    });
+
+    it.each(["rejected", "resolved"] as const)("blocks a %s return", async (status) => {
+      const { returnRequest } = await createApprovedReturn({ status });
+      expect((await ReturnService.getAdminReturn(returnRequest.id)).canCancel).toBe(false);
+      await expect(ReturnService.cancelAdminReturn(baseId + 32, returnRequest.id)).rejects.toMatchObject({ code: "RETURN_CANCELLATION_NOT_ALLOWED" });
+    });
+
+    it.each(["processing", "succeeded"] as const)("blocks cancellation when a %s refund exists", async (status) => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      await createRefund(returnRequest, status);
+      expect((await ReturnService.getAdminReturn(returnRequest.id)).canCancel).toBe(false);
+      await expect(ReturnService.cancelAdminReturn(baseId + 33, returnRequest.id)).rejects.toMatchObject({ code: "RETURN_CANCELLATION_NOT_ALLOWED" });
+      expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("approved");
+    });
+
+    it("allows local cancellation for a shipment without an AWB", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      await ReturnShipment.update({ awb_number: null }, { where: { id: shipment.id } });
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel");
+
+      expect((await ReturnService.getAdminReturn(returnRequest.id)).canCancel).toBe(true);
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).resolves.toMatchObject({ status: "cancelled" });
+      expect(cancelSpy).not.toHaveBeenCalled();
+      expect((await ReturnShipment.findByPk(shipment.id))?.status).toBe("approved");
+    });
+
+    it("treats an already-cancelled return as an idempotent success", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "cancelled" });
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel");
+
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).resolves.toMatchObject({ status: "cancelled", canCancel: false });
+      expect(cancelSpy).not.toHaveBeenCalled();
+    });
+
+    it("allows the owning customer to cancel an open return", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "requested" });
+      const { session } = await SessionService.createSession(returnRequest.user_id, "customer", null, null);
+      const customer = TokenService.generateAccessToken({ sub: String(returnRequest.user_id), sessionId: String(session.id), role: "customer", sessionType: "customer" });
+      const res = await request(app).post(`/api/v1/storefront/returns/${returnRequest.id}/cancel`).set("Authorization", `Bearer ${customer}`).send({ reason: "No longer needed" });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ status: "cancelled", cancellationSource: "customer" });
+    });
+
+    it("cancels a pre-pickup reverse shipment exactly once", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel").mockResolvedValue();
+      const admin = await mintAdminToken(baseId + 21, "rs-cancel-provider-admin@example.com");
+      const first = await request(app).post(`/api/v1/admin/returns/${returnRequest.id}/cancel`).set("Authorization", `Bearer ${admin}`).send({});
+      const second = await request(app).post(`/api/v1/admin/returns/${returnRequest.id}/cancel`).set("Authorization", `Bearer ${admin}`).send({});
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(cancelSpy).toHaveBeenCalledTimes(1);
+      expect(cancelSpy).toHaveBeenCalledWith(shipment.awbNumber);
+      expect((await ReturnShipment.findByPk(shipment.id))?.status).toBe("cancelled");
+      expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("cancelled");
+    });
+
+    it("rolls back local state when the provider rejects cancellation", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      vi.spyOn(IThinkClient, "cancel").mockRejectedValue(new IThinkClientError("CANCELLATION_REJECTED", "AWB cannot be cancelled"));
+      await expect(ReturnService.cancelAdminReturn(baseId + 22, returnRequest.id)).rejects.toMatchObject({ code: "RETURN_CANCELLATION_PROVIDER_ERROR" });
+      expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("approved");
+      expect((await ReturnShipment.findByPk(shipment.id))?.status).toBe("approved");
+    });
+
+    it.each([
+      ["malformed", "<html><body>Bad gateway</body></html>", "text/html"],
+      ["empty", "[]", "application/json"],
+      ["ambiguous", JSON.stringify({ status: "success", data: { "1": { status: "pending" } } }), "application/json"]
+    ] as const)("rolls back local state for a provider %s response", async (_kind, body, contentType) => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, { status: 200, headers: { "content-type": contentType } })));
+
+      await expect(ReturnService.cancelAdminReturn(baseId + 35, returnRequest.id)).rejects.toMatchObject({ code: "RETURN_CANCELLATION_PROVIDER_ERROR" });
+      expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("approved");
+      expect((await ReturnShipment.findByPk(shipment.id))?.status).toBe("approved");
+    });
+
+    it.each([
+      ["pickup_scheduled", "REV Manifested", true],
+      ["picked_up", "REV Picked Up", false],
+      ["in_transit", "REV In Transit", false],
+      ["in_transit", "REV Out For Delivery", false],
+      ["delivered", "Delivered", false],
+      ["delivered", "REV Closed", false],
+      ["failed", "REV Failed", false],
+      ["pending", "REV Unknown", false]
+    ] as const)("applies the cancellation rule for %s / %s", async (localStatus, providerStatus, expectedAllowed = false) => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      await ReturnShipment.update({ status: localStatus, provider_status: providerStatus }, { where: { id: shipment.id } });
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel").mockResolvedValue();
+      expect((await ReturnService.getAdminReturn(returnRequest.id)).canCancel).toBe(expectedAllowed);
+      if (expectedAllowed) {
+        await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).resolves.toMatchObject({ status: "cancelled" });
+        expect(cancelSpy).toHaveBeenCalledTimes(1);
+      } else {
+        await expect(ReturnService.cancelAdminReturn(baseId + 36, returnRequest.id)).rejects.toMatchObject({ code: "RETURN_CANCELLATION_NOT_ALLOWED" });
+        expect(cancelSpy).not.toHaveBeenCalled();
+        expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("approved");
+      }
+    });
+
+    it("syncs a provider-already-cancelled reverse shipment without calling iThink", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      await ReturnShipment.update({ provider_status: "REV Cancelled" }, { where: { id: shipment.id } });
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel");
+      await ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id);
+      expect(cancelSpy).not.toHaveBeenCalled();
+      expect((await ReturnShipment.findByPk(shipment.id))?.status).toBe("cancelled");
+      expect((await ReturnShipment.findByPk(shipment.id))?.cancelled_at).not.toBeNull();
+      expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("cancelled");
+    });
+
+    it("keeps cancellation idempotent and preserves reverse tracking history", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      await ReturnShipmentTrackingEvent.create({
+        id: shipment.id + 100,
+        return_shipment_id: shipment.id,
+        dedupe_key: `history-${shipment.id}`,
+        provider_status: "Manifested",
+        provider_status_code: "MF",
+        normalized_status: "pickup_scheduled",
+        location: "Mumbai",
+        message: "Manifested",
+        event_at: new Date()
+      });
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel").mockResolvedValue();
+      await ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id);
+      await ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id);
+
+      expect(cancelSpy).toHaveBeenCalledTimes(1);
+      expect(await ReturnShipmentTrackingEvent.count({ where: { return_shipment_id: shipment.id } })).toBe(1);
+      expect(await ReturnShipment.count({ where: { return_request_id: returnRequest.id } })).toBe(1);
+    });
+
+    it("serializes customer and admin cancellation to one provider call", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel").mockImplementation(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      const { session } = await SessionService.createSession(returnRequest.user_id, "customer", null, null);
+      const customer = TokenService.generateAccessToken({ sub: String(returnRequest.user_id), sessionId: String(session.id), role: "customer", sessionType: "customer" });
+      const admin = await mintAdminToken(baseId + 38, "rs-concurrent-admin@example.com");
+
+      const [customerResult, adminResult] = await Promise.all([
+        request(app).post(`/api/v1/storefront/returns/${returnRequest.id}/cancel`).set("Authorization", `Bearer ${customer}`).send({}),
+        request(app).post(`/api/v1/admin/returns/${returnRequest.id}/cancel`).set("Authorization", `Bearer ${admin}`).send({})
+      ]);
+
+      expect([customerResult.status, adminResult.status].every((status) => status === 200)).toBe(true);
+      expect(cancelSpy).toHaveBeenCalledTimes(1);
+      expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("cancelled");
+      expect((await ReturnShipment.findByPk(shipment.id))?.status).toBe("cancelled");
     });
   });
 

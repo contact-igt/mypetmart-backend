@@ -38,7 +38,8 @@ const SCHEMA_ALTER_MIGRATION_NAMES = [
   "052-add-usage-care-safety-to-products.ts",
   "056-add-review-source-to-product-reviews.ts",
   "058-add-shipment-eta-fields.ts",
-  "062-add-return-shipment-notification-events.ts"
+  "062-add-return-shipment-notification-events.ts",
+  "063-add-return-cancellation.ts"
 ] as const;
 export const MIGRATION_FILE_NAMES = [
   ...INITIAL_SCHEMA_TABLES.map((table) => `${table.migrationName}.ts`),

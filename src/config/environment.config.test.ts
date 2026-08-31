@@ -101,6 +101,7 @@ describe("environment configuration", () => {
       createValidEnvironment({
         BREEZE_MERCHANT_ID: "mypetmart",
         BREEZE_ENVIRONMENT: "smb-release",
+        BREEZE_SHOP_URL: "https://mypetmart.org",
         BREEZE_WEBHOOK_SECRET: "breeze_webhook_secret_for_tests",
         BREEZE_PUBLIC_KEY: "breeze-public-key-placeholder"
       })
@@ -108,6 +109,7 @@ describe("environment configuration", () => {
 
     expect(config.BREEZE_MERCHANT_ID).toBe("mypetmart");
     expect(config.BREEZE_ENVIRONMENT).toBe("smb-release");
+    expect(config.BREEZE_SHOP_URL).toBe("https://mypetmart.org");
     expect(config.BREEZE_WEBHOOK_SECRET).toBe("breeze_webhook_secret_for_tests");
     expect(config.BREEZE_PUBLIC_KEY).toBe("breeze-public-key-placeholder");
   });

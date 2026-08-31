@@ -9,6 +9,7 @@ import { Refund } from "../../database/tables/RefundTable/index.js";
 import { Replacement } from "../../database/tables/ReplacementTable/index.js";
 import { ReturnNote } from "../../database/tables/ReturnNoteTable/index.js";
 import { ReturnRequest } from "../../database/tables/ReturnRequestTable/index.js";
+import { ReturnShipment } from "../../database/tables/ReturnShipmentTable/index.js";
 import { Shipment } from "../../database/tables/ShipmentTable/index.js";
 import { ShipmentTrackingEvent } from "../../database/tables/ShipmentTrackingEventTable/index.js";
 import { User } from "../../database/tables/UserTable/index.js";
@@ -18,11 +19,14 @@ import { formatMoney } from "../../utils/product-money.js";
 import { getValidNextOrderStatuses } from "../OrderModels/order.constants.js";
 import { OrderNotFoundError } from "../OrderModels/order.errors.js";
 import { ReplacementService } from "../ReplacementModels/replacement.service.js";
-import { ReturnShipmentService } from "../ReturnShipmentModels/return-shipment.service.js";
+import { classifyIThinkReverseCancellationStage, ReturnShipmentService } from "../ReturnShipmentModels/return-shipment.service.js";
+import { IThinkClient, IThinkClientError } from "../ShipmentModels/ithink.client.js";
 import { ShipmentService } from "../ShipmentModels/shipment.service.js";
 import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import {
   ReturnAlreadyReviewedError,
+  ReturnCancellationNotAllowedError,
+  ReturnCancellationProviderError,
   ReturnItemAlreadyReceivedError,
   ReturnItemNotReceivedError,
   ReturnItemReceiptNotApplicableError,
@@ -66,6 +70,9 @@ function toJSON(returnRequest: ReturnRequest, order: Order, orderItem: OrderItem
     resolutionNote: returnRequest.resolution_note,
     requestedAt: returnRequest.requested_at.toISOString(),
     resolvedAt: returnRequest.resolved_at ? returnRequest.resolved_at.toISOString() : null,
+    cancelledAt: returnRequest.cancelled_at ? returnRequest.cancelled_at.toISOString() : null,
+    cancellationReason: returnRequest.cancellation_reason,
+    cancellationSource: returnRequest.cancellation_source,
     itemReceivedAt: returnRequest.item_received_at ? returnRequest.item_received_at.toISOString() : null,
     refunds: refunds.map((refund) => ({
       id: refund.id,
@@ -81,6 +88,109 @@ function toJSON(returnRequest: ReturnRequest, order: Order, orderItem: OrderItem
     replacement: replacement ? ReplacementService.toJSON(replacement, shipment ? ShipmentService.toJSON(shipment) : null) : null,
     returnShipment
   };
+}
+
+type ReturnCancellationActor = { id: number; source: "customer" | "admin" };
+
+const RETURN_CANCELLABLE_STATUSES = new Set(["requested", "approved"]);
+const ACTIVE_REFUND_STATUS_VALUES = ["pending", "processing", "succeeded"] as const;
+const ACTIVE_REFUND_STATUSES: ReadonlySet<string> = new Set(ACTIVE_REFUND_STATUS_VALUES);
+
+type ReturnCancellationEligibilityInput = {
+  status: ReturnRequest["status"];
+  refunds: Array<{ status: Refund["status"] }>;
+  replacement: Replacement | null;
+  returnShipment: Pick<ReturnShipmentJSON, "status" | "providerStatus" | "awbNumber"> | null;
+};
+
+function getReturnCancellationBlockReason(input: ReturnCancellationEligibilityInput): string | null {
+  if (!RETURN_CANCELLABLE_STATUSES.has(input.status)) {
+    return `the current return status is '${input.status}'.`;
+  }
+  if (input.refunds.some((refund) => ACTIVE_REFUND_STATUSES.has(refund.status))) {
+    return "a refund is already pending, processing, or completed.";
+  }
+  if (input.replacement) {
+    return "replacement processing has already started.";
+  }
+  if (!input.returnShipment || input.returnShipment.status === "cancelled") return null;
+
+  const stage = classifyIThinkReverseCancellationStage(input.returnShipment.providerStatus, input.returnShipment.status);
+  if (stage === "cancelled" || !input.returnShipment.awbNumber || stage === "pre_pickup") return null;
+  return "the reverse shipment has already progressed beyond the cancellable pickup stage.";
+}
+
+async function cancelReturnRequest(actor: ReturnCancellationActor, returnId: number, reason: string | undefined, customerId?: number): Promise<void> {
+  try {
+    await sequelize.transaction(async (transaction) => {
+      const returnRequest = await ReturnRequest.findOne({
+        where: customerId === undefined ? { id: returnId } : { id: returnId, user_id: customerId },
+        transaction,
+        lock: transaction.LOCK.UPDATE
+      });
+      if (!returnRequest) throw new ReturnRequestNotFoundError(returnId);
+
+      // Idempotency is intentionally checked before looking at the shipment:
+      // a completed return cancellation must never call iThink a second time.
+      if (returnRequest.status === "cancelled") return;
+      const activeRefund = await Refund.findOne({
+        where: { return_request_id: returnRequest.id, status: { [Op.in]: ACTIVE_REFUND_STATUS_VALUES } },
+        transaction,
+        lock: transaction.LOCK.UPDATE
+      });
+      // A replacement row means stock allocation has already begun. Do not
+      // cancel a return while that irreversible replacement flow is active.
+      const replacement = await Replacement.findOne({ where: { return_request_id: returnRequest.id }, transaction, lock: transaction.LOCK.UPDATE });
+
+      const returnShipment = await ReturnShipment.findOne({ where: { return_request_id: returnRequest.id }, transaction, lock: transaction.LOCK.UPDATE });
+      const blockReason = getReturnCancellationBlockReason({
+        status: returnRequest.status,
+        refunds: activeRefund ? [activeRefund] : [],
+        replacement,
+        returnShipment: returnShipment
+          ? { status: returnShipment.status, providerStatus: returnShipment.provider_status, awbNumber: returnShipment.awb_number }
+          : null
+      });
+      if (blockReason) throw new ReturnCancellationNotAllowedError(blockReason);
+
+      const now = new Date();
+      if (returnShipment && returnShipment.status === "cancelled") {
+        returnShipment.cancelled_at ??= now;
+        await returnShipment.save({ transaction });
+      } else if (returnShipment) {
+        const stage = classifyIThinkReverseCancellationStage(returnShipment.provider_status, returnShipment.status);
+        if (stage === "cancelled") {
+          returnShipment.status = "cancelled";
+          returnShipment.cancelled_at ??= now;
+          await returnShipment.save({ transaction });
+        } else if (returnShipment.awb_number) {
+          // The row lock is held for the duration of this transaction. A
+          // simultaneous customer/admin cancellation therefore waits, sees
+          // the cancelled ReturnRequest, and does not make a second provider call.
+          await IThinkClient.cancel(returnShipment.awb_number);
+          returnShipment.status = "cancelled";
+          returnShipment.cancelled_at = now;
+          returnShipment.provider_status = "Cancelled";
+          await returnShipment.save({ transaction });
+        }
+        // No AWB means no provider cancellation is required. The local
+        // return can still be cancelled while the reverse row remains intact.
+      }
+
+      returnRequest.status = "cancelled";
+      returnRequest.cancelled_at = now;
+      returnRequest.cancellation_reason = reason ?? `Return cancelled by ${actor.source}.`;
+      returnRequest.cancelled_by_user_id = actor.id;
+      returnRequest.cancellation_source = actor.source;
+      await returnRequest.save({ transaction });
+    });
+  } catch (error) {
+    if (error instanceof ReturnCancellationNotAllowedError || error instanceof ReturnCancellationProviderError) throw error;
+    if (error instanceof IThinkClientError) {
+      throw new ReturnCancellationProviderError(error.message, error.uncertain);
+    }
+    throw error;
+  }
 }
 
 async function loadDetail(returnRequest: ReturnRequest): Promise<ReturnRequestDetailJSON> {
@@ -109,6 +219,12 @@ async function loadDetail(returnRequest: ReturnRequest): Promise<ReturnRequestDe
 
   return {
     ...base,
+    canCancel: getReturnCancellationBlockReason({
+      status: returnRequest.status,
+      refunds,
+      replacement,
+      returnShipment
+    }) === null,
     maxRefundableAmount,
     currency: order.currency,
     paymentProvider: payment?.provider ?? null,
@@ -232,6 +348,11 @@ export const ReturnService = {
     return loadDetail(returnRequest);
   },
 
+  async cancelCustomerReturn(caller: ReturnCaller, returnId: number, reason?: string): Promise<ReturnRequestDetailJSON> {
+    await cancelReturnRequest({ id: caller.userId, source: "customer" }, returnId, reason, caller.userId);
+    return this.getCustomerReturn(caller, returnId);
+  },
+
   async listAdminReturns(params: ListReturnsParams): Promise<ListReturnsResultJSON> {
     const where: Record<string, unknown> = {};
     if (params.status) {
@@ -247,6 +368,11 @@ export const ReturnService = {
       throw new ReturnRequestNotFoundError(returnId);
     }
     return loadDetail(returnRequest);
+  },
+
+  async cancelAdminReturn(adminId: number, returnId: number, reason?: string): Promise<ReturnRequestDetailJSON> {
+    await cancelReturnRequest({ id: adminId, source: "admin" }, returnId, reason);
+    return this.getAdminReturn(returnId);
   },
 
   /**

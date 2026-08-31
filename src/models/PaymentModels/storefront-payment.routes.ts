@@ -2,7 +2,7 @@ import { Router } from "express";
 
 import { authRateLimiter } from "../../middlewares/auth/rate-limiter.middleware.js";
 import { optionalAuthenticate } from "../../middlewares/auth/optional-authenticate.middleware.js";
-import { handleConfirmCodOrder, handleGetPaymentStatus, handleInitiatePayment } from "./storefront-payment.controller.js";
+import { handleConfirmCodOrder, handleGetPaymentStatus, handleInitiateBreezeCheckout, handleInitiatePayment } from "./storefront-payment.controller.js";
 
 export const storefrontPaymentRouter = Router();
 
@@ -13,9 +13,18 @@ storefrontPaymentRouter.post("/initiate", authRateLimiter, optionalAuthenticate(
   void handleInitiatePayment(req, res, next);
 });
 
+// Breeze online payment initiation — same auth shape/precedent as /initiate.
+// Prepares a provider:"breeze" Payment Attempt and returns the
+// server-authoritative values the storefront feeds into the Breeze Web SDK
+// (sendOTP -> verifyOTP -> startPayment). PayU's /initiate is untouched.
+storefrontPaymentRouter.post("/breeze/initiate", authRateLimiter, optionalAuthenticate(), (req, res, next) => {
+  void handleInitiateBreezeCheckout(req, res, next);
+});
+
 // Browser-return reconciliation surface — same auth shape/precedent as
 // /initiate (POST body, not a numeric id in the URL, so a Payment can never
-// be looked up by id alone without proving Order ownership first).
+// be looked up by id alone without proving Order ownership first). Shared by
+// PayU and Breeze — getPaymentStatus is provider-neutral.
 storefrontPaymentRouter.post("/status", authRateLimiter, optionalAuthenticate(), (req, res, next) => {
   void handleGetPaymentStatus(req, res, next);
 });

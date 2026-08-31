@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 import { authenticate } from "../../middlewares/auth/authenticate.middleware.js";
-import { handleCreateReturnRequest, handleGetCustomerReturn, handleListCustomerReturns } from "./storefront-return.controller.js";
+import { handleCancelCustomerReturn, handleCreateReturnRequest, handleGetCustomerReturn, handleListCustomerReturns } from "./storefront-return.controller.js";
 
 export const storefrontReturnRouter = Router();
 
@@ -20,4 +20,8 @@ storefrontReturnRouter.get("/", (req, res, next) => {
 
 storefrontReturnRouter.get("/:returnId", (req, res, next) => {
   void handleGetCustomerReturn(req, res, next);
+});
+
+storefrontReturnRouter.post("/:returnId/cancel", (req, res, next) => {
+  void handleCancelCustomerReturn(req, res, next);
 });

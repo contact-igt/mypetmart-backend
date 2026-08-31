@@ -227,6 +227,15 @@ describe("iThink Logistics V3 request contracts", () => {
     expect(second.data.shipments[0]).toMatchObject({ awb_numbers: "AWB123", ndr_action: "1", reattempt_date: "2026-08-20", reattempt_time: "14:00" });
   });
 
+  it.each([
+    ["top-level empty array", [], "INVALID_RESPONSE"],
+    ["empty cancellation data", { status: "success", data: [] }, "CANCELLATION_REJECTED"],
+    ["ambiguous cancellation result", { status: "success", data: { "1": { status: "pending" } } }, "CANCELLATION_REJECTED"]
+  ] as const)("rejects a cancellation response with %s", async (_label, body, expectedCode) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(body)));
+    await expect(IThinkClient.cancel("AWB123")).rejects.toMatchObject({ code: expectedCode });
+  });
+
   it("distinguishes no-response uncertainty from an explicit provider rejection", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("timeout")));
     await expect(IThinkClient.cancel("AWB123")).rejects.toMatchObject({ uncertain: true });

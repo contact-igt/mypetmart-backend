@@ -1,9 +1,17 @@
 import { Router } from "express";
 
 import { authenticate } from "../../middlewares/auth/authenticate.middleware.js";
-import { handleAdminAddReturnNote, handleAdminCreateReturnShipment, handleAdminGetReturn, handleAdminListReturns, handleAdminMarkItemReceived, handleAdminReviewReturn, handleAdminUpdateReplacement } from "./admin-return.controller.js";
+import { handleAdminAddReturnNote, handleAdminCancelReturn, handleAdminCreateReturnShipment, handleAdminGetReturn, handleAdminListReturns, handleAdminMarkItemReceived, handleAdminRefreshReturnShipment, handleAdminReviewReturn, handleAdminUpdateReplacement } from "./admin-return.controller.js";
 
 export const adminReturnRouter = Router();
+
+export const adminReturnShipmentRouter = Router();
+
+adminReturnShipmentRouter.use(authenticate("admin"));
+
+adminReturnShipmentRouter.post("/:shipmentId/refresh", (req, res, next) => {
+  void handleAdminRefreshReturnShipment(req, res, next);
+});
 
 adminReturnRouter.use(authenticate("admin"));
 
@@ -13,6 +21,10 @@ adminReturnRouter.get("/", (req, res, next) => {
 
 adminReturnRouter.get("/:returnId", (req, res, next) => {
   void handleAdminGetReturn(req, res, next);
+});
+
+adminReturnRouter.post("/:returnId/cancel", (req, res, next) => {
+  void handleAdminCancelReturn(req, res, next);
 });
 
 // Approve/reject a Return request. Open to both admin and super_admin —
