@@ -7,6 +7,7 @@ import type { ReturnShipmentJSON } from "../ReturnShipmentModels/return-shipment
 // Refunds report §22). Every Return caller is therefore an authenticated
 // customer; unlike PaymentInitiationCaller there is no "guest" variant.
 export type ReturnCaller = { userId: number };
+export type ReturnCancellationSource = "customer" | "admin";
 
 export type CreateReturnRequestInput = {
   orderId: number;
@@ -51,6 +52,9 @@ export type ReturnRequestJSON = {
   resolutionNote: string | null;
   requestedAt: string;
   resolvedAt: string | null;
+  cancelledAt: string | null;
+  cancellationReason: string | null;
+  cancellationSource: ReturnCancellationSource | null;
   itemReceivedAt: string | null;
   refunds: ReturnRefundSummaryJSON[];
   replacement: ReplacementJSON | null;
@@ -62,6 +66,7 @@ export type ReturnRequestJSON = {
 
 export type ReturnRequestDetailJSON = ReturnRequestJSON & {
   notes: ReturnNoteJSON[];
+  canCancel: boolean;
   paymentProvider: string | null;
   paymentMethod: string | null;
   // Backend-computed, echoed back for the Admin refund-initiation UI —

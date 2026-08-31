@@ -32,8 +32,12 @@ export const addReturnNoteSchema = z.object({
   message: z.string().trim().min(1, "A note message is required.").max(2000, "Note must be 2000 characters or fewer.")
 });
 
+export const cancelReturnSchema = z.object({
+  reason: z.string().trim().min(1, "A cancellation reason is required.").max(2000, "Reason must be 2000 characters or fewer.").optional()
+}).default({});
+
 export const listReturnsQuerySchema = z.object({
-  status: z.enum(["requested", "approved", "rejected", "resolved"]).optional(),
+  status: z.enum(["requested", "approved", "rejected", "resolved", "cancelled"]).optional(),
   resolution: z.enum(["refund", "replacement"]).optional(),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(20)

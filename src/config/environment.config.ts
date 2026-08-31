@@ -212,6 +212,11 @@ const environmentSchema = z
     BREEZE_ENVIRONMENT: optionalTrimmedStringSchema,
     BREEZE_WEBHOOK_SECRET: optionalTrimmedStringSchema,
     BREEZE_PUBLIC_KEY: optionalTrimmedStringSchema,
+    // Breeze Web SDK `shopUrl` init parameter (Breeze team confirmed:
+    // https://mypetmart.org). Optional at the env layer — payment.config.ts
+    // falls back to STOREFRONT_ORIGIN when unset. Not a secret: it is passed
+    // to the browser SDK's initiate() call.
+    BREEZE_SHOP_URL: z.preprocess(optionalString, z.url("BREEZE_SHOP_URL must be a valid URL.").optional()),
     // PayU Hosted Checkout form-post endpoint. Optional — payment.config.ts
     // falls back to PayU's published test/live URL by NODE_ENV when unset.
     PAYMENT_GATEWAY_URL: z.preprocess(optionalString, z.url("PAYMENT_GATEWAY_URL must be a valid URL.").optional()),

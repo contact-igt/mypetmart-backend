@@ -4,8 +4,9 @@ import { sendSuccess } from "../../utils/api-response.js";
 import { ReplacementService } from "../ReplacementModels/replacement.service.js";
 import { updateReplacementSchema } from "../ReplacementModels/replacement.validation.js";
 import { ReturnShipmentService } from "../ReturnShipmentModels/return-shipment.service.js";
+import { parseReturnShipmentId } from "../ReturnShipmentModels/return-shipment.validation.js";
 import { ReturnService } from "./return.service.js";
-import { addReturnNoteSchema, adminReviewReturnSchema, listReturnsQuerySchema, parseReturnId } from "./return.validation.js";
+import { addReturnNoteSchema, adminReviewReturnSchema, cancelReturnSchema, listReturnsQuerySchema, parseReturnId } from "./return.validation.js";
 
 function requireAdmin(req: Request): { id: number } {
   // Guaranteed by authenticate("admin") running ahead of every route in
@@ -89,6 +90,27 @@ export async function handleAdminCreateReturnShipment(req: Request, res: Respons
     const returnId = parseReturnId(req.params.returnId);
     const result = await ReturnShipmentService.createForApprovedReturn(returnId);
     sendSuccess(res, 201, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleAdminRefreshReturnShipment(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const shipmentId = parseReturnShipmentId(req.params.shipmentId);
+    const result = await ReturnShipmentService.refresh(shipmentId);
+    sendSuccess(res, 200, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleAdminCancelReturn(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const returnId = parseReturnId(req.params.returnId);
+    const { reason } = cancelReturnSchema.parse(req.body);
+    const result = await ReturnService.cancelAdminReturn(requireAdmin(req).id, returnId, reason);
+    sendSuccess(res, 200, result);
   } catch (error) {
     next(error);
   }

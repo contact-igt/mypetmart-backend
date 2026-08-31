@@ -161,6 +161,11 @@ describe("iThink Logistics V3 request contracts", () => {
   // Phase E.3 — a freshly-created/manifested AWB the courier hasn't scanned
   // yet is not a provider failure; see ithink.client.ts's track() comment.
   describe("Empty tracking data (AWB created, no scans yet)", () => {
+    it("accepts a top-level empty array as a valid empty tracking response", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse([])));
+      await expect(IThinkClient.track("AWB123")).resolves.toEqual({ awb: "AWB123", courier: null, currentStatus: null, currentStatusCode: null, events: [] });
+    });
+
     it("resolves with events=[] and no fabricated status when data is an empty array", async () => {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: [] })));
       await expect(IThinkClient.track("AWB123")).resolves.toEqual({ awb: "AWB123", courier: null, currentStatus: null, currentStatusCode: null, events: [] });
@@ -186,6 +191,21 @@ describe("iThink Logistics V3 request contracts", () => {
       await expect(IThinkClient.track("AWB123")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
     });
 
+    it("still throws INVALID_RESPONSE for an HTML body", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<!doctype html><html><body>Bad gateway</body></html>", { status: 200, headers: { "content-type": "text/html" } })));
+      await expect(IThinkClient.track("AWB123")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    });
+
+    it("still throws INVALID_RESPONSE for an empty HTTP body", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 200, headers: { "content-type": "application/json" } })));
+      await expect(IThinkClient.track("AWB123")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    });
+
+    it("still throws INVALID_RESPONSE for an unexpected JSON primitive", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse("success")));
+      await expect(IThinkClient.track("AWB123")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    });
+
     it("still throws PROVIDER_UNAVAILABLE for a real HTTP failure", async () => {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "error" }, 503)));
       await expect(IThinkClient.track("AWB123")).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
@@ -205,6 +225,15 @@ describe("iThink Logistics V3 request contracts", () => {
     const second = JSON.parse(secondBody) as { data: { shipments: Array<Record<string, unknown>> } };
     expect((fetchMock.mock.calls[1] as [string])[0]).toContain("/api_v3/ndr/add-reattempt-rto.json");
     expect(second.data.shipments[0]).toMatchObject({ awb_numbers: "AWB123", ndr_action: "1", reattempt_date: "2026-08-20", reattempt_time: "14:00" });
+  });
+
+  it.each([
+    ["top-level empty array", [], "INVALID_RESPONSE"],
+    ["empty cancellation data", { status: "success", data: [] }, "CANCELLATION_REJECTED"],
+    ["ambiguous cancellation result", { status: "success", data: { "1": { status: "pending" } } }, "CANCELLATION_REJECTED"]
+  ] as const)("rejects a cancellation response with %s", async (_label, body, expectedCode) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(body)));
+    await expect(IThinkClient.cancel("AWB123")).rejects.toMatchObject({ code: expectedCode });
   });
 
   it("distinguishes no-response uncertainty from an explicit provider rejection", async () => {
@@ -391,6 +420,25 @@ describe("ShipmentService fulfilment invariants", () => {
     expect(refreshed.providerStatus).toBe(shipment.providerStatus); // unchanged, not clobbered with a fabricated value
     expect(refreshed.lastSyncedAt).not.toBeNull();
     expect(await ShipmentTrackingEvent.count({ where: { shipment_id: shipment.id } })).toBe(0);
+  });
+
+  it("refreshes a shipment successfully when iThink returns a top-level empty array", async () => {
+    const { order } = await createOrder();
+    mockSuccessfulProvider();
+    const shipment = await ShipmentService.createForOrder(order.id);
+    const before = await ShipmentService.getById(shipment.id);
+    await order.reload();
+    const orderBefore = { status: order.status, fulfilment_status: order.fulfilment_status, payment_status: order.payment_status };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse([])));
+
+    const refreshed = await ShipmentService.refresh(shipment.id);
+
+    expect(refreshed.status).toBe(before.status);
+    expect(refreshed.providerStatus).toBe(before.providerStatus);
+    expect(refreshed.trackingEvents).toHaveLength(0);
+    expect(refreshed.lastSyncedAt).not.toBeNull();
+    await order.reload();
+    expect(order).toMatchObject(orderBefore);
   });
 
   it("claims cancellation before the network call so concurrent clicks dispatch once", async () => {

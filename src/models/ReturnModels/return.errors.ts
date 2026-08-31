@@ -100,3 +100,21 @@ export class ReturnItemReceiptNotApplicableError extends ReturnError {
     this.name = "ReturnItemReceiptNotApplicableError";
   }
 }
+
+export class ReturnCancellationNotAllowedError extends ReturnError {
+  public constructor(reason: string) {
+    super("RETURN_CANCELLATION_NOT_ALLOWED", `This return cannot be cancelled: ${reason}`, 409, { reason });
+    this.name = "ReturnCancellationNotAllowedError";
+  }
+}
+
+export class ReturnCancellationProviderError extends ReturnError {
+  public constructor(message: string, uncertain: boolean) {
+    super(
+      uncertain ? "RETURN_CANCELLATION_PROVIDER_UNCERTAIN" : "RETURN_CANCELLATION_PROVIDER_ERROR",
+      uncertain ? "The courier cancellation result is uncertain. The return was not cancelled locally; reconcile the shipment before retrying." : message,
+      uncertain ? 409 : 502
+    );
+    this.name = "ReturnCancellationProviderError";
+  }
+}

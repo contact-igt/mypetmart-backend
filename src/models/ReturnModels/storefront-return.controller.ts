@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 
 import { sendSuccess } from "../../utils/api-response.js";
 import { ReturnService } from "./return.service.js";
-import { createReturnRequestSchema, listReturnsQuerySchema, parseReturnId } from "./return.validation.js";
+import { cancelReturnSchema, createReturnRequestSchema, listReturnsQuerySchema, parseReturnId } from "./return.validation.js";
 import type { ReturnCaller } from "./return.types.js";
 
 function resolveCaller(req: Request): ReturnCaller {
@@ -38,6 +38,17 @@ export async function handleGetCustomerReturn(req: Request, res: Response, next:
   try {
     const returnId = parseReturnId(req.params.returnId);
     const result = await ReturnService.getCustomerReturn(resolveCaller(req), returnId);
+    sendSuccess(res, 200, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleCancelCustomerReturn(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const returnId = parseReturnId(req.params.returnId);
+    const { reason } = cancelReturnSchema.parse(req.body);
+    const result = await ReturnService.cancelCustomerReturn(resolveCaller(req), returnId, reason);
     sendSuccess(res, 200, result);
   } catch (error) {
     next(error);

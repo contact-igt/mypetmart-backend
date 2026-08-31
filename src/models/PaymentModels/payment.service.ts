@@ -22,10 +22,12 @@ import {
   PaymentOrderNotPayableError,
   PaymentProviderNotConfiguredError
 } from "./payment.errors.js";
+import { BreezeService } from "./breeze.service.js";
 import { PaymentFinalizationService, lockAndCheckOrderStock } from "./payment-finalization.service.js";
 import { buildPayuRequestHash } from "./payu-hash.util.js";
 import { normalizeVerifyApiResult } from "./payu-result-normalizer.js";
 import { PayuVerifyClient } from "./payu-verify.client.js";
+import type { BreezeStartPaymentParamsJSON } from "./breeze.types.js";
 import type {
   CodConfirmationResultJSON,
   ConfirmCodOrderInput,
@@ -34,6 +36,7 @@ import type {
   PaymentAttemptResult,
   PaymentInitiationCaller,
   PaymentInitiationResultJSON,
+  PaymentProvider,
   PaymentStatusResultJSON
 } from "./payment.types.js";
 
@@ -111,6 +114,19 @@ function generatePayuTxnId(paymentId: number): string {
 }
 
 /**
+ * Breeze equivalent of generatePayuTxnId — the merchant transaction
+ * reference sent to Breeze as `startPayment.orderId` and stored in
+ * Payment.provider_order_id. Same "payment id prefix for support
+ * traceability + random suffix for global uniqueness across DB resets"
+ * rationale as the PayU version. `BRZ-` prefix keeps the two providers'
+ * references trivially distinguishable in logs.
+ */
+function generateBreezeTxnRef(paymentId: number): string {
+  const random = randomBytes(5).toString("hex");
+  return `BRZ-${String(paymentId).padStart(6, "0")}-${random}`;
+}
+
+/**
  * Reconciles a still-"pending" Payment Attempt against PayU's Verify
  * Payment API before any caller treats its local "pending" status as
  * current truth. Originally only ever called reactively (getPaymentStatus,
@@ -129,6 +145,17 @@ function generatePayuTxnId(paymentId: number): string {
  */
 async function reconcilePendingAttempt(payment: Payment): Promise<void> {
   if (!payment.provider_order_id) {
+    return;
+  }
+  // Provider-specific reconciliation. PayU has a documented Verify Payment
+  // API used here as a proactive cross-check. Breeze has NO documented
+  // client-pollable status/verify API for the startPayment flow — its
+  // authoritative confirmation is the S2S webhook — so a pending Breeze
+  // attempt is simply left as-is until that webhook arrives (the terminal-
+  // status guard in PaymentFinalizationService keeps that idempotent).
+  // TODO — BREEZE CONFIRMATION REQUIRED: a Breeze payment/order status query
+  // API, if one exists, would slot in here as a BreezeVerifyClient.
+  if (payment.provider !== "payu") {
     return;
   }
   try {
@@ -150,6 +177,7 @@ export const PaymentService = {
    * Snapshots the amount and currency from the Order.
    */
   async createPaymentAttempt(input: CreatePaymentAttemptInput): Promise<PaymentAttemptResult> {
+    const provider: PaymentProvider = input.provider ?? "payu";
     return sequelize.transaction(async (transaction) => {
       // 1. Lock the Order row to serialize concurrent payment attempt creations.
       const order = await Order.findByPk(input.orderId, {
@@ -190,15 +218,16 @@ export const PaymentService = {
         throw new PaymentOrderNotPayableError(order.id, "the order has already been confirmed for Cash on Delivery.");
       }
 
-      // 3. Inspect existing active pending Payment. Scoped to provider:
-      // "payu" — every Payment row this method itself ever creates is
-      // already "payu" (see step 5 below), so for a pure-PayU Order history
-      // this filter is a no-op; it only matters now that a second provider
-      // (COD, see PaymentService.confirmCodOrder) can also leave a
-      // long-lived "pending" Payment on the same Order, which must never be
-      // mistaken for — or silently overwritten as — an active PayU attempt.
+      // 3. Inspect existing active pending Payment for THIS provider. Scoped
+      // by provider so a long-lived pending COD Payment (see
+      // PaymentService.confirmCodOrder) — and, now, a pending attempt for the
+      // *other* online provider — is never mistaken for, or silently
+      // overwritten as, this provider's active attempt. Switching online
+      // providers mid-Order is still blocked below (a pending attempt for the
+      // other online provider surfaces as PaymentAttemptAlreadyActiveError
+      // via the initiate* orchestrators, not here).
       const activeAttempt = await Payment.findOne({
-        where: { order_id: order.id, status: "pending", provider: "payu" },
+        where: { order_id: order.id, status: "pending", provider },
         transaction
       });
 
@@ -209,15 +238,16 @@ export const PaymentService = {
       // 4. Allocate ID for Payment
       const paymentId = await IdSequenceService.allocateNextId("payments", transaction);
 
-      // 5. Snapshot amount/currency and create the new Payment Attempt
-      // provider is "payu" as selected, provider IDs and payload remain null
+      // 5. Snapshot amount/currency and create the new Payment Attempt.
+      // provider is as selected (default "payu"); provider IDs and payload
+      // remain null until the gateway/webhook fills them in.
       const payment = await Payment.create(
         {
           id: paymentId,
           order_id: order.id,
           amount: order.total,
           currency: order.currency,
-          provider: "payu",
+          provider,
           status: "pending",
           provider_order_id: null,
           provider_payment_id: null,
@@ -243,14 +273,14 @@ export const PaymentService = {
    * retry during initiation land on the same Payment Attempt rather than
    * failing or creating an unsafe duplicate.
    */
-  async getOrCreateActiveAttempt(orderId: number): Promise<PaymentAttemptResult> {
+  async getOrCreateActiveAttempt(orderId: number, provider: PaymentProvider = "payu"): Promise<PaymentAttemptResult> {
     try {
-      return await this.createPaymentAttempt({ orderId });
+      return await this.createPaymentAttempt({ orderId, provider });
     } catch (error) {
       if (error instanceof PaymentAttemptAlreadyActiveError) {
-        // Scoped to provider: "payu" — see the matching comment on
+        // Scoped to the same provider — see the matching comment on
         // createPaymentAttempt's own activeAttempt lookup above.
-        const existing = await Payment.findOne({ where: { order_id: orderId, status: "pending", provider: "payu" } });
+        const existing = await Payment.findOne({ where: { order_id: orderId, status: "pending", provider } });
         if (existing) {
           return existing;
         }
@@ -281,7 +311,7 @@ export const PaymentService = {
       if (payment.provider_order_id) {
         return payment;
       }
-      payment.provider_order_id = generatePayuTxnId(payment.id);
+      payment.provider_order_id = payment.provider === "breeze" ? generateBreezeTxnRef(payment.id) : generatePayuTxnId(payment.id);
       await payment.save({ transaction: t });
       return payment;
     });
@@ -451,6 +481,57 @@ export const PaymentService = {
     const productinfo = itemCount === 1 && items[0] ? items[0].product_name : `MyPetMart Order ${order.order_number} (${itemCount} items)`;
 
     return this.buildHostedCheckoutFields(order, attemptWithTxnId, productinfo);
+  },
+
+  /**
+   * Breeze equivalent of initiatePayuCheckout for the documented
+   * `sendOTP -> verifyOTP -> startPayment` Web SDK flow. The OTP steps run
+   * entirely in the browser via @juspay/blaze-sdk-web (no backend round-trip
+   * and no frontend key, per Breeze). This method only:
+   *   - authorizes the caller against the Order (same resolveAuthorizedOrder),
+   *   - verifies the Order is payable,
+   *   - blocks switching online providers mid-Order,
+   *   - reuses or creates the single active provider:"breeze" Payment Attempt,
+   *   - assigns (or reuses) its stable Breeze transaction reference,
+   *   - returns server-authoritative values for the SDK `startPayment` call.
+   *
+   * Payment.status stays "pending" and Order.status/payment_status are never
+   * touched here — finalization happens only via the Breeze S2S webhook ->
+   * PaymentFinalizationService, exactly like PayU.
+   */
+  async initiateBreezeCheckout(caller: PaymentInitiationCaller, input: InitiatePaymentInput): Promise<BreezeStartPaymentParamsJSON> {
+    if (!BreezeService.isConfigured()) {
+      throw new PaymentProviderNotConfiguredError();
+    }
+
+    const order = await this.resolveAuthorizedOrder(caller, input);
+    const itemCount = await OrderItem.count({ where: { order_id: order.id } });
+    this.assertOrderPayable(order, itemCount);
+
+    // Block switching online providers mid-Order. A still-pending PayU attempt
+    // means PayU checkout was already started for this Order — reconcile it
+    // first (it may have actually succeeded on a prior submission), then hard-
+    // block rather than silently opening a second online attempt.
+    const pendingPayuAttempt = await Payment.findOne({ where: { order_id: order.id, status: "pending", provider: "payu" } });
+    if (pendingPayuAttempt) {
+      await reconcilePendingAttempt(pendingPayuAttempt);
+      const refreshed = await Order.findByPk(order.id);
+      if (refreshed?.payment_status === "paid") {
+        throw new OrderAlreadyPaidError(order.id);
+      }
+      throw new PaymentAttemptAlreadyActiveError(order.id);
+    }
+
+    // getOrCreateActiveAttempt -> createPaymentAttempt already enforces:
+    // not already paid, no successful attempt, not already a COD Order, and
+    // one active pending attempt per provider. Re-calling with an existing
+    // pending Breeze attempt reuses the same provider_order_id, which is the
+    // intended retry path (Breeze's own idempotency + the finalizer's
+    // terminal-status guard make a duplicate startPayment safe).
+    const attempt = await this.getOrCreateActiveAttempt(order.id, "breeze");
+    const attemptWithRef = await this.ensureProviderTransactionId(attempt.id);
+
+    return BreezeService.buildStartPaymentParams(order, attemptWithRef);
   },
 
   /**

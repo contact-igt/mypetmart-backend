@@ -150,7 +150,7 @@ export type ShipmentStatus = (typeof SHIPMENT_STATUS_VALUES)[number];
 export const RETURN_TYPE_VALUES = ["return", "replacement"] as const;
 export type ReturnType = (typeof RETURN_TYPE_VALUES)[number];
 
-export const RETURN_STATUS_VALUES = ["requested", "approved", "rejected", "resolved"] as const;
+export const RETURN_STATUS_VALUES = ["requested", "approved", "rejected", "resolved", "cancelled"] as const;
 export type ReturnStatus = (typeof RETURN_STATUS_VALUES)[number];
 
 // Refund financial state is deliberately separate from ReturnRequest.status

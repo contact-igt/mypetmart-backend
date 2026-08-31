@@ -24,6 +24,10 @@ export class ReturnRequest extends Model<InferAttributes<ReturnRequest>, InferCr
   declare evidence_image_url: string | null;
   declare item_received_at: Date | null;
   declare item_received_by_admin_id: ForeignKey<User["id"]> | null;
+  declare cancelled_at: Date | null;
+  declare cancellation_reason: string | null;
+  declare cancelled_by_user_id: ForeignKey<User["id"]> | null;
+  declare cancellation_source: "customer" | "admin" | null;
   declare requested_at: CreationOptional<Date>;
   declare resolved_at: Date | null;
   declare created_at: CreationOptional<Date>;
@@ -68,6 +72,10 @@ export function initializeReturnRequestTable(sequelize: Sequelize): typeof Retur
       evidence_image_url: { type: DataTypes.STRING(1000), allowNull: true, validate: { len: [0, 1000] } },
       item_received_at: { type: DataTypes.DATE, allowNull: true },
       item_received_by_admin_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+      cancelled_at: { type: DataTypes.DATE, allowNull: true },
+      cancellation_reason: { type: DataTypes.TEXT, allowNull: true },
+      cancelled_by_user_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+      cancellation_source: { type: DataTypes.ENUM("customer", "admin"), allowNull: true },
       requested_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
       resolved_at: { type: DataTypes.DATE, allowNull: true },
       created_at: DataTypes.DATE,
@@ -82,7 +90,8 @@ export function initializeReturnRequestTable(sequelize: Sequelize): typeof Retur
         { fields: ["order_id"], name: "return_requests_order_id_idx" },
         { fields: ["order_item_id"], name: "return_requests_order_item_id_idx" },
         { fields: ["user_id"], name: "return_requests_user_id_idx" },
-        { fields: ["item_received_by_admin_id"], name: "return_requests_item_received_by_admin_id_idx" }
+        { fields: ["item_received_by_admin_id"], name: "return_requests_item_received_by_admin_id_idx" },
+        { fields: ["cancelled_by_user_id"], name: "return_requests_cancelled_by_user_id_idx" }
       ]
     }
   );

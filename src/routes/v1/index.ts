@@ -31,7 +31,7 @@ import { storefrontPaymentRouter } from "../../models/PaymentModels/storefront-p
 import { payuWebhookRouter } from "../../models/PaymentModels/payu-webhook.routes.js";
 import { breezeWebhookRouter } from "../../models/PaymentModels/breeze-webhook.routes.js";
 import { storefrontReturnRouter } from "../../models/ReturnModels/storefront-return.routes.js";
-import { adminReturnRouter } from "../../models/ReturnModels/admin-return.routes.js";
+import { adminReturnRouter, adminReturnShipmentRouter } from "../../models/ReturnModels/admin-return.routes.js";
 import { adminRefundRouter } from "../../models/RefundModels/admin-refund.routes.js";
 import { payuRefundWebhookRouter } from "../../models/RefundModels/payu-refund-webhook.routes.js";
 import { adminShipmentRouter } from "../../models/ShipmentModels/admin-shipment.routes.js";
@@ -79,6 +79,7 @@ v1Router.use("/payments/payu", payuWebhookRouter);
 v1Router.use("/payments/breeze", breezeWebhookRouter);
 v1Router.use("/storefront/returns", storefrontReturnRouter);
 v1Router.use("/admin/returns", adminReturnRouter);
+v1Router.use("/admin/return-shipments", adminReturnShipmentRouter);
 v1Router.use("/storefront/newsletter", storefrontNewsletterRouter);
 // Registered ahead of adminRefundRouter (mounted broadly at "/admin", gated to
 // super_admin) so /admin/newsletter/* is matched here first instead of falling

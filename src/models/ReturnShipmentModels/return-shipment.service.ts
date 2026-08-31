@@ -42,13 +42,19 @@ const FORWARD_RANK: Partial<Record<ReturnShipmentStatus, number>> = { pending: 0
  * normalized_status.
  */
 export function normalizeIThinkReverseStatus(providerStatus: string): ReturnShipmentStatus {
-  switch (providerStatus.trim().toLowerCase()) {
-    case "manifested": return "pickup_scheduled";
+  const status = providerStatus.trim().toLowerCase().replace(/^rev\s+/u, "");
+  switch (status) {
+    case "manifest":
+    case "manifested":
+    case "out for pick up":
+    case "pickup scheduled": return "pickup_scheduled";
     case "picked up": return "picked_up";
     case "in transit":
     case "reached at destination": return "in_transit";
+    case "out for delivery": return "in_transit";
     case "delivered": return "delivered";
-    case "cancelled": return "cancelled";
+    case "cancelled":
+    case "canceled": return "cancelled";
     case "undelivered":
     case "not picked":
     case "out of delivery area":
@@ -59,6 +65,36 @@ export function normalizeIThinkReverseStatus(providerStatus: string): ReturnShip
     case "shortage": return "failed";
     default: return "pending";
   }
+}
+
+export type ReturnShipmentCancellationStage = "pre_pickup" | "picked_up" | "in_transit" | "out_for_delivery" | "delivered" | "closed" | "cancelled" | "failed" | "unknown";
+
+/**
+ * Provider-facing cancellation gate. This intentionally keeps the raw
+ * provider vocabulary separate from the smaller local status enum: a reverse
+ * shipment that has reached pickup or delivery must never be cancelled merely
+ * because its local row has lagged behind tracking.
+ */
+export function classifyIThinkReverseCancellationStage(providerStatus: string | null, localStatus: ReturnShipmentStatus): ReturnShipmentCancellationStage {
+  if (providerStatus) {
+    const status = providerStatus.trim().toLowerCase().replace(/^rev\s+/u, "");
+    if (["cancelled", "canceled"].includes(status)) return "cancelled";
+    if (["manifest", "manifested", "accepted", "out for pick up", "pickup scheduled"].includes(status)) return "pre_pickup";
+    if (status === "picked up") return "picked_up";
+    if (status === "in transit" || status === "reached at destination") return "in_transit";
+    if (status === "out for delivery") return "out_for_delivery";
+    if (status === "delivered") return "delivered";
+    if (status === "closed") return "closed";
+    if (["undelivered", "not picked", "out of delivery area", "delayed", "damaged", "misrouted", "lost", "shortage", "failed"].includes(status)) return "failed";
+    return "unknown";
+  }
+
+  if (["pending", "approved", "pickup_scheduled"].includes(localStatus)) return "pre_pickup";
+  if (localStatus === "picked_up") return "picked_up";
+  if (localStatus === "in_transit") return "in_transit";
+  if (localStatus === "delivered") return "delivered";
+  if (localStatus === "cancelled") return "cancelled";
+  return "unknown";
 }
 
 export function canAdvanceReturnShipmentStatus(current: ReturnShipmentStatus, next: ReturnShipmentStatus): boolean {
@@ -95,6 +131,7 @@ function toJSON(returnShipment: ReturnShipment): ReturnShipmentJSON {
     serviceType: returnShipment.service_type,
     status: returnShipment.status,
     providerStatus: returnShipment.provider_status,
+    providerStatusCode: returnShipment.provider_status_code,
     failureReason: returnShipment.status === "failed" ? readFailureReason(returnShipment) : null,
     trackingUrl: returnShipment.tracking_url,
     pickedUpAt: returnShipment.picked_up_at?.toISOString() ?? null,
@@ -321,6 +358,7 @@ async function ingest(returnShipmentId: number, courier: string | null, currentS
       shipment.status = next;
       if (["picked_up", "in_transit"].includes(next) && !shipment.picked_up_at) shipment.picked_up_at = new Date();
       if (next === "delivered" && !shipment.delivered_at) shipment.delivered_at = new Date();
+      if (next === "cancelled" && !shipment.cancelled_at) shipment.cancelled_at = new Date();
       // Deliberately does NOT touch ReturnRequest.item_received_at or
       // trigger any refund logic — per Phase F.1's explicit "Return
       // Delivered -> Admin Inspection -> Approve Refund" requirement, a

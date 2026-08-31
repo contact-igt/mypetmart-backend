@@ -1,7 +1,14 @@
 import type { Payment } from "../../database/tables/PaymentTable/index.js";
 
+// provider defaults to "payu" (every pre-Breeze caller). "breeze" selects the
+// Breeze startPayment flow — a second online provider that coexists with PayU
+// at the attempt layer (single active pending attempt is still enforced
+// per-provider, exactly as before).
+export type PaymentProvider = "payu" | "breeze";
+
 export type CreatePaymentAttemptInput = {
   orderId: number;
+  provider?: PaymentProvider;
 };
 
 // Return type for internal service usage, no public JSON DTOs yet as per requirements
@@ -87,6 +94,14 @@ export type FinalizationOutcome = {
   paymentId: number | null;
   orderId: number | null;
 };
+
+// ---------------------------------------------------------------------------
+// Breeze payment initiation (sendOTP -> verifyOTP -> startPayment)
+// ---------------------------------------------------------------------------
+
+// Returned by POST /storefront/payments/breeze/initiate. Re-exported from
+// breeze.types.ts so the storefront and backend share one shape.
+export type { BreezeStartPaymentParamsJSON } from "./breeze.types.js";
 
 export type PaymentStatusResultJSON = {
   paymentStatus: string;

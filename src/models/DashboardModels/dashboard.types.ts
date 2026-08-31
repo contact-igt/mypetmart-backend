@@ -69,7 +69,7 @@ export type DashboardCustomerOverview = {
 
 export type DashboardReturnsOverview = {
   open: number;
-  statusBreakdown: { status: "requested" | "approved" | "rejected" | "resolved"; count: number }[];
+  statusBreakdown: { status: "requested" | "approved" | "rejected" | "resolved" | "cancelled"; count: number }[];
 };
 
 export type DashboardProductPerformanceRow = {

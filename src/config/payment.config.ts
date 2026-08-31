@@ -57,6 +57,9 @@ export const paymentConfig = Object.freeze({
   breezeEnvironment: environmentConfig.BREEZE_ENVIRONMENT,
   breezeWebhookSecret: environmentConfig.BREEZE_WEBHOOK_SECRET,
   breezePublicKey: environmentConfig.BREEZE_PUBLIC_KEY,
+  // Breeze Web SDK initiate() `shopUrl`. Non-secret. Falls back to the
+  // already-trusted storefront origin when BREEZE_SHOP_URL is unset.
+  breezeShopUrl: environmentConfig.BREEZE_SHOP_URL ?? environmentConfig.STOREFRONT_ORIGIN,
   gatewayUrl: resolveGatewayUrl(),
   verifyApiUrl: resolveVerifyApiUrl(),
   // Trusted, backend-configured browser return targets — never a

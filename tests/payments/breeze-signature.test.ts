@@ -1,24 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { BreezeCartSignatureNotImplementedError, generateBreezeCartSignature, verifyBreezeWebhookSignature } from "../../src/models/PaymentModels/breeze-signature.util.js";
+import { BreezeCartSignatureNotImplementedError, generateBreezeCartSignature, verifyBreezeWebhookApiKey } from "../../src/models/PaymentModels/breeze-signature.util.js";
 
-describe("Breeze signature utilities", () => {
-  it("validates the configured webhook secret using timing-safe comparison", () => {
-    expect(verifyBreezeWebhookSignature("expected-secret", "expected-secret")).toBe(true);
-    expect(verifyBreezeWebhookSignature("wrong-secret", "expected-secret")).toBe(false);
-    expect(verifyBreezeWebhookSignature(undefined, "expected-secret")).toBe(false);
+describe("Breeze webhook API-key verification", () => {
+  it("accepts the exact configured secret and rejects anything else, in constant time", () => {
+    expect(verifyBreezeWebhookApiKey("expected-api-key", "expected-api-key")).toBe(true);
+    expect(verifyBreezeWebhookApiKey("wrong-api-key", "expected-api-key")).toBe(false);
+    expect(verifyBreezeWebhookApiKey("expected-api-key-longer", "expected-api-key")).toBe(false);
+    expect(verifyBreezeWebhookApiKey(undefined, "expected-api-key")).toBe(false);
+    expect(verifyBreezeWebhookApiKey("expected-api-key", undefined)).toBe(false);
   });
+});
 
-  it("does not invent Breeze cart signature generation before Breeze confirms the algorithm", () => {
-    expect(() =>
-      generateBreezeCartSignature({
-        merchantId: "mypetmart",
-        environment: "smb-release",
-        merchantTransactionId: "BRZ-000001",
-        amount: "100.00",
-        currency: "INR",
-        orderId: 1
-      })
-    ).toThrow(BreezeCartSignatureNotImplementedError);
+describe("Breeze cart signature", () => {
+  it("is intentionally not implemented for the Phase B1 startPayment flow", () => {
+    expect(() => generateBreezeCartSignature()).toThrow(BreezeCartSignatureNotImplementedError);
   });
 });
