@@ -230,6 +230,21 @@ describe("ReturnShipmentService (Phase F.1)", () => {
 
       expect(await ReturnShipmentTrackingEvent.count({ where: { return_shipment_id: shipment.id } })).toBe(1);
     });
+
+    it("refreshes a return shipment successfully when iThink returns a top-level empty array", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      const before = await ReturnShipmentService.getById(shipment.id);
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("[]", { status: 200, headers: { "content-type": "application/json" } })));
+
+      const refreshed = await ReturnShipmentService.refresh(shipment.id);
+
+      expect(refreshed.status).toBe(before.status);
+      expect(refreshed.providerStatus).toBe(before.providerStatus);
+      expect(refreshed.trackingEvents).toHaveLength(0);
+      expect(refreshed.lastSyncedAt).not.toBeNull();
+    });
   });
 
   describe("Security — admin-only creation", () => {

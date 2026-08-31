@@ -37,6 +37,8 @@ function record(value: unknown): JsonRecord | undefined {
 }
 function text(value: unknown): string | null { return typeof value === "string" || typeof value === "number" ? String(value) : null; }
 function success(value: unknown): boolean { return text(value)?.toLowerCase() === "success"; }
+
+const TRACKING_PATH = "/api_v3/order/track.json";
 // delivery_tat arrives as a numeric-looking string (e.g. "4") — a non-numeric
 // or non-positive value is treated as absent rather than stored as garbage.
 function positiveInt(value: unknown): number | null {
@@ -56,8 +58,14 @@ function credentials(): { access_token: string; secret_key: string } {
   return { access_token: shippingConfig.accessToken, secret_key: shippingConfig.secretKey };
 }
 
-async function post(path: string, data: JsonRecord, options: { tracking?: boolean; create?: boolean; mutating?: boolean } = {}): Promise<JsonRecord> {
+type IThinkPostOptions = { tracking?: boolean; create?: boolean; mutating?: boolean };
+type IThinkTrackingPostOptions = IThinkPostOptions & { tracking: true };
+
+async function post(path: string, data: JsonRecord, options: IThinkTrackingPostOptions): Promise<JsonRecord | []>;
+async function post(path: string, data: JsonRecord, options?: IThinkPostOptions): Promise<JsonRecord>;
+async function post(path: string, data: JsonRecord, options: IThinkPostOptions = {}): Promise<JsonRecord | []> {
   const baseUrl = options.tracking ? shippingConfig.trackingBaseUrl : shippingConfig.apiBaseUrl;
+  const isTrackingRequest = options.tracking === true && path === TRACKING_PATH;
   let response: Response;
   try {
     response = await fetch(`${baseUrl}${path}`, {
@@ -70,7 +78,9 @@ async function post(path: string, data: JsonRecord, options: { tracking?: boolea
     throw new IThinkClientError(options.create ? "CREATE_UNCERTAIN" : "PROVIDER_UNAVAILABLE", "iThink Logistics did not return a response.", Boolean(options.create || options.mutating));
   }
   if (!response.ok) throw new IThinkClientError("PROVIDER_UNAVAILABLE", `iThink Logistics returned HTTP ${response.status}.`, false);
-  const payload = record(await response.json().catch(() => undefined));
+  const parsed: unknown = await response.json().catch(() => undefined);
+  if (isTrackingRequest && Array.isArray(parsed) && parsed.length === 0) return [];
+  const payload = record(parsed);
   if (!payload) throw new IThinkClientError("INVALID_RESPONSE", "iThink Logistics returned an invalid response.", Boolean(options.create));
   return payload;
 }
@@ -171,6 +181,7 @@ export const IThinkClient = {
 
   async track(awb: string): Promise<IThinkTrackingResult> {
     const payload = await post("/api_v3/order/track.json", { awb_number_list: awb }, { tracking: true });
+    if (Array.isArray(payload)) return { awb, courier: null, currentStatus: null, currentStatusCode: null, events: [] };
     const dataRecord = record(payload.data);
     const result = dataRecord ? record(dataRecord[awb]) : undefined;
     if (!result) {
