@@ -20,6 +20,7 @@
     "db:create": "tsx src/scripts/db-create.ts",
     "db:truncate:all": "tsx src/scripts/truncate-all-data.ts",
     "db:truncate:table": "tsx src/scripts/truncate-table.ts",
+    "db:truncate:media-assets": "tsx src/scripts/truncate-media-assets.ts",
     "db:drop:all": "tsx src/scripts/drop-all-tables.ts",
     "db:add-super-admin": "tsx src/scripts/add-super-admin.ts",
     "db:update-super-admin": "tsx src/scripts/update-super-admin.ts",

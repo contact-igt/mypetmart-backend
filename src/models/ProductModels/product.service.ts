@@ -19,6 +19,8 @@ import { IdSequenceService } from "../../database/sequences/id-sequence.service.
 import { formatMoney, isCompareAtPriceValid } from "../../utils/product-money.js";
 import { generateDuplicateSku, generateDuplicateSlug, isSkuReservedBy, normalizeAndValidateSku, reserveSku } from "./catalog-sku.service.js";
 import { MediaAssetNotFoundError } from "../MediaModels/media-asset.errors.js";
+import { computeReviewSummaries } from "../ReviewModels/review.service.js";
+import type { ReviewSummaryJSON } from "../ReviewModels/review.types.js";
 import {
   InvalidProductDataError,
   ProductCategoryInvalidError,
@@ -433,7 +435,7 @@ export async function assertVideoMediaAsset(mediaAssetId: number, transaction?: 
 // Helper: Format Storefront Product list item DTO. `category` (active) and
 // `images` (primary only) must be eager-loaded — this never re-queries.
 // Shared by the Storefront list endpoint and Related Products.
-export function formatStorefrontListItemDTO(p: Product): StorefrontProductListItemJSON {
+export function formatStorefrontListItemDTO(p: Product, rating?: ReviewSummaryJSON): StorefrontProductListItemJSON {
   const primaryImg = p.images && p.images.length > 0 && p.images[0] ? formatImageDTO(p.images[0]) : null;
   return {
     id: p.id,
@@ -454,7 +456,9 @@ export function formatStorefrontListItemDTO(p: Product): StorefrontProductListIt
       slug: p.category!.slug,
       petType: p.category!.pet_type
     },
-    primaryImage: primaryImg
+    primaryImage: primaryImg,
+    averageRating: rating?.averageRating ?? 0,
+    reviewCount: rating?.reviewCount ?? 0
   };
 }
 
@@ -534,7 +538,10 @@ export class ProductService {
       distinct: true
     });
 
-    const items: StorefrontProductListItemJSON[] = rows.map(formatStorefrontListItemDTO);
+    // One grouped aggregate query for the whole page — never one Review query
+    // per Product (see computeReviewSummaries in ReviewModels/review.service.ts).
+    const ratingByProductId = await computeReviewSummaries(rows.map((p) => p.id));
+    const items: StorefrontProductListItemJSON[] = rows.map((p) => formatStorefrontListItemDTO(p, ratingByProductId.get(p.id)));
 
     return {
       items,
@@ -604,7 +611,8 @@ export class ProductService {
       picked.push(...fallback.map((p) => ({ product: p, score: 0 })));
     }
 
-    return picked.map(({ product: p }) => formatStorefrontListItemDTO(p));
+    const ratingByProductId = await computeReviewSummaries(picked.map(({ product: p }) => p.id));
+    return picked.map(({ product: p }) => formatStorefrontListItemDTO(p, ratingByProductId.get(p.id)));
   }
 
   // Storefront Product Detail by Slug
@@ -689,6 +697,7 @@ export class ProductService {
     const testimonialVideos = mediaAssignments.filter((a) => a.mediaRole === "testimonial_video");
     const primaryImg = images.find((img) => img.isPrimary) || (images.length > 0 ? images[0] : null);
     const relatedProducts = await ProductService.getRelatedProducts(product);
+    const rating = (await computeReviewSummaries([product.id])).get(product.id);
 
     return {
       id: product.id,
@@ -721,6 +730,8 @@ export class ProductService {
         petType: product.category!.pet_type
       },
       primaryImage: primaryImg ?? null,
+      averageRating: rating?.averageRating ?? 0,
+      reviewCount: rating?.reviewCount ?? 0,
       variants,
       images,
       features,

@@ -6,8 +6,10 @@ import { Category, Product, ProductImage, Wishlist } from "../../database/tables
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
 import { formatImageDTO } from "../ProductModels/product.service.js";
 import { ProductNotFoundError } from "../ProductModels/product.errors.js";
+import { computeReviewSummaries } from "../ReviewModels/review.service.js";
 import { formatMoney } from "../../utils/product-money.js";
 import type { ProductImageJSON } from "../ProductModels/product.types.js";
+import type { ReviewSummaryJSON } from "../ReviewModels/review.types.js";
 import { WishlistItemNotFoundError } from "./wishlist.errors.js";
 import type { WishlistItemJSON, WishlistJSON, WishlistProductSummaryJSON } from "./wishlist.types.js";
 
@@ -24,7 +26,7 @@ async function getPrimaryImageDTO(productId: number, transaction?: Transaction):
   return image ? formatImageDTO(image) : null;
 }
 
-async function buildWishlistProductSummary(product: Product, transaction?: Transaction): Promise<WishlistProductSummaryJSON> {
+async function buildWishlistProductSummary(product: Product, transaction?: Transaction, rating?: ReviewSummaryJSON): Promise<WishlistProductSummaryJSON> {
   // paranoid:false so a Product/Category soft-deleted after being wishlisted still renders
   // (as unavailable) instead of the Wishlist row silently disappearing — mirrors Cart's
   // buildCartDTO precedent for the same reason.
@@ -58,7 +60,9 @@ async function buildWishlistProductSummary(product: Product, transaction?: Trans
       slug: category.slug,
       petType: category.pet_type
     },
-    primaryImage
+    primaryImage,
+    averageRating: rating?.averageRating ?? 0,
+    reviewCount: rating?.reviewCount ?? 0
   };
 }
 
@@ -68,6 +72,9 @@ async function buildWishlistDTO(userId: number, transaction?: Transaction): Prom
     order: [["created_at", "DESC"], ["id", "DESC"]],
     ...(transaction ? { transaction } : {})
   });
+
+  // One grouped aggregate query for the whole wishlist page, not one per item.
+  const ratingByProductId = await computeReviewSummaries(rows.map((row) => row.product_id), transaction);
 
   const items: WishlistItemJSON[] = [];
   for (const row of rows) {
@@ -81,7 +88,7 @@ async function buildWishlistDTO(userId: number, transaction?: Transaction): Prom
     items.push({
       wishlistItemId: row.id,
       createdAt: row.created_at.toISOString(),
-      product: await buildWishlistProductSummary(product, transaction)
+      product: await buildWishlistProductSummary(product, transaction, ratingByProductId.get(row.product_id))
     });
   }
 
