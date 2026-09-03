@@ -227,9 +227,30 @@ describe("iThink Logistics V3 request contracts", () => {
     expect(second.data.shipments[0]).toMatchObject({ awb_numbers: "AWB123", ndr_action: "1", reattempt_date: "2026-08-20", reattempt_time: "14:00" });
   });
 
+  it("sends the cancellation contract with exactly the requested AWB", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: { "1": { status: "success" } } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await IThinkClient.cancel("AWB123");
+
+    const request = sentRequest(fetchMock);
+    expect(request.data).toMatchObject({ awb_numbers: "AWB123", access_token: "test-access-token", secret_key: "test-secret-key" });
+    expect(request.data).not.toHaveProperty("order_type");
+  });
+
+  it("selects the exact requested AWB when cancellation returns multiple results", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: "success", data: {
+      OTHER: { status: "error", awb_number: "OTHER", remark: "not cancellable" },
+      AWB123: { status: "success", awb_number: "AWB123" }
+    } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(IThinkClient.cancel("AWB123")).resolves.toBeUndefined();
+  });
+
   it.each([
     ["top-level empty array", [], "INVALID_RESPONSE"],
-    ["empty cancellation data", { status: "success", data: [] }, "CANCELLATION_REJECTED"],
+    ["empty cancellation data", { status: "success", data: [] }, "CANCELLATION_AMBIGUOUS"],
     ["ambiguous cancellation result", { status: "success", data: { "1": { status: "pending" } } }, "CANCELLATION_REJECTED"]
   ] as const)("rejects a cancellation response with %s", async (_label, body, expectedCode) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(body)));
@@ -240,7 +261,7 @@ describe("iThink Logistics V3 request contracts", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("timeout")));
     await expect(IThinkClient.cancel("AWB123")).rejects.toMatchObject({ uncertain: true });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "error" }, 503)));
-    await expect(IThinkClient.cancel("AWB123")).rejects.toMatchObject({ uncertain: false });
+    await expect(IThinkClient.cancel("AWB123")).rejects.toMatchObject({ uncertain: true });
   });
 });
 

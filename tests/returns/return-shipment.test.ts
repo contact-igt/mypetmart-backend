@@ -23,7 +23,7 @@ vi.mock("../../src/config/shipping.config.js", () => ({
 
 import { app } from "../../src/app.js";
 import { IThinkClient, IThinkClientError } from "../../src/models/ShipmentModels/ithink.client.js";
-import { ReturnShipmentService } from "../../src/models/ReturnShipmentModels/return-shipment.service.js";
+import { RETURN_SHIPMENT_BOOKING_IN_PROGRESS, ReturnShipmentService } from "../../src/models/ReturnShipmentModels/return-shipment.service.js";
 import { ReturnService } from "../../src/models/ReturnModels/return.service.js";
 import { connectDatabase, disconnectDatabase } from "../../src/database/index.js";
 import { AuthSession, Category, Order, OrderItem, Payment, Product, Refund, ReturnRequest, ReturnShipment, ReturnShipmentTrackingEvent, User } from "../../src/database/tables/index.js";
@@ -173,6 +173,206 @@ describe("ReturnShipmentService (Phase F.1)", () => {
 
     it("rejects a non-existent return request", async () => {
       await expect(ReturnShipmentService.createForApprovedReturn(999_999_999)).rejects.toMatchObject({ code: "RETURN_SHIPMENT_NOT_FOUND" });
+    });
+  });
+
+  describe("Courier selection + pickup address", () => {
+    const TWO_REVERSE_RATES = [
+      { courier: "Delhivery", serviceType: "Surface", rate: "80.00", deliveryTat: 4, estimatedDelivery: null },
+      { courier: "Xpressbees", serviceType: "Reverse", rate: "65.00", deliveryTat: 5, estimatedDelivery: null }
+    ];
+
+    async function setPickupSnapshot(returnId: number, overrides: Partial<Record<"pickup_recipient_name" | "pickup_phone" | "pickup_line_1" | "pickup_line_2" | "pickup_city" | "pickup_state" | "pickup_postal_code" | "pickup_country", string>>) {
+      await ReturnRequest.update(overrides, { where: { id: returnId } });
+    }
+
+    it("quoteForReturn returns every reverse candidate and creates no shipment row", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      vi.spyOn(IThinkClient, "getReverseRates").mockResolvedValue(TWO_REVERSE_RATES);
+
+      const quote = await ReturnShipmentService.quoteForReturn(returnRequest.id);
+
+      expect(quote.options.map((option) => option.carrier)).toEqual(["Xpressbees", "Delhivery"]); // cheapest first
+      expect(await ReturnShipment.count({ where: { return_request_id: returnRequest.id } })).toBe(0);
+    });
+
+    it("quoteForReturn refuses a non-approved return", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "requested" });
+      const spy = vi.spyOn(IThinkClient, "getReverseRates");
+      await expect(ReturnShipmentService.quoteForReturn(returnRequest.id)).rejects.toMatchObject({ code: "RETURN_SHIPMENT_NOT_ELIGIBLE" });
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("quoteForReturn refuses a return that already has a live shipment", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      await expect(ReturnShipmentService.quoteForReturn(returnRequest.id)).rejects.toMatchObject({ code: "RETURN_SHIPMENT_ALREADY_EXISTS" });
+    });
+
+    it("books the courier the admin selected, not the cheapest", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      vi.spyOn(IThinkClient, "getReverseRates").mockResolvedValue(TWO_REVERSE_RATES);
+      const createSpy = vi.spyOn(IThinkClient, "createReverseShipment").mockResolvedValue({ awb: "RAWB-SEL", reference: "RREF-SEL", courier: "Delhivery", trackingUrl: null });
+
+      const result = await ReturnShipmentService.createForApprovedReturn(returnRequest.id, { carrier: "Delhivery", serviceType: "Surface" });
+
+      expect(result.carrier).toBe("Delhivery");
+      expect(result.shippingAmount).toBe("80.00");
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ logistics: "Delhivery", serviceType: "Surface" }));
+    });
+
+    it("rejects a selection that a fresh reverse rate check no longer offers", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      vi.spyOn(IThinkClient, "getReverseRates").mockResolvedValue(TWO_REVERSE_RATES);
+      const createSpy = vi.spyOn(IThinkClient, "createReverseShipment");
+
+      await expect(ReturnShipmentService.createForApprovedReturn(returnRequest.id, { carrier: "BlueDart", serviceType: "Surface" }))
+        .rejects.toMatchObject({ code: "RETURN_SHIPMENT_COURIER_SELECTION_INVALID" });
+      expect(createSpy).not.toHaveBeenCalled();
+      expect((await ReturnShipmentService.getForReturnRequest(returnRequest.id))?.status).toBe("failed");
+    });
+
+    it("still auto-picks the cheapest when no selection is given", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      vi.spyOn(IThinkClient, "getReverseRates").mockResolvedValue(TWO_REVERSE_RATES);
+      const createSpy = vi.spyOn(IThinkClient, "createReverseShipment").mockResolvedValue({ awb: "RAWB-CHEAP", reference: "R", courier: "Xpressbees", trackingUrl: null });
+
+      const result = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+
+      expect(result.carrier).toBe("Xpressbees");
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ logistics: "Xpressbees" }));
+    });
+
+    it("exposes the reverse shipping amount and currency in the JSON", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const result = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      expect(result.shippingAmount).toBe("80.00");
+      expect(result.currency).toBe("INR");
+    });
+
+    it("uses the edited pickup snapshot for the rate check and the provider booking", async () => {
+      const { order, returnRequest } = await createApprovedReturn({ status: "approved" });
+      await setPickupSnapshot(returnRequest.id, {
+        pickup_recipient_name: "Warehouse Contact", pickup_phone: "9000000001", pickup_line_1: "Plot 5, Industrial Area",
+        pickup_line_2: "Gate 2", pickup_city: "Bengaluru", pickup_state: "Karnataka", pickup_postal_code: "560099", pickup_country: "IN"
+      });
+      const rateSpy = vi.spyOn(IThinkClient, "getReverseRates").mockResolvedValue([{ courier: "Delhivery", serviceType: "Surface", rate: "80.00", deliveryTat: 4, estimatedDelivery: null }]);
+      const createSpy = vi.spyOn(IThinkClient, "createReverseShipment").mockResolvedValue({ awb: "RAWB-SNAP", reference: "R", courier: "Delhivery", trackingUrl: null });
+
+      await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+
+      expect(rateSpy).toHaveBeenCalledWith(expect.objectContaining({ fromPincode: "560099" }));
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+        pickupContact: expect.objectContaining({ name: "Warehouse Contact", address1: "Plot 5, Industrial Area", pincode: "560099", city: "Bengaluru", state: "Karnataka" })
+      }));
+      // Order's own shipping snapshot is never touched.
+      await order.reload();
+      expect(order.ship_recipient_name).toBe("Riya Sharma");
+      expect(order.ship_postal_code).toBe("400001");
+    });
+
+    it("falls back to the Order shipping address when no pickup snapshot is set", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      const rateSpy = vi.spyOn(IThinkClient, "getReverseRates").mockResolvedValue([{ courier: "Delhivery", serviceType: "Surface", rate: "80.00", deliveryTat: 4, estimatedDelivery: null }]);
+      const createSpy = vi.spyOn(IThinkClient, "createReverseShipment").mockResolvedValue({ awb: "RAWB-ORD", reference: "R", courier: "Delhivery", trackingUrl: null });
+
+      await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+
+      expect(rateSpy).toHaveBeenCalledWith(expect.objectContaining({ fromPincode: "400001" }));
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ pickupContact: expect.objectContaining({ name: "Riya Sharma", pincode: "400001" }) }));
+    });
+
+    it("updatePickupAddress writes only return_requests.pickup_* and leaves the Order untouched", async () => {
+      const { order, returnRequest } = await createApprovedReturn({ status: "approved" });
+      const before = { name: order.ship_recipient_name, line1: order.ship_line_1, city: order.ship_city, pin: order.ship_postal_code };
+
+      const detail = await ReturnService.updatePickupAddress(returnRequest.id, {
+        recipientName: "New Contact", phone: "9812345678", line1: "New Line 1", line2: "Near Park",
+        city: "Pune", state: "Maharashtra", postalCode: "411001"
+      });
+
+      expect(detail.pickupAddress).toMatchObject({ recipientName: "New Contact", line1: "New Line 1", city: "Pune", postalCode: "411001", edited: true });
+      await order.reload();
+      expect(order.ship_recipient_name).toBe(before.name);
+      expect(order.ship_line_1).toBe(before.line1);
+      expect(order.ship_city).toBe(before.city);
+      expect(order.ship_postal_code).toBe(before.pin);
+      const reloaded = await ReturnRequest.findByPk(returnRequest.id);
+      expect(reloaded?.pickup_recipient_name).toBe("New Contact");
+      expect(reloaded?.pickup_postal_code).toBe("411001");
+    });
+
+    it("rejects an invalid pickup address over the admin endpoint and writes nothing", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      const adminToken = await mintAdminToken(baseId + 40, "rs-pickup-admin@example.com");
+
+      const res = await request(app)
+        .patch(`/api/v1/admin/returns/${returnRequest.id}/pickup-address`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ recipientName: "X", phone: "123", line1: "", city: "", state: "", postalCode: "12" });
+
+      expect(res.status).toBe(400);
+      expect((await ReturnRequest.findByPk(returnRequest.id))?.pickup_line_1).toBeNull();
+    });
+
+    it("refuses a pickup address edit once a live reverse shipment exists", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+
+      await expect(ReturnService.updatePickupAddress(returnRequest.id, {
+        recipientName: "New", phone: "9812345678", line1: "L1", city: "Pune", state: "MH", postalCode: "411001"
+      })).rejects.toMatchObject({ code: "RETURN_PICKUP_ADDRESS_NOT_EDITABLE" });
+    });
+
+    it("allows a pickup address edit while the only reverse shipment is failed, then books with it", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      vi.spyOn(IThinkClient, "getReverseRates").mockResolvedValue([{ courier: "Delhivery", serviceType: "Surface", rate: "80.00", deliveryTat: 4, estimatedDelivery: null }]);
+      vi.spyOn(IThinkClient, "createReverseShipment").mockRejectedValueOnce(new IThinkClientError("CREATE_REJECTED", "Pickup address invalid"));
+      await expect(ReturnShipmentService.createForApprovedReturn(returnRequest.id)).rejects.toBeDefined();
+
+      await ReturnService.updatePickupAddress(returnRequest.id, {
+        recipientName: "Fixed Contact", phone: "9812345678", line1: "Correct Line 1", city: "Pune", state: "Maharashtra", postalCode: "411001"
+      });
+      const createSpy = vi.spyOn(IThinkClient, "createReverseShipment").mockResolvedValue({ awb: "RAWB-FIXED", reference: "R", courier: "Delhivery", trackingUrl: null });
+      const retried = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+
+      expect(retried.status).toBe("approved");
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ pickupContact: expect.objectContaining({ pincode: "411001", name: "Fixed Contact" }) }));
+      expect(await ReturnShipment.count({ where: { return_request_id: returnRequest.id } })).toBe(1);
+    });
+
+    it("leaves the return, order and payment untouched when the provider rejects the booking", async () => {
+      const { order, returnRequest } = await createApprovedReturn({ status: "approved" });
+      vi.spyOn(IThinkClient, "getReverseRates").mockResolvedValue([{ courier: "Delhivery", serviceType: "Surface", rate: "80.00", deliveryTat: 4, estimatedDelivery: null }]);
+      vi.spyOn(IThinkClient, "createReverseShipment").mockRejectedValue(new IThinkClientError("CREATE_REJECTED", "nope"));
+
+      await expect(ReturnShipmentService.createForApprovedReturn(returnRequest.id)).rejects.toMatchObject({ code: "ITHINK_CREATE_REJECTED" });
+
+      await returnRequest.reload();
+      await order.reload();
+      expect(returnRequest.status).toBe("approved");
+      expect(order.status).toBe("return_requested");
+      expect(order.payment_status).toBe("paid");
+      expect(order.fulfilment_status).toBe("delivered");
+      expect(await Refund.count({ where: { return_request_id: returnRequest.id } })).toBe(0);
+    });
+
+    it("requires an admin token on the quote and pickup-address endpoints", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      const customerToken = await mintCustomerToken(baseId + 41, "rs-pickup-customer@example.com");
+
+      const quoteAnon = await request(app).post(`/api/v1/admin/returns/${returnRequest.id}/return-shipment/quote`);
+      const quoteCustomer = await request(app).post(`/api/v1/admin/returns/${returnRequest.id}/return-shipment/quote`).set("Authorization", `Bearer ${customerToken}`);
+      const addrAnon = await request(app).patch(`/api/v1/admin/returns/${returnRequest.id}/pickup-address`).send({});
+      const addrCustomer = await request(app).patch(`/api/v1/admin/returns/${returnRequest.id}/pickup-address`).set("Authorization", `Bearer ${customerToken}`).send({});
+
+      expect(quoteAnon.status).toBe(401);
+      expect([401, 403]).toContain(quoteCustomer.status);
+      expect(addrAnon.status).toBe(401);
+      expect([401, 403]).toContain(addrCustomer.status);
     });
   });
 
@@ -494,16 +694,16 @@ describe("ReturnShipmentService (Phase F.1)", () => {
     });
 
     it.each([
-      ["malformed", "<html><body>Bad gateway</body></html>", "text/html"],
-      ["empty", "[]", "application/json"],
-      ["ambiguous", JSON.stringify({ status: "success", data: { "1": { status: "pending" } } }), "application/json"]
-    ] as const)("rolls back local state for a provider %s response", async (_kind, body, contentType) => {
+      ["malformed", "<html><body>Bad gateway</body></html>", "text/html", "RETURN_CANCELLATION_PROVIDER_UNCERTAIN"],
+      ["empty", "[]", "application/json", "RETURN_CANCELLATION_PROVIDER_UNCERTAIN"],
+      ["ambiguous", JSON.stringify({ status: "success", data: { "1": { status: "pending" } } }), "application/json", "RETURN_CANCELLATION_PROVIDER_ERROR"]
+    ] as const)("rolls back local state for a provider %s response", async (_kind, body, contentType, expectedCode) => {
       const { returnRequest } = await createApprovedReturn({ status: "approved" });
       mockSuccessfulProvider();
       const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, { status: 200, headers: { "content-type": contentType } })));
 
-      await expect(ReturnService.cancelAdminReturn(baseId + 35, returnRequest.id)).rejects.toMatchObject({ code: "RETURN_CANCELLATION_PROVIDER_ERROR" });
+      await expect(ReturnService.cancelAdminReturn(baseId + 35, returnRequest.id)).rejects.toMatchObject({ code: expectedCode });
       expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("approved");
       expect((await ReturnShipment.findByPk(shipment.id))?.status).toBe("approved");
     });
@@ -591,6 +791,211 @@ describe("ReturnShipmentService (Phase F.1)", () => {
       expect(cancelSpy).toHaveBeenCalledTimes(1);
       expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("cancelled");
       expect((await ReturnShipment.findByPk(shipment.id))?.status).toBe("cancelled");
+    });
+
+    it("blocks cancellation while a booking can still assign an AWB, then allows it after booking", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      vi.spyOn(IThinkClient, "getReverseRates").mockResolvedValue([{ courier: "Delhivery", serviceType: "Surface", rate: "80.00", deliveryTat: 4, estimatedDelivery: null }]);
+      let releaseBooking!: (result: { awb: string; reference: string; courier: string; trackingUrl: null }) => void;
+      const booking = vi.spyOn(IThinkClient, "createReverseShipment").mockImplementation(() => new Promise((resolve) => { releaseBooking = resolve; }));
+
+      const creation = ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      for (let attempt = 0; attempt < 100 && !releaseBooking; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(booking).toHaveBeenCalledTimes(1);
+
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).rejects.toMatchObject({ code: "RETURN_CANCELLATION_NOT_ALLOWED" });
+      expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("approved");
+
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel").mockResolvedValue();
+      releaseBooking({ awb: "RAWB-RACE", reference: "RREF-RACE", courier: "Delhivery", trackingUrl: null });
+      await expect(creation).resolves.toMatchObject({ awbNumber: "RAWB-RACE", status: "approved" });
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).resolves.toMatchObject({ status: "cancelled" });
+      expect(cancelSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("quarantines and provider-cancels an AWB returned after the return was cancelled", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      vi.spyOn(IThinkClient, "getReverseRates").mockResolvedValue([{ courier: "Delhivery", serviceType: "Surface", rate: "80.00", deliveryTat: 4, estimatedDelivery: null }]);
+      let releaseBooking!: (result: { awb: string; reference: string; courier: string; trackingUrl: null }) => void;
+      vi.spyOn(IThinkClient, "createReverseShipment").mockImplementation(() => new Promise((resolve) => { releaseBooking = resolve; }));
+      const creation = ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      for (let attempt = 0; attempt < 100 && !releaseBooking; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(releaseBooking).toBeTypeOf("function");
+
+      await ReturnRequest.update({ status: "cancelled", cancelled_at: new Date(), cancellation_reason: "race", cancellation_source: "admin", cancelled_by_user_id: returnRequest.user_id }, { where: { id: returnRequest.id } });
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel").mockResolvedValue();
+      releaseBooking({ awb: "RAWB-LATE", reference: "RREF-LATE", courier: "Delhivery", trackingUrl: null });
+
+      await expect(creation).resolves.toMatchObject({ awbNumber: "RAWB-LATE", status: "cancelled" });
+      expect(cancelSpy).toHaveBeenCalledWith("RAWB-LATE");
+      expect((await ReturnShipment.findOne({ where: { return_request_id: returnRequest.id } }))?.status).toBe("cancelled");
+    });
+
+    it("reconciles a provider cancellation after local persistence fails without issuing a second cancel", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel").mockResolvedValue();
+      const saveSpy = vi.spyOn(ReturnRequest.prototype, "save").mockRejectedValueOnce(new Error("database unavailable"));
+
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).rejects.toThrow("database unavailable");
+      expect(cancelSpy).toHaveBeenCalledTimes(1);
+      saveSpy.mockRestore();
+      vi.spyOn(IThinkClient, "track").mockResolvedValue({ awb: shipment.awbNumber!, courier: "Delhivery", currentStatus: "Cancelled", currentStatusCode: "C", events: [] });
+
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).resolves.toMatchObject({ status: "cancelled" });
+      expect(cancelSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("merges the cancellation intent into raw_payload without dropping existing fields", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      // A shipment row that already carries a full booking payload AND a
+      // failureReason-shaped block from a prior diagnostic write.
+      await ReturnShipment.update(
+        {
+          raw_payload: {
+            provider: "ithink",
+            bookingReference: "REF-KEEP",
+            label: "https://label.example/keep",
+            diagnostics: { attempt: 1, note: "keep me" },
+            errorCode: "PRIOR_FAILURE",
+            message: "an earlier failure to preserve",
+            failedAt: "2026-01-02T03:04:05.000Z"
+          }
+        },
+        { where: { id: shipment.id } }
+      );
+      vi.spyOn(IThinkClient, "cancel").mockRejectedValue(new IThinkClientError("CANCELLATION_REJECTED", "provider says no"));
+
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).rejects.toMatchObject({ code: "RETURN_CANCELLATION_PROVIDER_ERROR" });
+
+      const rawPayload = (await ReturnShipment.findByPk(shipment.id))?.raw_payload as Record<string, any>;
+      // 1. existing raw_payload survives
+      expect(rawPayload.bookingReference).toBe("REF-KEEP");
+      expect(rawPayload.label).toBe("https://label.example/keep");
+      expect(rawPayload.diagnostics).toEqual({ attempt: 1, note: "keep me" });
+      expect(rawPayload.provider).toBe("ithink");
+      // 2. existing failureReason fields survive
+      expect(rawPayload.errorCode).toBe("PRIOR_FAILURE");
+      expect(rawPayload.message).toBe("an earlier failure to preserve");
+      expect(rawPayload.failedAt).toBe("2026-01-02T03:04:05.000Z");
+      // 3. cancellationIntent is added
+      expect(rawPayload.cancellationIntent).toMatchObject({ kind: "return-cancellation", previousProviderStatus: "Accepted" });
+      expect(typeof rawPayload.cancellationIntent.requestedAt).toBe("string");
+      // 4. no unrelated fields deleted
+      expect(Object.keys(rawPayload).sort()).toEqual(
+        ["bookingReference", "cancellationIntent", "diagnostics", "errorCode", "failedAt", "label", "message", "provider"].sort()
+      );
+    });
+
+    it("blocks cancellation for a fresh 'Booking in progress' marker", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      await ReturnShipment.update(
+        { status: "pending", provider_status: RETURN_SHIPMENT_BOOKING_IN_PROGRESS, awb_number: null },
+        { where: { id: shipment.id } }
+      );
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel");
+
+      expect((await ReturnService.getAdminReturn(returnRequest.id)).canCancel).toBe(false);
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).rejects.toMatchObject({ code: "RETURN_CANCELLATION_NOT_ALLOWED" });
+      expect(cancelSpy).not.toHaveBeenCalled();
+      expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("approved");
+      expect((await ReturnShipment.findByPk(shipment.id))?.status).toBe("pending");
+    });
+
+    it("recovers a stale 'Booking in progress' marker and cancels locally with no provider call", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      await ReturnShipment.update(
+        { status: "pending", provider_status: RETURN_SHIPMENT_BOOKING_IN_PROGRESS, awb_number: null, last_synced_at: null, raw_payload: { provider: "ithink", stage: "rate-checked", keep: "this" } },
+        { where: { id: shipment.id } }
+      );
+      // Marker untouched well past the staleness window (raw UPDATE so the
+      // ORM does not bump updated_at back to now).
+      await ReturnShipment.sequelize!.query(
+        `UPDATE \`${ReturnShipment.tableName}\` SET updated_at = ? WHERE id = ?`,
+        { replacements: [new Date(Date.now() - 30 * 60_000), shipment.id] }
+      );
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel");
+
+      expect((await ReturnService.getAdminReturn(returnRequest.id)).canCancel).toBe(true);
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).resolves.toMatchObject({ status: "cancelled" });
+
+      expect(cancelSpy).not.toHaveBeenCalled();
+      const recovered = await ReturnShipment.findByPk(shipment.id);
+      expect(recovered?.status).toBe("failed");
+      expect(recovered?.provider_status).toBe("BOOKING_MARKER_STALE");
+      expect(recovered?.awb_number).toBeNull();
+      expect(recovered?.cancelled_at).toBeNull();
+      const rawPayload = recovered?.raw_payload as Record<string, any>;
+      expect(rawPayload.keep).toBe("this");
+      expect(rawPayload.stage).toBe("rate-checked");
+      expect(rawPayload.errorCode).toBe("BOOKING_MARKER_STALE");
+      expect(typeof rawPayload.failedAt).toBe("string");
+      expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("cancelled");
+    });
+
+    it("allows local cancellation for a failed reverse shipment with no AWB", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+      await ReturnShipment.update({ status: "failed", provider_status: "CREATE_REJECTED", awb_number: null }, { where: { id: shipment.id } });
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel");
+
+      expect((await ReturnService.getAdminReturn(returnRequest.id)).canCancel).toBe(true);
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).resolves.toMatchObject({ status: "cancelled" });
+      expect(cancelSpy).not.toHaveBeenCalled();
+      expect((await ReturnShipment.findByPk(shipment.id))?.status).toBe("failed");
+    });
+
+    it("confirms rather than blindly re-cancels when a pending-intent retry is rejected as already cancelled", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+
+      // First attempt: provider cancel succeeds, local persistence fails — the
+      // cancellationIntent is left on the row.
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel").mockResolvedValue();
+      const saveSpy = vi.spyOn(ReturnRequest.prototype, "save").mockRejectedValueOnce(new Error("database unavailable"));
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).rejects.toThrow("database unavailable");
+      saveSpy.mockRestore();
+      expect(cancelSpy).toHaveBeenCalledTimes(1);
+
+      // Retry: tracking still lags (pre-pickup), so a re-issue is attempted;
+      // the provider rejects it ("already cancelled"), and a confirming track
+      // then shows it cancelled — no third cancel, return finalized.
+      const trackSpy = vi.spyOn(IThinkClient, "track")
+        .mockResolvedValueOnce({ awb: shipment.awbNumber!, courier: "Delhivery", currentStatus: "REV Manifested", currentStatusCode: "MF", events: [] })
+        .mockResolvedValueOnce({ awb: shipment.awbNumber!, courier: "Delhivery", currentStatus: "REV Cancelled", currentStatusCode: "C", events: [] });
+      cancelSpy.mockRejectedValueOnce(new IThinkClientError("CANCELLATION_REJECTED", "already cancelled"));
+
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).resolves.toMatchObject({ status: "cancelled" });
+      expect(cancelSpy).toHaveBeenCalledTimes(2);
+      expect(trackSpy).toHaveBeenCalledTimes(2);
+      expect((await ReturnShipment.findByPk(shipment.id))?.status).toBe("cancelled");
+    });
+
+    it("keeps local state untouched when a pending-intent retry cannot be confirmed", async () => {
+      const { returnRequest } = await createApprovedReturn({ status: "approved" });
+      mockSuccessfulProvider();
+      const shipment = await ReturnShipmentService.createForApprovedReturn(returnRequest.id);
+
+      const cancelSpy = vi.spyOn(IThinkClient, "cancel").mockResolvedValue();
+      const saveSpy = vi.spyOn(ReturnRequest.prototype, "save").mockRejectedValueOnce(new Error("database unavailable"));
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).rejects.toThrow("database unavailable");
+      saveSpy.mockRestore();
+
+      vi.spyOn(IThinkClient, "track").mockResolvedValue({ awb: shipment.awbNumber!, courier: "Delhivery", currentStatus: "REV Manifested", currentStatusCode: "MF", events: [] });
+      cancelSpy.mockRejectedValue(new IThinkClientError("CANCELLATION_REJECTED", "still refusing"));
+
+      await expect(ReturnService.cancelAdminReturn(returnRequest.user_id, returnRequest.id)).rejects.toMatchObject({ code: "RETURN_CANCELLATION_PROVIDER_UNCERTAIN" });
+      expect((await ReturnRequest.findByPk(returnRequest.id))?.status).toBe("approved");
+      expect((await ReturnShipment.findByPk(shipment.id))?.status).toBe("approved");
     });
   });
 

@@ -12,6 +12,10 @@ export type PublicReviewJSON = {
   customerDisplayName: string;
   verifiedPurchase: boolean;
   reviewSource: ReviewSource;
+  // Optional admin-controlled public review date, "YYYY-MM-DD" or null. The
+  // storefront renders `reviewDate ?? createdAt` — the backend never
+  // pre-formats or collapses the two.
+  reviewDate: string | null;
   createdAt: string;
 };
 
@@ -27,6 +31,9 @@ export type AdminReviewListItemJSON = {
   status: ReviewStatus;
   verifiedPurchase: boolean;
   reviewSource: ReviewSource;
+  // Admin-controlled public review date, "YYYY-MM-DD" or null. createdAt /
+  // updatedAt below remain the untouched system audit timestamps.
+  reviewDate: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -65,6 +72,11 @@ export type StorefrontReviewFeedItemJSON = {
   review: string;
   customerName: string;
   verifiedPurchase: boolean;
+  // Additive (Customer Review Enhancement Stage 1) — the global feed
+  // previously exposed no date at all. Same contract as PublicReviewJSON:
+  // storefront renders `reviewDate ?? createdAt`.
+  reviewDate: string | null;
+  createdAt: string;
   product: StorefrontProductSummaryJSON;
 };
 
@@ -116,6 +128,9 @@ export type AdminUpdateReviewInput = {
   title?: string | null;
   review?: string;
   status?: ReviewStatus;
+  // Tri-state: `undefined` = leave the stored review_date unchanged;
+  // `null` = clear it; "YYYY-MM-DD" = set it.
+  reviewDate?: string | null;
 };
 
 // Manual Admin-authored Review — never backed by a real User/OrderItem.
@@ -128,6 +143,9 @@ export type AdminCreateReviewInput = {
   title?: string | null;
   review: string;
   status?: ReviewStatus;
+  // Optional "YYYY-MM-DD". Omitted/undefined stores NULL — never auto-filled
+  // with today. `null` is also accepted and stores NULL.
+  reviewDate?: string | null;
 };
 
 export type PublicReviewListQuery = {

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { FULFILMENT_STATUS_VALUES, ORDER_STATUS_VALUES, PAYMENT_STATUS_VALUES } from "../../constants/database.constants.js";
 import { addressFieldsSchema } from "../AddressModels/address.validation.js";
+import { CHECKOUT_PAYMENT_METHOD_VALUES } from "../CheckoutModels/checkout.types.js";
 import { GuestOrderNotFoundError, InvalidOrderIdError } from "./order.errors.js";
 
 export function parseOrderId(rawId: unknown): number {
@@ -39,7 +40,8 @@ export const createOrderSchema = z
   .object({
     savedAddressId: z.number().int().positive("savedAddressId must be a positive integer").optional(),
     shippingAddress: addressFieldsSchema.optional(),
-    contactEmail: z.string().email().optional()
+    contactEmail: z.string().email().optional(),
+    paymentMethod: z.enum(CHECKOUT_PAYMENT_METHOD_VALUES).optional()
   })
   .refine((data) => (data.savedAddressId !== undefined) !== (data.shippingAddress !== undefined), {
     message: "Provide exactly one of savedAddressId or shippingAddress.",

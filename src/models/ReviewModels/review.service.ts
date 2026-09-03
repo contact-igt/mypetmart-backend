@@ -1,4 +1,4 @@
-import { Op, UniqueConstraintError, type Transaction } from "sequelize";
+import { Op, UniqueConstraintError, type Order as FindOrder, type Transaction } from "sequelize";
 
 import { DATABASE_TABLE_NAMES } from "../../constants/database.constants.js";
 import { sequelize } from "../../database/index.js";
@@ -41,6 +41,18 @@ import type {
 // never retroactively revoke Review eligibility (§46): "return_requested" is
 // still an accepted delivered state here.
 const DELIVERED_ORDER_STATUSES = ["delivered", "return_requested"] as const;
+
+// Public chronology key for every storefront-facing review list: the
+// admin-set review_date when present, otherwise the calendar date of
+// created_at. A review an admin dated 14 Aug must not sort above a genuine
+// review created 3 Sep just because created_at is newer (Customer Review
+// Enhancement Stage 1). Columns are qualified to the `ProductReview` table
+// alias Sequelize uses whenever the query has an include — both `products`
+// and `users` are joined in the storefront feeds and also carry a
+// `created_at` column (`review_date` is unambiguous: only product_reviews
+// has it). This is a fixed internal expression — no request input is ever
+// interpolated into it.
+const EFFECTIVE_REVIEW_DATE_SQL = "COALESCE(`ProductReview`.`review_date`, DATE(`ProductReview`.`created_at`))";
 
 // Full, unshortened name — used for Admin-facing views only, where seeing the
 // real customer name (or the Admin-entered display name) is expected.
@@ -97,6 +109,9 @@ function toPublicReviewJSON(review: ProductReview): PublicReviewJSON {
     customerDisplayName: customerName,
     verifiedPurchase: review.review_source === "customer" && review.verified_purchase,
     reviewSource: review.review_source,
+    // DATEONLY — already a plain "YYYY-MM-DD" string or null; never wrapped in
+    // a Date / toISOString(). The storefront resolves `reviewDate ?? createdAt`.
+    reviewDate: review.review_date ?? null,
     createdAt: review.created_at.toISOString()
   };
 }
@@ -128,6 +143,9 @@ function toAdminListItemJSON(review: ProductReview): AdminReviewListItemJSON {
     status: review.status,
     verifiedPurchase: review.verified_purchase,
     reviewSource: review.review_source,
+    // Admin-set public review date ("YYYY-MM-DD" or null). createdAt / updatedAt
+    // below stay the untouched system audit timestamps.
+    reviewDate: review.review_date ?? null,
     createdAt: review.created_at.toISOString(),
     updatedAt: review.updated_at.toISOString()
   };
@@ -279,9 +297,14 @@ export class ReviewService {
     const pageSize = Math.min(50, Math.max(1, query.pageSize || 10));
     const offset = (page - 1) * pageSize;
 
-    let order: Array<[string, string]> = [["created_at", "DESC"]];
-    if (query.sort === "highest") order = [["rating", "DESC"], ["created_at", "DESC"]];
-    if (query.sort === "lowest") order = [["rating", "ASC"], ["created_at", "DESC"]];
+    // newest = effective public review date (review_date ?? DATE(created_at)),
+    // then created_at, then id — a deterministic tiebreak so two reviews with
+    // the same effective date always order the same way. highest/lowest keep
+    // rating as the primary key, unchanged.
+    const effectiveDate = sequelize.literal(EFFECTIVE_REVIEW_DATE_SQL);
+    let order: FindOrder = [[effectiveDate, "DESC"], ["created_at", "DESC"], ["id", "DESC"]];
+    if (query.sort === "highest") order = [["rating", "DESC"], [effectiveDate, "DESC"], ["created_at", "DESC"], ["id", "DESC"]];
+    if (query.sort === "lowest") order = [["rating", "ASC"], [effectiveDate, "DESC"], ["created_at", "DESC"], ["id", "DESC"]];
 
     const [{ count, rows }, summary] = await Promise.all([
       ProductReview.findAndCountAll({
@@ -312,9 +335,12 @@ export class ReviewService {
     const pageSize = Math.min(50, Math.max(1, query.pageSize || 10));
     const offset = (page - 1) * pageSize;
 
-    let order: Array<[string, string]> = [["created_at", "DESC"], ["id", "DESC"]];
-    if (query.sort === "highest") order = [["rating", "DESC"], ["created_at", "DESC"], ["id", "DESC"]];
-    if (query.sort === "lowest") order = [["rating", "ASC"], ["created_at", "DESC"], ["id", "DESC"]];
+    // Same public effective-date chronology as the PDP list above — the
+    // homepage feed and a product's own PDP list must never disagree on order.
+    const effectiveDate = sequelize.literal(EFFECTIVE_REVIEW_DATE_SQL);
+    let order: FindOrder = [[effectiveDate, "DESC"], ["created_at", "DESC"], ["id", "DESC"]];
+    if (query.sort === "highest") order = [["rating", "DESC"], [effectiveDate, "DESC"], ["created_at", "DESC"], ["id", "DESC"]];
+    if (query.sort === "lowest") order = [["rating", "ASC"], [effectiveDate, "DESC"], ["created_at", "DESC"], ["id", "DESC"]];
 
     const { count, rows } = await ProductReview.findAndCountAll({
       where: { status: "approved" },
@@ -340,6 +366,8 @@ export class ReviewService {
         review: publicReview.review,
         customerName: publicReview.customerName,
         verifiedPurchase: publicReview.verifiedPurchase,
+        reviewDate: publicReview.reviewDate,
+        createdAt: publicReview.createdAt,
         product: {
           id: product.id,
           name: product.name,
@@ -421,6 +449,11 @@ export class ReviewService {
     if (input.title !== undefined) updates.title = input.title?.trim() || null;
     if (input.review !== undefined) updates.review = input.review;
     if (input.status !== undefined) updates.status = input.status;
+    // Tri-state: field absent (undefined) leaves the stored review_date
+    // untouched; explicit null clears it; a "YYYY-MM-DD" string sets it.
+    // Changing only the review date never touches moderation status,
+    // verified_purchase, review_source or ownership.
+    if (input.reviewDate !== undefined) updates.review_date = input.reviewDate;
 
     await review.update(updates);
     return toAdminDetailJSON(review);
@@ -451,7 +484,9 @@ export class ReviewService {
           status: input.status ?? "pending",
           verified_purchase: false,
           customer_name: input.customerName?.trim() || "Admin",
-          review_source: "admin"
+          review_source: "admin",
+          // Omitted / undefined stores NULL — never auto-filled with today.
+          review_date: input.reviewDate ?? null
         },
         { transaction: t }
       );

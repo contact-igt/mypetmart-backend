@@ -750,4 +750,337 @@ describe("Written Product Reviews — Backend Integration Tests", () => {
     const res = await request(app).post(ADMIN_REVIEWS_BASE).set("Authorization", `Bearer ${adminToken}`).send({ productId: product.id, rating: 5, review: "   " });
     expect(res.status).toBe(400);
   });
+
+  describe("Custom Review Date (Stage 1) — admin-controlled optional public review date", () => {
+    // Derived from the moment the suite runs so these never silently become
+    // future/past as the calendar moves (see Stage 1 §26).
+    const todayIso = (): string => new Date().toISOString().slice(0, 10);
+    const isoDateDaysAgo = (days: number): string => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - days);
+      return d.toISOString().slice(0, 10);
+    };
+    const isoDateDaysAhead = (days: number): string => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() + days);
+      return d.toISOString().slice(0, 10);
+    };
+
+    async function seedAdmin() {
+      return seedUser("admin", "Moderator");
+    }
+
+    async function createAdmin(
+      adminToken: string,
+      productId: number,
+      body: Record<string, unknown>
+    ) {
+      return request(app)
+        .post(ADMIN_REVIEWS_BASE)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ rating: 5, review: "Solid product.", status: "approved", productId, ...body });
+    }
+
+    it("1. Admin create with a custom review date persists review_date, leaves created_at independent, and both DTOs expose it", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+      const chosen = isoDateDaysAgo(19);
+
+      const res = await createAdmin(adminToken, product.id, { reviewDate: chosen });
+      expect(res.status).toBe(201);
+      expect(res.body.data.reviewDate).toBe(chosen);
+      expect(res.body.data.createdAt).toBeDefined();
+
+      const row = await ProductReview.findByPk(res.body.data.id);
+      expect(row?.review_date).toBe(chosen);
+      // created_at is the real system timestamp — set to ~now, not the chosen date.
+      expect(Date.now() - new Date(row!.created_at).getTime()).toBeLessThan(60_000);
+      expect(new Date(row!.created_at).toISOString().slice(0, 10)).not.toBe(chosen);
+
+      const publicList = await request(app).get(`${REVIEWS_BASE}/${product.id}/reviews`);
+      expect(publicList.body.data.items[0].reviewDate).toBe(chosen);
+      expect(publicList.body.data.items[0].createdAt).toBeDefined();
+
+      const detail = await request(app).get(`${ADMIN_REVIEWS_BASE}/${res.body.data.id}`).set("Authorization", `Bearer ${adminToken}`);
+      expect(detail.body.data.reviewDate).toBe(chosen);
+      expect(detail.body.data.createdAt).toBeDefined();
+      expect(detail.body.data.updatedAt).toBeDefined();
+    });
+
+    it("2. Admin create without a review date stores NULL and never auto-fills today", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+
+      const res = await createAdmin(adminToken, product.id, {});
+      expect(res.status).toBe(201);
+      expect(res.body.data.reviewDate).toBeNull();
+
+      const row = await ProductReview.findByPk(res.body.data.id);
+      expect(row?.review_date).toBeNull();
+      expect(row?.review_date).not.toBe(todayIso());
+    });
+
+    it("3. Admin edit can set a custom review date on an existing review", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+      const created = await createAdmin(adminToken, product.id, {});
+      const chosen = isoDateDaysAgo(5);
+
+      const res = await request(app)
+        .patch(`${ADMIN_REVIEWS_BASE}/${created.body.data.id}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ reviewDate: chosen });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.reviewDate).toBe(chosen);
+      const row = await ProductReview.findByPk(created.body.data.id);
+      expect(row?.review_date).toBe(chosen);
+    });
+
+    it("4. Admin edit with reviewDate: null clears the stored review date", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+      const created = await createAdmin(adminToken, product.id, { reviewDate: isoDateDaysAgo(8) });
+
+      const res = await request(app)
+        .patch(`${ADMIN_REVIEWS_BASE}/${created.body.data.id}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ reviewDate: null });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.reviewDate).toBeNull();
+      const row = await ProductReview.findByPk(created.body.data.id);
+      expect(row?.review_date).toBeNull();
+    });
+
+    it("5. Admin edit that omits reviewDate leaves an existing custom date untouched", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+      const chosen = isoDateDaysAgo(12);
+      const created = await createAdmin(adminToken, product.id, { reviewDate: chosen });
+
+      const res = await request(app)
+        .patch(`${ADMIN_REVIEWS_BASE}/${created.body.data.id}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ rating: 3, review: "Edited body only." });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.rating).toBe(3);
+      expect(res.body.data.reviewDate).toBe(chosen);
+      const row = await ProductReview.findByPk(created.body.data.id);
+      expect(row?.review_date).toBe(chosen);
+    });
+
+    it("6. A customer can never persist review_date — on create or on their own-review edit", async () => {
+      const product = await seedProduct(categoryId);
+      const { user: customer, token: customerToken } = await seedUser("customer", "Buyer Zero");
+      await seedOrderItem(customer.id, product, "delivered");
+
+      const created = await request(app)
+        .post(`${REVIEWS_BASE}/${product.id}/reviews`)
+        .set("Authorization", `Bearer ${customerToken}`)
+        .send({ rating: 5, review: "Great product", reviewDate: "2020-01-01" });
+      expect(created.status).toBe(201);
+
+      let row = await ProductReview.findOne({ where: { product_id: product.id, user_id: customer.id } });
+      expect(row?.review_date).toBeNull();
+
+      const edited = await request(app)
+        .patch(`${REVIEWS_BASE}/${product.id}/reviews/me`)
+        .set("Authorization", `Bearer ${customerToken}`)
+        .send({ review: "Updated my thoughts", reviewDate: "2019-06-30" });
+      expect(edited.status).toBe(200);
+
+      row = await ProductReview.findOne({ where: { product_id: product.id, user_id: customer.id } });
+      expect(row?.review_date).toBeNull();
+    });
+
+    it("7. A customer review (no override) stays verified and serialises reviewDate: null publicly", async () => {
+      const product = await seedProduct(categoryId);
+      const { user: customer, token: customerToken } = await seedUser("customer", "Genuine Buyer");
+      const { token: adminToken } = await seedAdmin();
+      await seedOrderItem(customer.id, product, "delivered");
+      const created = await request(app).post(`${REVIEWS_BASE}/${product.id}/reviews`).set("Authorization", `Bearer ${customerToken}`).send({ rating: 5, review: "Really happy with it." });
+      await request(app).patch(`${ADMIN_REVIEWS_BASE}/${created.body.data.id}`).set("Authorization", `Bearer ${adminToken}`).send({ status: "approved" });
+
+      const list = await request(app).get(`${REVIEWS_BASE}/${product.id}/reviews`);
+      expect(list.body.data.items[0].reviewDate).toBeNull();
+      expect(list.body.data.items[0].verifiedPurchase).toBe(true);
+    });
+
+    it("8. Public DTO exposes reviewDate + createdAt but still leaks no userId/orderItemId/email/status", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+      await createAdmin(adminToken, product.id, { reviewDate: isoDateDaysAgo(3) });
+
+      const list = await request(app).get(`${REVIEWS_BASE}/${product.id}/reviews`);
+      const item = list.body.data.items[0];
+      expect(item).toHaveProperty("reviewDate");
+      expect(item).toHaveProperty("createdAt");
+      expect(item.userId).toBeUndefined();
+      expect(item.orderItemId).toBeUndefined();
+      expect(item.email).toBeUndefined();
+      expect(item.customerEmail).toBeUndefined();
+      expect(item.status).toBeUndefined();
+    });
+
+    it("9. Admin list + detail DTOs expose reviewDate alongside createdAt and updatedAt", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+      const chosen = isoDateDaysAgo(6);
+      const created = await createAdmin(adminToken, product.id, { reviewDate: chosen });
+
+      const list = await request(app).get(`${ADMIN_REVIEWS_BASE}?productId=${product.id}`).set("Authorization", `Bearer ${adminToken}`);
+      const listItem = list.body.data.items.find((r: { id: number }) => r.id === created.body.data.id);
+      expect(listItem.reviewDate).toBe(chosen);
+      expect(listItem.createdAt).toBeDefined();
+      expect(listItem.updatedAt).toBeDefined();
+    });
+
+    it("10. newest sort respects the effective public review date, not created_at", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+
+      // B is created first (older created_at), no override → effective date = today.
+      const b = await createAdmin(adminToken, product.id, { review: "Review B", title: "B" });
+      // A is created later (newer created_at) but back-dated well into the past.
+      const a = await createAdmin(adminToken, product.id, { review: "Review A", title: "A", reviewDate: isoDateDaysAgo(30) });
+
+      const list = await request(app).get(`${REVIEWS_BASE}/${product.id}/reviews?sort=newest`);
+      const ids = list.body.data.items.map((r: { id: number }) => r.id);
+      expect(ids.indexOf(b.body.data.id)).toBeLessThan(ids.indexOf(a.body.data.id));
+    });
+
+    it("11. same effective review date orders deterministically by created_at DESC then id DESC", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+      const sameDate = isoDateDaysAgo(4);
+
+      const first = await createAdmin(adminToken, product.id, { review: "First", reviewDate: sameDate });
+      const second = await createAdmin(adminToken, product.id, { review: "Second", reviewDate: sameDate });
+
+      const run1 = await request(app).get(`${REVIEWS_BASE}/${product.id}/reviews?sort=newest`);
+      const run2 = await request(app).get(`${REVIEWS_BASE}/${product.id}/reviews?sort=newest`);
+      const order1 = run1.body.data.items.map((r: { id: number }) => r.id);
+      const order2 = run2.body.data.items.map((r: { id: number }) => r.id);
+      expect(order1).toEqual(order2);
+      expect(order1.indexOf(second.body.data.id)).toBeLessThan(order1.indexOf(first.body.data.id));
+    });
+
+    it("12. highest sort keeps rating as the primary key, effective date as the tiebreak", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+
+      const low = await createAdmin(adminToken, product.id, { rating: 3, review: "Three stars, dated recently", reviewDate: isoDateDaysAgo(1) });
+      const high = await createAdmin(adminToken, product.id, { rating: 5, review: "Five stars, dated long ago", reviewDate: isoDateDaysAgo(40) });
+      const highNewer = await createAdmin(adminToken, product.id, { rating: 5, review: "Five stars, dated recently", reviewDate: isoDateDaysAgo(2) });
+
+      const list = await request(app).get(`${REVIEWS_BASE}/${product.id}/reviews?sort=highest`);
+      const ids = list.body.data.items.map((r: { id: number }) => r.id);
+      // both 5-star reviews rank above the 3-star one...
+      expect(ids.indexOf(high.body.data.id)).toBeLessThan(ids.indexOf(low.body.data.id));
+      expect(ids.indexOf(highNewer.body.data.id)).toBeLessThan(ids.indexOf(low.body.data.id));
+      // ...and within the 5-star group the newer effective date comes first.
+      expect(ids.indexOf(highNewer.body.data.id)).toBeLessThan(ids.indexOf(high.body.data.id));
+    });
+
+    it("13. lowest sort keeps rating ASC as the primary key, effective date as the tiebreak", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+
+      const one = await createAdmin(adminToken, product.id, { rating: 1, review: "One star", reviewDate: isoDateDaysAgo(30) });
+      const five = await createAdmin(adminToken, product.id, { rating: 5, review: "Five stars", reviewDate: isoDateDaysAgo(1) });
+
+      const list = await request(app).get(`${REVIEWS_BASE}/${product.id}/reviews?sort=lowest`);
+      const ids = list.body.data.items.map((r: { id: number }) => r.id);
+      expect(ids.indexOf(one.body.data.id)).toBeLessThan(ids.indexOf(five.body.data.id));
+    });
+
+    it("14. rejects a malformed or impossible calendar review date", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+
+      for (const bad of ["2026-13-40", "abc", "2025-02-29", "14-08-2026", "2026-8-1"]) {
+        const res = await createAdmin(adminToken, product.id, { reviewDate: bad });
+        expect(res.status).toBe(400);
+      }
+    });
+
+    it("15. rejects a future review date on both create and edit", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+
+      const createRes = await createAdmin(adminToken, product.id, { reviewDate: isoDateDaysAhead(5) });
+      expect(createRes.status).toBe(400);
+
+      const created = await createAdmin(adminToken, product.id, {});
+      const editRes = await request(app)
+        .patch(`${ADMIN_REVIEWS_BASE}/${created.body.data.id}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ reviewDate: isoDateDaysAhead(1) });
+      expect(editRes.status).toBe(400);
+    });
+
+    it("16. today's date is accepted", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+      const res = await createAdmin(adminToken, product.id, { reviewDate: todayIso() });
+      expect(res.status).toBe(201);
+      expect(res.body.data.reviewDate).toBe(todayIso());
+    });
+
+    it("17. a custom review date never changes moderation visibility", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+
+      const pending = await createAdmin(adminToken, product.id, { status: "pending", reviewDate: isoDateDaysAgo(2) });
+      const hidden = await request(app).get(`${REVIEWS_BASE}/${product.id}/reviews`);
+      expect(hidden.body.data.items).toHaveLength(0);
+
+      await request(app).patch(`${ADMIN_REVIEWS_BASE}/${pending.body.data.id}`).set("Authorization", `Bearer ${adminToken}`).send({ status: "approved" });
+      const shown = await request(app).get(`${REVIEWS_BASE}/${product.id}/reviews`);
+      expect(shown.body.data.items).toHaveLength(1);
+      expect(shown.body.data.items[0].reviewDate).toBe(isoDateDaysAgo(2));
+    });
+
+    it("18. changing only review_date does not affect rating aggregation", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+      const four = await createAdmin(adminToken, product.id, { rating: 4, review: "Four" });
+      await createAdmin(adminToken, product.id, { rating: 2, review: "Two" });
+
+      const before = await request(app).get(`${REVIEWS_BASE}/${product.id}/reviews`);
+      expect(before.body.data.summary.averageRating).toBe(3);
+      expect(before.body.data.summary.reviewCount).toBe(2);
+
+      await request(app).patch(`${ADMIN_REVIEWS_BASE}/${four.body.data.id}`).set("Authorization", `Bearer ${adminToken}`).send({ reviewDate: isoDateDaysAgo(10) });
+
+      const after = await request(app).get(`${REVIEWS_BASE}/${product.id}/reviews`);
+      expect(after.body.data.summary.averageRating).toBe(3);
+      expect(after.body.data.summary.reviewCount).toBe(2);
+      expect(after.body.data.summary.distribution).toEqual(before.body.data.summary.distribution);
+    });
+
+    it("19. the global storefront review feed exposes reviewDate + createdAt and uses effective-date chronology", async () => {
+      const product = await seedProduct(categoryId);
+      const { token: adminToken } = await seedAdmin();
+
+      const recent = await createAdmin(adminToken, product.id, { review: "Recent, no override", title: "recent" });
+      const backdated = await createAdmin(adminToken, product.id, { review: "Created now but back-dated", title: "backdated", reviewDate: isoDateDaysAgo(45) });
+
+      const feed = await request(app).get(`/api/v1/storefront/reviews?sort=newest`);
+      expect(feed.status).toBe(200);
+      const feedItems = feed.body.data.reviews as Array<{ id: number; reviewDate: string | null; createdAt: string }>;
+
+      const recentItem = feedItems.find((r) => r.id === recent.body.data.id);
+      const backdatedItem = feedItems.find((r) => r.id === backdated.body.data.id);
+      expect(recentItem).toBeDefined();
+      expect(recentItem).toHaveProperty("createdAt");
+      expect(recentItem!.reviewDate).toBeNull();
+      expect(backdatedItem!.reviewDate).toBe(isoDateDaysAgo(45));
+
+      const ids = feedItems.map((r) => r.id);
+      expect(ids.indexOf(recent.body.data.id)).toBeLessThan(ids.indexOf(backdated.body.data.id));
+    });
+  });
 });

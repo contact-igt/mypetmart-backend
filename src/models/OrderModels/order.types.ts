@@ -1,5 +1,5 @@
 import type { FulfilmentStatus, OrderStatus, PaymentStatus } from "../../constants/database.constants.js";
-import type { InlineAddressInput } from "../CheckoutModels/checkout.types.js";
+import type { CheckoutPaymentMethod, InlineAddressInput } from "../CheckoutModels/checkout.types.js";
 import type { OrderShipmentSummaryJSON, ShipmentJSON } from "../ShipmentModels/shipment.types.js";
 
 // Exactly one of the two must be present — enforced by createOrderSchema's
@@ -10,6 +10,7 @@ export type CreateOrderInput = {
   savedAddressId?: number;
   shippingAddress?: InlineAddressInput;
   contactEmail?: string;
+  paymentMethod?: CheckoutPaymentMethod;
 };
 
 export type OrderItemJSON = {

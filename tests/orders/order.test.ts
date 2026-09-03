@@ -3,6 +3,22 @@ import crypto from "node:crypto";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+const mockedShippingConfig = vi.hoisted(() => ({
+  provider: "ithink",
+  accessToken: "test-access-token",
+  secretKey: "test-secret-key",
+  apiBaseUrl: "https://pre-alpha.ithinklogistics.com",
+  trackingBaseUrl: "https://pre-alpha.ithinklogistics.com",
+  storeId: "test-store",
+  pickupAddressId: "test-pickup",
+  returnAddressId: "test-return",
+  originPincode: "400001",
+  timeoutMs: 1_000,
+  ready: true
+}));
+
+vi.mock("../../src/config/shipping.config.js", () => ({ shippingConfig: mockedShippingConfig }));
+
 import { app } from "../../src/app.js";
 import { paymentConfig } from "../../src/config/payment.config.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
@@ -31,6 +47,7 @@ import { connectDatabase, disconnectDatabase, sequelize } from "../../src/databa
 import { PasswordService } from "../../src/services/auth/password.service.js";
 import { SessionService } from "../../src/services/auth/session.service.js";
 import { TokenService } from "../../src/services/auth/token.service.js";
+import { IThinkClient } from "../../src/models/ShipmentModels/ithink.client.js";
 import { buildPayuResponseHash } from "../../src/models/PaymentModels/payu-hash.util.js";
 
 const CART_URL = "/api/v1/storefront/cart";
@@ -368,6 +385,24 @@ describe("Order Backend Integration Tests", () => {
       expect(res.body.data.orderNumber).toMatch(/^ORD-\d{6}$/);
       expect(res.body.data.items).toHaveLength(1);
       expect(res.body.data.items[0].quantity).toBe(2);
+    });
+
+    it("rejects an explicitly selected payment method when the Order destination is unserviceable", async () => {
+      const { addressId } = await addSimpleItemAndCreateAddress(customerAToken, { stock: 10 });
+      const check = vi.spyOn(IThinkClient, "checkServiceability").mockResolvedValue([]);
+      const beforeOrders = await Order.count();
+      const beforeItems = await OrderItem.count();
+
+      const res = await request(app)
+        .post(ORDERS_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ savedAddressId: addressId, paymentMethod: "payu" });
+
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe("CHECKOUT_DESTINATION_UNSERVICEABLE");
+      expect(await Order.count()).toBe(beforeOrders);
+      expect(await OrderItem.count()).toBe(beforeItems);
+      expect(check).toHaveBeenCalledWith("400001", "prepaid");
     });
 
     it("creates a pending Order from a Variant Product Cart", async () => {
@@ -770,9 +805,34 @@ describe("Order Backend Integration Tests", () => {
   // Status transitions
   // ---------------------------------------------------------------------
   describe("Status Transitions", () => {
-    it("accepts a valid transition (pending -> confirmed)", async () => {
+    it("blocks an unpaid online Order from entering fulfilment", async () => {
       const a = await addSimpleItemAndCreateAddress(customerAToken, { stock: 10 });
       const created = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: a.addressId });
+
+      const res = await request(app)
+        .patch(`${ADMIN_ORDERS_URL}/${created.body.data.id}/status`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ status: "confirmed" });
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe("ORDER_PAYMENT_REQUIRED_FOR_FULFILMENT");
+    });
+
+    it("blocks an unpaid online Order from jumping straight to delivered", async () => {
+      const a = await addSimpleItemAndCreateAddress(customerAToken, { stock: 10 });
+      const created = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: a.addressId });
+
+      const res = await request(app)
+        .patch(`${ADMIN_ORDERS_URL}/${created.body.data.id}/status`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ status: "delivered" });
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe("ORDER_PAYMENT_REQUIRED_FOR_FULFILMENT");
+    });
+
+    it("allows a paid online Order to enter fulfilment", async () => {
+      const a = await addSimpleItemAndCreateAddress(customerAToken, { stock: 10 });
+      const created = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: a.addressId });
+      await Order.update({ payment_status: "paid" }, { where: { id: created.body.data.id } });
 
       const res = await request(app)
         .patch(`${ADMIN_ORDERS_URL}/${created.body.data.id}/status`)
@@ -782,21 +842,10 @@ describe("Order Backend Integration Tests", () => {
       expect(res.body.data.status).toBe("confirmed");
     });
 
-    it("allows jumping straight ahead to a later non-adjacent status (pending -> delivered) — matches the existing prior-art graph, which is forward-any not forward-one", async () => {
-      const a = await addSimpleItemAndCreateAddress(customerAToken, { stock: 10 });
-      const created = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: a.addressId });
-
-      const res = await request(app)
-        .patch(`${ADMIN_ORDERS_URL}/${created.body.data.id}/status`)
-        .set("Authorization", `Bearer ${adminToken}`)
-        .send({ status: "delivered" });
-      expect(res.status).toBe(200);
-      expect(res.body.data.status).toBe("delivered");
-    });
-
     it("rejects a backward transition (confirmed -> pending)", async () => {
       const a = await addSimpleItemAndCreateAddress(customerAToken, { stock: 10 });
       const created = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: a.addressId });
+      await Order.update({ payment_status: "paid" }, { where: { id: created.body.data.id } });
       await request(app).patch(`${ADMIN_ORDERS_URL}/${created.body.data.id}/status`).set("Authorization", `Bearer ${adminToken}`).send({ status: "confirmed" });
 
       const res = await request(app)
@@ -842,6 +891,7 @@ describe("Order Backend Integration Tests", () => {
     it("persists status after refresh (repeated GET)", async () => {
       const a = await addSimpleItemAndCreateAddress(customerAToken, { stock: 10 });
       const created = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: a.addressId });
+      await Order.update({ payment_status: "paid" }, { where: { id: created.body.data.id } });
       await request(app).patch(`${ADMIN_ORDERS_URL}/${created.body.data.id}/status`).set("Authorization", `Bearer ${adminToken}`).send({ status: "confirmed" });
 
       const first = await request(app).get(`${ADMIN_ORDERS_URL}/${created.body.data.id}`).set("Authorization", `Bearer ${adminToken}`);
@@ -985,6 +1035,323 @@ describe("Order Backend Integration Tests", () => {
   });
 
   // ---------------------------------------------------------------------
+  // Pending Order Cancellation — customer + guest self-service (Stage 1.5)
+  // ---------------------------------------------------------------------
+  describe("Pending Order Cancellation (customer + guest self-service)", () => {
+    const INITIATE_PATH = "/api/v1/storefront/payments/initiate";
+    const COD_PATH = "/api/v1/storefront/payments/cod";
+    const cancelUrl = (orderId: number | string) => `${ORDERS_URL}/${orderId}/cancel`;
+    const guestCancelUrl = (token: string) => `${ORDERS_URL}/guest/${token}/cancel`;
+
+    beforeEach(() => {
+      vi.stubGlobal("fetch", vi.fn());
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    });
+
+    async function createCustomerPendingOrder(
+      token: string,
+      overrides: { stock?: number; quantity?: number } = {}
+    ): Promise<{ orderId: number; productId: number }> {
+      const { product, addressId } = await addSimpleItemAndCreateAddress(
+        token,
+        { stock: overrides.stock ?? 10 },
+        overrides.quantity ?? 1
+      );
+      const res = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${token}`).send({ savedAddressId: addressId });
+      expect(res.status).toBe(201);
+      return { orderId: res.body.data.id, productId: product.id };
+    }
+
+    async function createGuestPendingOrder(): Promise<{ agent: ReturnType<typeof request.agent>; orderId: number; token: string; productId: number }> {
+      const product = await createSimpleProduct({ stock: 10 });
+      const agent = request.agent(app);
+      await agent.post(`${CART_URL}/items`).send({ productId: product.id, quantity: 1 });
+      const res = await agent.post(ORDERS_URL).send({ shippingAddress: validAddressPayload(), contactEmail: "guest@example.com" });
+      expect(res.status).toBe(201);
+      return { agent, orderId: res.body.data.id, token: res.body.data.guestAccessToken, productId: product.id };
+    }
+
+    /** Runs PayU initiation for an Order — leaves a provider:"payu" status:"pending" Payment with a provider_order_id. */
+    async function initiatePayu(opts: { orderId: number; customerToken?: string; guestToken?: string }): Promise<{ txnid: string; amount: string }> {
+      const httpReq = request(app).post(INITIATE_PATH);
+      if (opts.customerToken) httpReq.set("Authorization", `Bearer ${opts.customerToken}`);
+      const res = await httpReq.send(opts.guestToken ? { guestAccessToken: opts.guestToken } : { orderId: opts.orderId });
+      expect(res.status).toBe(200);
+      return { txnid: res.body.data.fields.txnid, amount: res.body.data.fields.amount };
+    }
+
+    function stubVerify(txnid: string, providerStatus: "success" | "failure", amount: string) {
+      vi.mocked(fetch).mockResolvedValue(
+        jsonResponse({ status: 1, transaction_details: { [txnid]: { mihpayid: `mihpay_${txnid}`, status: providerStatus, amt: amount, mode: "UPI" } } })
+      );
+    }
+    function stubVerifyUnavailable() {
+      vi.mocked(fetch).mockRejectedValue(new Error("PayU Verify network failure"));
+    }
+
+    // --- Authenticated customer (§36) ---------------------------------------
+
+    it("1. cancels the customer's own pending Order with no payment attempt; Cart stays active", async () => {
+      const { orderId } = await createCustomerPendingOrder(customerAToken);
+
+      const res = await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe("cancelled");
+      expect(res.body.data.cancelledAt).not.toBeNull();
+
+      const order = await Order.findByPk(orderId);
+      expect(order!.status).toBe("cancelled");
+      expect(order!.cancelled_at).not.toBeNull();
+
+      const cart = await request(app).get(CART_URL).set("Authorization", `Bearer ${customerAToken}`);
+      expect(cart.body.data.items).toHaveLength(1);
+      const cartRow = await Cart.findOne({ where: { user_id: CUSTOMER_A_ID } });
+      expect(cartRow!.status).toBe("active");
+    });
+
+    it("2. a cancelled Order no longer blocks creating a new Order", async () => {
+      const { orderId } = await createCustomerPendingOrder(customerAToken);
+      const blocked = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: (await Address.findOne({ where: { user_id: CUSTOMER_A_ID } }))!.id });
+      expect(blocked.body.error.code).toBe("ORDER_ALREADY_PENDING");
+
+      await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+
+      const { addressId } = await addSimpleItemAndCreateAddress(customerAToken, { stock: 5 });
+      const created = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: addressId });
+      expect(created.status).toBe(201);
+      expect(created.body.data.id).not.toBe(orderId);
+      expect(created.body.data.status).toBe("pending");
+    });
+
+    it("3. a customer cannot cancel another customer's Order (same safe 404 as an unknown Order)", async () => {
+      const { orderId } = await createCustomerPendingOrder(customerAToken);
+      const res = await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerBToken}`).send({});
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe("ORDER_NOT_FOUND");
+      expect((await Order.findByPk(orderId))!.status).toBe("pending");
+    });
+
+    it("4. cancellation is idempotent — a repeat request returns the cancelled Order, not an error", async () => {
+      const { orderId } = await createCustomerPendingOrder(customerAToken);
+      const first = await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+      const second = await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(second.body.data.status).toBe("cancelled");
+    });
+
+    it("5. a confirmed (paid) Order is rejected by the pending-cancel endpoint", async () => {
+      const { orderId } = await createPaidOrder(customerAToken, { stock: 10, quantity: 1 });
+      const res = await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+      expect([409, 422]).toContain(res.status);
+      expect(["ORDER_ALREADY_PAID", "ORDER_NOT_CANCELLABLE"]).toContain(res.body.error.code);
+      expect((await Order.findByPk(orderId))!.status).toBe("confirmed");
+    });
+
+    it("6. a processing Order is rejected by the pending-cancel endpoint", async () => {
+      const { orderId } = await createPaidOrder(customerAToken, { stock: 10, quantity: 1 });
+      await request(app).patch(`${ADMIN_ORDERS_URL}/${orderId}/status`).set("Authorization", `Bearer ${adminToken}`).send({ status: "processing" });
+      const res = await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe("ORDER_NOT_CANCELLABLE");
+      expect((await Order.findByPk(orderId))!.status).toBe("processing");
+    });
+
+    // --- PayU (§37) --------------------------------------------------------
+
+    it("7. a pending Order whose PayU attempt is terminal-failed can be cancelled (no reconciliation call)", async () => {
+      const { orderId } = await createCustomerPendingOrder(customerAToken);
+      const { txnid } = await initiatePayu({ orderId, customerToken: customerAToken });
+      await Payment.update({ status: "failed", failed_at: new Date() }, { where: { provider_order_id: txnid } });
+
+      const res = await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe("cancelled");
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it("8. a pending Order whose PayU attempt is terminal-cancelled can be cancelled", async () => {
+      const { orderId } = await createCustomerPendingOrder(customerAToken);
+      const { txnid } = await initiatePayu({ orderId, customerToken: customerAToken });
+      await Payment.update({ status: "cancelled", failed_at: new Date() }, { where: { provider_order_id: txnid } });
+
+      const res = await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe("cancelled");
+    });
+
+    it("9. a still-pending PayU attempt is reconciled against PayU before the cancellation decision", async () => {
+      const { orderId } = await createCustomerPendingOrder(customerAToken);
+      const { txnid, amount } = await initiatePayu({ orderId, customerToken: customerAToken });
+      stubVerify(txnid, "failure", amount);
+
+      const res = await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe("cancelled");
+      expect(fetch).toHaveBeenCalled(); // Verify Payment API was consulted
+      expect((await Payment.findOne({ where: { provider_order_id: txnid } }))!.status).toBe("failed");
+    });
+
+    it("10. reconciliation that returns PAID blocks cancellation; the Order ends provider-authoritative paid", async () => {
+      const { orderId } = await createCustomerPendingOrder(customerAToken);
+      const { txnid, amount } = await initiatePayu({ orderId, customerToken: customerAToken });
+      stubVerify(txnid, "success", amount);
+
+      const res = await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe("ORDER_ALREADY_PAID");
+
+      const order = await Order.findByPk(orderId);
+      expect(order!.payment_status).toBe("paid");
+      expect(order!.status).not.toBe("cancelled");
+      expect((await Payment.findOne({ where: { provider_order_id: txnid } }))!.status).toBe("paid");
+    });
+
+    it("11. an uncertain/unavailable PayU Verify result blocks cancellation with a retryable error", async () => {
+      const { orderId } = await createCustomerPendingOrder(customerAToken);
+      const { txnid } = await initiatePayu({ orderId, customerToken: customerAToken });
+      stubVerifyUnavailable();
+
+      const res = await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe("PAYMENT_STATUS_UNCERTAIN");
+
+      const order = await Order.findByPk(orderId);
+      expect(order!.status).toBe("pending"); // untouched
+      expect((await Payment.findOne({ where: { provider_order_id: txnid } }))!.status).toBe("pending"); // untouched
+    });
+
+    it("12. a payment finalized paid before the cancel request cannot produce a cancelled+unpaid Order", async () => {
+      const { orderId } = await createCustomerPendingOrder(customerAToken);
+      const { txnid } = await initiatePayu({ orderId, customerToken: customerAToken });
+      // Simulate the webhook/finalization having committed first.
+      await Payment.update({ status: "paid", paid_at: new Date() }, { where: { provider_order_id: txnid } });
+      await Order.update({ status: "confirmed", payment_status: "paid" }, { where: { id: orderId } });
+
+      const res = await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+      expect([409, 422]).toContain(res.status);
+      const order = await Order.findByPk(orderId);
+      expect(order!.status).not.toBe("cancelled");
+      expect(order!.payment_status).toBe("paid");
+    });
+
+    // --- COD (§38) --------------------------------------------------------
+
+    it("13-15. a confirmed COD Order is rejected; its COD Payment and stock are untouched", async () => {
+      vi.spyOn(IThinkClient, "checkServiceability").mockResolvedValue(["test-courier"]);
+      const { orderId, productId } = await createCustomerPendingOrder(customerAToken, { stock: 10, quantity: 3 });
+      const cod = await request(app).post(COD_PATH).set("Authorization", `Bearer ${customerAToken}`).send({ orderId });
+      expect(cod.status).toBe(200);
+      expect((await Product.findByPk(productId))!.stock).toBe(7); // decremented on COD confirmation
+      const codPaymentBefore = await Payment.findOne({ where: { order_id: orderId, provider: "cod" } });
+
+      const res = await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe("ORDER_NOT_CANCELLABLE");
+
+      const order = await Order.findByPk(orderId);
+      expect(order!.status).toBe("confirmed");
+      expect(order!.payment_status).toBe("pending"); // COD stays pending, never mistaken for unpaid-online
+      expect((await Product.findByPk(productId))!.stock).toBe(7); // NOT restored
+      const codPaymentAfter = await Payment.findOne({ where: { order_id: orderId, provider: "cod" } });
+      expect(codPaymentAfter!.status).toBe(codPaymentBefore!.status);
+    });
+
+    // --- Cart / inventory (§39) ------------------------------------------
+
+    it("16-18. cancelling an unpaid pending online Order leaves stock, Cart and CartItems untouched", async () => {
+      const { orderId, productId } = await createCustomerPendingOrder(customerAToken, { stock: 8, quantity: 2 });
+      const stockBefore = (await Product.findByPk(productId))!.stock;
+      const cartItemsBefore = await CartItem.count();
+
+      await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+
+      expect((await Product.findByPk(productId))!.stock).toBe(stockBefore);
+      expect(await CartItem.count()).toBe(cartItemsBefore);
+      const cart = await request(app).get(CART_URL).set("Authorization", `Bearer ${customerAToken}`);
+      expect(cart.body.data.items).toHaveLength(1);
+      expect((await Cart.findOne({ where: { user_id: CUSTOMER_A_ID } }))!.status).toBe("active");
+    });
+
+    it("19-20. after cancellation the customer can modify the Cart and create a fresh pending Order", async () => {
+      const { orderId } = await createCustomerPendingOrder(customerAToken);
+      await request(app).post(cancelUrl(orderId)).set("Authorization", `Bearer ${customerAToken}`).send({});
+
+      const another = await createSimpleProduct({ stock: 10 });
+      const add = await request(app).post(`${CART_URL}/items`).set("Authorization", `Bearer ${customerAToken}`).send({ productId: another.id, quantity: 1 });
+      expect([200, 201]).toContain(add.status);
+
+      const addr = await Address.findOne({ where: { user_id: CUSTOMER_A_ID } });
+      const created = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: addr!.id });
+      expect(created.status).toBe(201);
+      expect(created.body.data.items.length).toBeGreaterThanOrEqual(2);
+    });
+
+    // --- Guest (§40) -----------------------------------------------------
+
+    it("21. a guest can cancel their own pending Order with a valid recovery token", async () => {
+      const { token, orderId } = await createGuestPendingOrder();
+      const res = await request(app).post(guestCancelUrl(token)).send({});
+      expect(res.status).toBe(200);
+      expect(res.body.data.id).toBe(orderId);
+      expect(res.body.data.status).toBe("cancelled");
+      expect(res.body.data.shippingAddress.latitude).toBeUndefined(); // guest-safe DTO
+    });
+
+    it("22. an invalid/unknown guest token cannot cancel any Order", async () => {
+      const { orderId } = await createGuestPendingOrder();
+      const bad = await request(app).post(guestCancelUrl(crypto.randomBytes(32).toString("hex"))).send({});
+      expect(bad.status).toBe(404);
+      expect(bad.body.error.code).toBe("GUEST_ORDER_NOT_FOUND");
+      const malformed = await request(app).post(guestCancelUrl("not-a-real-token")).send({});
+      expect(malformed.status).toBe(404);
+      expect((await Order.findByPk(orderId))!.status).toBe("pending");
+    });
+
+    it("23. one guest's token cannot cancel a different guest's Order", async () => {
+      const guestA = await createGuestPendingOrder();
+      const guestB = await createGuestPendingOrder();
+      const res = await request(app).post(guestCancelUrl(guestB.token)).send({});
+      // token B only ever resolves to order B
+      expect(res.body.data.id).toBe(guestB.orderId);
+      expect((await Order.findByPk(guestA.orderId))!.status).toBe("pending");
+    });
+
+    it("24. a guest paid Order cannot be cancelled through the pending-cancel endpoint", async () => {
+      const { token, orderId } = await createGuestPendingOrder();
+      const { txnid } = await initiatePayu({ orderId, guestToken: token });
+      await Payment.update({ status: "paid", paid_at: new Date() }, { where: { provider_order_id: txnid } });
+      await Order.update({ status: "confirmed", payment_status: "paid" }, { where: { id: orderId } });
+
+      const res = await request(app).post(guestCancelUrl(token)).send({});
+      expect([409, 422]).toContain(res.status);
+      expect((await Order.findByPk(orderId))!.status).toBe("confirmed");
+    });
+
+    it("25. a guest cancellation releases the one-pending-Order block for that guest identity", async () => {
+      const { agent, orderId } = await createGuestPendingOrder();
+      // Same guest identity, repeated create → returns the same pending Order,
+      // rotating the recovery token (see Guest Order Idempotency) — use the
+      // freshest token to cancel.
+      const blocked = await agent.post(ORDERS_URL).send({ shippingAddress: validAddressPayload(), contactEmail: "guest@example.com" });
+      expect(blocked.body.data.id).toBe(orderId);
+
+      const cancel = await request(app).post(guestCancelUrl(blocked.body.data.guestAccessToken)).send({});
+      expect(cancel.status).toBe(200);
+
+      const another = await createSimpleProduct({ stock: 10 });
+      await agent.post(`${CART_URL}/items`).send({ productId: another.id, quantity: 1 });
+      const fresh = await agent.post(ORDERS_URL).send({ shippingAddress: validAddressPayload(), contactEmail: "guest@example.com" });
+      expect(fresh.status).toBe(201);
+      expect(fresh.body.data.id).not.toBe(orderId);
+      expect(fresh.body.data.status).toBe("pending");
+    });
+  });
+
+  // ---------------------------------------------------------------------
   // Notes
   // ---------------------------------------------------------------------
   describe("Order Notes", () => {
@@ -1029,6 +1396,20 @@ describe("Order Backend Integration Tests", () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data).toEqual({ updated: 0, skipped: 1 });
+    });
+
+    it("skips an unpaid online Order when bulk fulfilment status is requested", async () => {
+      const a = await addSimpleItemAndCreateAddress(customerAToken, { stock: 10 });
+      const created = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerAToken}`).send({ savedAddressId: a.addressId });
+
+      const res = await request(app)
+        .patch(`${ADMIN_ORDERS_URL}/bulk-status`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ ids: [created.body.data.id], status: "processing" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({ updated: 0, skipped: 1 });
+      expect((await Order.findByPk(created.body.data.id))?.status).toBe("pending");
     });
   });
 
@@ -1599,12 +1980,12 @@ describe("Order Backend Integration Tests", () => {
       expect(res.body.data.shippingAddress.recipientName).toBe("Jordan Rivera");
     });
 
-    it("allows an Admin to transition a guest Order's status", async () => {
+    it("blocks an Admin from moving an unpaid guest Order into fulfilment", async () => {
       const { id } = await createGuestOrder();
 
       const res = await request(app).patch(`${ADMIN_ORDERS_URL}/${id}/status`).set("Authorization", `Bearer ${adminToken}`).send({ status: "confirmed" });
-      expect(res.status).toBe(200);
-      expect(res.body.data.status).toBe("confirmed");
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe("ORDER_PAYMENT_REQUIRED_FOR_FULFILMENT");
     });
   });
 
@@ -1832,4 +2213,3 @@ describe("Order Backend Integration Tests", () => {
     });
   });
 });
-

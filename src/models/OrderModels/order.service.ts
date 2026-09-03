@@ -32,8 +32,10 @@ import { RefundService } from "../RefundModels/refund.service.js";
 import { ShipmentService } from "../ShipmentModels/shipment.service.js";
 import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import type { ShipmentJSON } from "../ShipmentModels/shipment.types.js";
+import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
 import { getValidNextOrderStatuses, isValidOrderStatusTransition } from "./order.constants.js";
 import {
+  OrderPaymentRequiredForFulfilmentError,
   GuestOrderNotFoundError,
   OrderAddressNotFoundError,
   OrderAddressRequiredError,
@@ -43,11 +45,14 @@ import {
   OrderEmailRequiredError,
   OrderInsufficientStockError,
   OrderInvalidStatusTransitionError,
+  OrderNotCancellableError,
   OrderNotFoundError,
   OrderProductNotAvailableError,
   OrderShippingAddressNotEditableError,
   OrderVariantNotAvailableError
 } from "./order.errors.js";
+import { OrderAlreadyPaidError, PaymentStatusUncertainError } from "../PaymentModels/payment.errors.js";
+import { CheckoutDestinationUnserviceableError } from "../CheckoutModels/checkout.errors.js";
 import type {
   AddOrderNoteInput,
   AdminOrderCustomerJSON,
@@ -196,14 +201,14 @@ function fromSavedAddress(address: Address): ShippingSnapshot {
  * guests may only use shippingAddress. createOrderSchema's Zod refine already
  * guarantees exactly one of the two fields is present.
  */
-async function resolveShippingSnapshot(identity: CartIdentity, input: CreateOrderInput, transaction: Transaction): Promise<ShippingSnapshot> {
+async function resolveShippingSnapshot(identity: CartIdentity, input: CreateOrderInput, transaction?: Transaction): Promise<ShippingSnapshot> {
   if (input.savedAddressId !== undefined) {
     if (identity.type !== "customer") {
       // Guests have no persistent address book — a guest-supplied
       // savedAddressId is never looked up, only rejected.
       throw new OrderAddressRequiredError();
     }
-    const address = await Address.findOne({ where: { id: input.savedAddressId, user_id: identity.userId }, transaction });
+    const address = await Address.findOne({ where: { id: input.savedAddressId, user_id: identity.userId }, ...(transaction ? { transaction } : {}) });
     if (!address) {
       throw new OrderAddressNotFoundError(input.savedAddressId);
     }
@@ -412,6 +417,149 @@ async function reconcileExistingPendingOrderPayment(identity: CartIdentity): Pro
   await PaymentService.reconcilePendingAttempt(payment);
 }
 
+const ADMIN_FULFILMENT_STATUSES = new Set<OrderStatus>(["confirmed", "processing", "shipped", "delivered"]);
+
+async function hasPendingOrder(identity: CartIdentity): Promise<boolean> {
+  const where = identity.type === "customer"
+    ? { user_id: identity.userId, status: "pending" as const }
+    : { guest_identity_hash: identity.tokenHash, status: "pending" as const };
+  return Boolean(await Order.findOne({ where, attributes: ["id"] }));
+}
+
+async function assertAdminFulfilmentPaymentSafe(order: Order, nextStatus: OrderStatus, transaction: Transaction): Promise<void> {
+  if (!ADMIN_FULFILMENT_STATUSES.has(nextStatus) || order.payment_status === "paid") {
+    return;
+  }
+
+  const codPayment = await Payment.findOne({
+    where: { order_id: order.id, provider: "cod" },
+    attributes: ["id"],
+    transaction
+  });
+  if (!codPayment) {
+    throw new OrderPaymentRequiredForFulfilmentError(order.id, nextStatus);
+  }
+}
+
+// Online providers whose pending attempt must be resolved before an Order can
+// be self-service cancelled. "cod" is deliberately excluded — a COD Payment
+// only ever exists on an already-confirmed Order (see confirmCodOrder).
+const RECONCILABLE_ONLINE_PROVIDERS = ["payu", "breeze"] as const;
+
+/**
+ * Shared core of customer + guest pending-Order self-service cancellation.
+ * `order` has already been resolved to the caller (session ownership, or a
+ * verified guest recovery token). Never deletes anything, never touches stock
+ * (a pending Order never decremented it), never touches the Cart (left active
+ * so the customer can check out again). Reconciles a still-pending PayU
+ * attempt against PayU's Verify API FIRST — outside any transaction — then
+ * cancels inside a transaction that locks the Payment rows and the Order row
+ * (the same lock order PaymentFinalizationService uses) and re-checks every
+ * guard, so a racing payment finalization can never produce a cancelled Order
+ * that money was actually captured for without the existing commerce_exception
+ * path catching it.
+ */
+async function performPendingOrderCancellation(order: Order): Promise<void> {
+  // Idempotent replay — an already-cancelled Order is a safe no-op success
+  // (the caller re-reads and returns the current Order detail afterwards).
+  if (order.status === "cancelled") {
+    return;
+  }
+  if (order.status !== "pending") {
+    throw new OrderNotCancellableError(order.id, order.status);
+  }
+  // Fast reject before any provider call.
+  if (order.payment_status === "paid") {
+    throw new OrderAlreadyPaidError(order.id);
+  }
+
+  // --- Payment reconciliation — deliberately OUTSIDE any transaction --------
+  // A PayU network call must never run inside an open DB transaction (the same
+  // rule PaymentService and reconcileExistingPendingOrderPayment follow).
+  const pendingOnlineAttempt = await Payment.findOne({
+    where: { order_id: order.id, status: "pending", provider: { [Op.in]: RECONCILABLE_ONLINE_PROVIDERS } },
+    order: [["id", "DESC"]]
+  });
+  if (pendingOnlineAttempt && pendingOnlineAttempt.provider === "payu" && pendingOnlineAttempt.provider_order_id) {
+    // Cross-check the real provider state. A network/provider failure is
+    // swallowed inside reconcilePendingAttempt — the attempt simply stays
+    // "pending" and the transactional re-check below then treats that as
+    // PAYMENT_STATUS_UNCERTAIN rather than assuming the Order is unpaid.
+    await PaymentService.reconcilePendingAttempt(pendingOnlineAttempt);
+  }
+  // A pending Breeze attempt (no client-pollable verify API exists), or a PayU
+  // attempt with no provider_order_id yet (the checkout form was never
+  // generated, so the browser was never handed off and no capture is
+  // possible), is resolved entirely by the re-check below.
+
+  // --- Cancellation transaction — no external calls, re-check every guard ---
+  const didCancel = await sequelize.transaction(async (t) => {
+    // Lock the Payment rows first, then the Order row — the exact lock order
+    // PaymentFinalizationService.processVerifiedPaymentResult uses, so a
+    // concurrent finalization and this cancellation serialize rather than
+    // deadlock.
+    const payments = await Payment.findAll({
+      where: { order_id: order.id },
+      order: [["id", "ASC"]],
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+    const lockedOrder = await Order.findByPk(order.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!lockedOrder) {
+      throw new OrderNotFoundError(order.id);
+    }
+
+    if (lockedOrder.status === "cancelled") {
+      return false; // a concurrent identical request already committed — idempotent
+    }
+    // Paid check BEFORE the generic status check: the Order entered this call
+    // as "pending" (pre-transaction gate), so if it is now paid/confirmed the
+    // cause is a reconciliation success or a racing finalization landing real
+    // money — "already paid" is the accurate, actionable error, not a generic
+    // "wrong state".
+    if (lockedOrder.payment_status === "paid" || payments.some((payment) => payment.status === "paid")) {
+      throw new OrderAlreadyPaidError(lockedOrder.id);
+    }
+    if (lockedOrder.status !== "pending") {
+      throw new OrderNotCancellableError(lockedOrder.id, lockedOrder.status);
+    }
+    if (payments.some((payment) => payment.provider === "cod")) {
+      // Not reachable today (confirmCodOrder moves the Order pending ->
+      // confirmed in the same transaction it creates the COD Payment). Refuse
+      // rather than bypass the COD stock-restoration rules if data diverges.
+      throw new OrderNotCancellableError(lockedOrder.id, lockedOrder.status);
+    }
+    const unresolvedOnlineAttempt = payments.some(
+      (payment) =>
+        payment.status === "pending" &&
+        (payment.provider === "breeze" || (payment.provider === "payu" && payment.provider_order_id !== null))
+    );
+    if (unresolvedOnlineAttempt) {
+      // Reconciliation ran (PayU) or is impossible (Breeze) and the attempt is
+      // still pending — money may have moved. Do not cancel; the caller retries
+      // once the provider state settles.
+      throw new PaymentStatusUncertainError(lockedOrder.id);
+    }
+
+    lockedOrder.status = "cancelled";
+    lockedOrder.cancelled_at = new Date();
+    await lockedOrder.save({ transaction: t });
+    // Intentionally NOT here: no stock change (a pending Order never
+    // decremented stock), no Cart mutation (the active Cart stays active), no
+    // Payment row mutation (terminal states preserved; a never-dispatched
+    // pending attempt is left as-is rather than fabricating a provider
+    // "cancelled" confirmation).
+    return true;
+  });
+
+  // Post-commit — only when this call actually performed the transition (never
+  // on an idempotent replay, never when a guard threw). Operational admin
+  // email only; there is no existing customer email for this event.
+  if (didCancel) {
+    await CommerceNotifications.orderCancelled(order.id, order.user_id === null ? "guest" : "customer");
+  }
+}
+
 export const OrderService = {
   /**
    * Creates a pending Order from the caller's current active Cart — customer
@@ -448,6 +596,17 @@ export const OrderService = {
    */
   async createOrder(identity: CartIdentity, input: CreateOrderInput): Promise<CreateOrderResultJSON> {
     await reconcileExistingPendingOrderPayment(identity);
+
+    // Legacy clients omit paymentMethod and continue through the established
+    // Order -> payment flow. New two-step clients opt into this provider
+    // preflight explicitly. It is deliberately outside the Order transaction.
+    if (input.paymentMethod && !(await hasPendingOrder(identity))) {
+      const shipping = await resolveShippingSnapshot(identity, input);
+      const readiness = await ServiceabilityService.checkForCheckout(identity, shipping.postalCode, input.paymentMethod);
+      if (readiness.cartReady && !readiness.serviceable) {
+        throw new CheckoutDestinationUnserviceableError(readiness.paymentMode);
+      }
+    }
 
     // Set only on the genuinely-new-Order path below (never the "reissue a
     // guest access token for an already-existing pending Order" early
@@ -753,6 +912,43 @@ export const OrderService = {
       ShipmentService.getForOrder(order.id)
     ]);
     return toOrderDetailJSON(order, items, shipment, order.payments ?? [], order.refunds ?? []);
+  },
+
+  /**
+   * Customer self-service cancellation of their own unfinished `pending`
+   * Order — the safe way to abandon a checkout that never completed payment,
+   * so the one-pending-Order guard in createOrder stops blocking a fresh
+   * checkout. Ownership is the same non-enumerating findOne-by-owner pattern
+   * getCustomerOrder uses ("doesn't exist" and "not yours" are
+   * indistinguishable). See performPendingOrderCancellation for the full
+   * payment-safety / concurrency rationale. Returns the resulting Order
+   * detail (status "cancelled"); a repeat call on an already-cancelled Order
+   * is idempotent success.
+   */
+  async cancelPendingOrder(userId: number, orderId: number): Promise<OrderDetailJSON> {
+    const order = await Order.findOne({ where: { id: orderId, user_id: userId } });
+    if (!order) {
+      throw new OrderNotFoundError(orderId);
+    }
+    await performPendingOrderCancellation(order);
+    return OrderService.getCustomerOrder(userId, orderId);
+  },
+
+  /**
+   * Guest equivalent of cancelPendingOrder — authorized only by the same
+   * opaque, high-entropy recovery token issued for that exact Order at
+   * creation (hashed and matched against orders.guest_access_token_hash, the
+   * same mechanism getGuestOrder uses). A numeric Order ID alone never
+   * authorizes a guest cancellation.
+   */
+  async cancelPendingGuestOrder(rawToken: string): Promise<GuestOrderDetailJSON> {
+    const tokenHash = TokenService.hashToken(rawToken);
+    const order = await Order.findOne({ where: { guest_access_token_hash: tokenHash, user_id: null } });
+    if (!order) {
+      throw new GuestOrderNotFoundError();
+    }
+    await performPendingOrderCancellation(order);
+    return OrderService.getGuestOrder(rawToken);
   }
 };
 
@@ -1021,6 +1217,8 @@ export const AdminOrderService = {
         throw new OrderInvalidStatusTransitionError(order.status, nextStatus);
       }
 
+      await assertAdminFulfilmentPaymentSafe(order, nextStatus, t);
+
       // Cancelling an Order that was never paid is a pure status change (no
       // money or stock ever moved for it) and stays open to any admin.
       // Cancelling a PAID Order now restores stock and triggers a real
@@ -1076,6 +1274,7 @@ export const AdminOrderService = {
     if (nextStatus === "processing") await CommerceNotifications.orderProcessing(orderId);
     else if (nextStatus === "shipped") await CommerceNotifications.orderShipped(orderId);
     else if (nextStatus === "delivered") await CommerceNotifications.orderDelivered(orderId);
+    else if (nextStatus === "cancelled") await CommerceNotifications.orderCancelled(orderId, "admin");
 
     if (pendingRefundId === null) {
       return detail;
@@ -1149,6 +1348,16 @@ export const AdminOrderService = {
           continue;
         }
 
+        try {
+          await assertAdminFulfilmentPaymentSafe(order, nextStatus, t);
+        } catch (error) {
+          if (error instanceof OrderPaymentRequiredForFulfilmentError) {
+            skipped += 1;
+            continue;
+          }
+          throw error;
+        }
+
         const isPaidCancellation = nextStatus === "cancelled" && order.payment_status === "paid";
         if (isPaidCancellation && admin.role !== "super_admin") {
           // Skip rather than fail the whole batch — matches the existing
@@ -1188,6 +1397,10 @@ export const AdminOrderService = {
         if (nextStatus === "processing") await CommerceNotifications.orderProcessing(orderId);
         else if (nextStatus === "shipped") await CommerceNotifications.orderShipped(orderId);
         else await CommerceNotifications.orderDelivered(orderId);
+      }
+    } else if (nextStatus === "cancelled") {
+      for (const orderId of updatedOrderIds) {
+        await CommerceNotifications.orderCancelled(orderId, "admin");
       }
     }
 

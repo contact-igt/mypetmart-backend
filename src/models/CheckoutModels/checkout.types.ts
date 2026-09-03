@@ -1,5 +1,8 @@
 import type { CartItemJSON } from "../CartModels/cart.types.js";
 
+export const CHECKOUT_PAYMENT_METHOD_VALUES = ["payu", "cod"] as const;
+export type CheckoutPaymentMethod = (typeof CHECKOUT_PAYMENT_METHOD_VALUES)[number];
+
 export type CheckoutAddressCandidate = {
   recipientName: string;
   phone: string;
@@ -34,7 +37,15 @@ export type CheckoutPreviewInput = {
   billingSameAsShipping: boolean;
   billingAddress?: InlineAddressInput;
   contactEmail?: string;
+  // Optional for backwards compatibility with the existing one-step client.
+  // Stage 2 will send this explicitly before Order creation.
+  paymentMethod?: CheckoutPaymentMethod;
 };
+
+export type CheckoutServiceabilityJSON = {
+  paymentMode: "prepaid" | "cod";
+  serviceable: boolean;
+} | null;
 
 export type CheckoutReadiness = {
   cartReady: boolean;
@@ -42,6 +53,7 @@ export type CheckoutReadiness = {
   shippingReady: boolean;
   paymentReady: boolean;
   orderReady: boolean;
+  serviceable: boolean;
 };
 
 export type CheckoutTotals = {
@@ -64,5 +76,7 @@ export type CheckoutPreviewJSON = {
     amount: string | null;
   };
   totals: CheckoutTotals;
+  paymentMethod: CheckoutPaymentMethod | null;
+  serviceability: CheckoutServiceabilityJSON;
   readiness: CheckoutReadiness;
 };

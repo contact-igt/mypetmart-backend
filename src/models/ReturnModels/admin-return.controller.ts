@@ -6,7 +6,7 @@ import { updateReplacementSchema } from "../ReplacementModels/replacement.valida
 import { ReturnShipmentService } from "../ReturnShipmentModels/return-shipment.service.js";
 import { parseReturnShipmentId } from "../ReturnShipmentModels/return-shipment.validation.js";
 import { ReturnService } from "./return.service.js";
-import { addReturnNoteSchema, adminReviewReturnSchema, cancelReturnSchema, listReturnsQuerySchema, parseReturnId } from "./return.validation.js";
+import { addReturnNoteSchema, adminReviewReturnSchema, cancelReturnSchema, createReturnShipmentSchema, listReturnsQuerySchema, parseReturnId, updateReturnPickupAddressSchema } from "./return.validation.js";
 
 function requireAdmin(req: Request): { id: number } {
   // Guaranteed by authenticate("admin") running ahead of every route in
@@ -88,8 +88,38 @@ export async function handleAdminUpdateReplacement(req: Request, res: Response, 
 export async function handleAdminCreateReturnShipment(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const returnId = parseReturnId(req.params.returnId);
-    const result = await ReturnShipmentService.createForApprovedReturn(returnId);
+    // Empty/omitted body parses to { carrier: undefined, serviceType:
+    // undefined } — "no selection", the unchanged automatic-cheapest reverse
+    // courier path every prior caller took.
+    const body = createReturnShipmentSchema.parse(req.body ?? {});
+    const selection = body.carrier !== undefined && body.serviceType !== undefined ? { carrier: body.carrier, serviceType: body.serviceType } : undefined;
+    const result = await ReturnShipmentService.createForApprovedReturn(returnId, selection);
     sendSuccess(res, 201, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Read-only reverse rate quote — lists every reverse-pickup-capable courier
+// iThink currently offers for this return's pickup address. Creates nothing.
+export async function handleAdminQuoteReturnShipment(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const returnId = parseReturnId(req.params.returnId);
+    const result = await ReturnShipmentService.quoteForReturn(returnId);
+    sendSuccess(res, 200, result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Edit the reverse-pickup address snapshot for an approved return. Never
+// touches the Order's own shipping address.
+export async function handleAdminUpdateReturnPickupAddress(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const returnId = parseReturnId(req.params.returnId);
+    const input = updateReturnPickupAddressSchema.parse(req.body);
+    const result = await ReturnService.updatePickupAddress(returnId, input);
+    sendSuccess(res, 200, result);
   } catch (error) {
     next(error);
   }

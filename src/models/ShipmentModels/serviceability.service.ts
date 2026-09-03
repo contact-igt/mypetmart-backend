@@ -2,10 +2,58 @@ import { DEFAULT_CURRENCY_CODE, V1_FREE_SHIPPING_FEE } from "../../constants/dat
 import { shippingConfig } from "../../config/shipping.config.js";
 import { Product, ProductVariant } from "../../database/tables/index.js";
 import { ProductNotFoundError } from "../ProductModels/product.errors.js";
+import { CartService } from "../CartModels/cart.service.js";
+import type { CartIdentity } from "../CartModels/cart.types.js";
+import type { CheckoutPaymentMethod } from "../CheckoutModels/checkout.types.js";
+import { CheckoutInvalidPincodeError, CheckoutServiceabilityUnavailableError } from "../CheckoutModels/checkout.errors.js";
 import { IThinkClient, IThinkClientError } from "./ithink.client.js";
 import { DeliveryCheckUnavailableError } from "./shipment.errors.js";
 import type { DeliveryCheckResultJSON } from "./shipment.types.js";
 import type { DeliveryCheckInput } from "./serviceability.validation.js";
+import type { IThinkPaymentMode } from "./ithink.client.js";
+
+function toIThinkPaymentMode(paymentMethod: CheckoutPaymentMethod): IThinkPaymentMode {
+  return paymentMethod === "cod" ? "cod" : "prepaid";
+}
+
+/**
+ * Checkout-level destination check. This intentionally calls only the
+ * lookup-only pincode endpoint; rates and courier selection are not part of
+ * checkout safety in Stage 1.
+ */
+async function checkDestination(postalCode: string, paymentMode: IThinkPaymentMode): Promise<boolean> {
+  const normalizedPincode = postalCode.trim();
+  if (!/^[1-9][0-9]{5}$/u.test(normalizedPincode)) {
+    throw new CheckoutInvalidPincodeError();
+  }
+  if (shippingConfig.provider !== "ithink" || !shippingConfig.ready) {
+    throw new CheckoutServiceabilityUnavailableError();
+  }
+
+  try {
+    const couriers = await IThinkClient.checkServiceability(normalizedPincode, paymentMode);
+    return couriers.length > 0;
+  } catch (error) {
+    if (error instanceof IThinkClientError) {
+      throw new CheckoutServiceabilityUnavailableError();
+    }
+    throw error;
+  }
+}
+
+async function checkForCheckout(identity: CartIdentity, postalCode: string, paymentMethod: CheckoutPaymentMethod) {
+  const cart = await CartService.getCart(identity);
+  const cartReady = cart.items.length > 0 && cart.items.every((item) => item.available);
+  const paymentMode = toIThinkPaymentMode(paymentMethod);
+
+  // Keep the provider out of an obviously unorderable checkout and let the
+  // authoritative Order transaction report its existing cart error.
+  if (!cartReady) {
+    return { paymentMode, cartReady, serviceable: false };
+  }
+
+  return { paymentMode, cartReady, serviceable: await checkDestination(postalCode, paymentMode) };
+}
 
 /**
  * Storefront Product Detail pre-purchase "check delivery to your pincode".
@@ -105,4 +153,4 @@ async function checkForProduct(input: DeliveryCheckInput): Promise<DeliveryCheck
   }
 }
 
-export const ServiceabilityService = { checkForProduct };
+export const ServiceabilityService = { checkForProduct, checkDestination, checkForCheckout };

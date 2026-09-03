@@ -12,8 +12,11 @@ import { TokenService } from "../../services/auth/token.service.js";
 import { logger } from "../../utils/logger.js";
 import { formatMoney } from "../../utils/product-money.js";
 import { CartService } from "../CartModels/cart.service.js";
+import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import { isValidOrderStatusTransition } from "../OrderModels/order.constants.js";
 import { OrderNotFoundError } from "../OrderModels/order.errors.js";
+import { CheckoutCodUnavailableError } from "../CheckoutModels/checkout.errors.js";
+import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
 import {
   OrderAlreadyPaidError,
   PaymentAttemptAlreadyActiveError,
@@ -600,7 +603,20 @@ export const PaymentService = {
     const itemCount = await OrderItem.count({ where: { order_id: order.id } });
     this.assertOrderPayable(order, itemCount);
 
-    return sequelize.transaction(async (t) => {
+    // This is a lookup against the immutable Order shipping snapshot and is
+    // intentionally outside the transaction below. A replay of an existing
+    // COD confirmation remains idempotent even if iThink is unavailable.
+    const existingCodPayment = await Payment.findOne({ where: { order_id: order.id, provider: "cod", status: "pending" } });
+    if (existingCodPayment) {
+      return buildCodResult(order, existingCodPayment);
+    }
+
+    const codServiceable = await ServiceabilityService.checkDestination(order.ship_postal_code, "cod");
+    if (!codServiceable) {
+      throw new CheckoutCodUnavailableError();
+    }
+
+    const result = await sequelize.transaction(async (t) => {
       // Lock the Order row to serialize concurrent COD confirmation / PayU
       // initiation attempts for the same Order — the same precedent
       // createPaymentAttempt already sets for PayU.
@@ -671,5 +687,12 @@ export const PaymentService = {
 
       return buildCodResult(lockedOrder, payment);
     });
+
+    // Post-commit — the same "commit first, then notify" boundary
+    // payment-finalization.service.ts uses. Never throws, never affects the
+    // COD confirmation that already committed above.
+    await CommerceNotifications.codOrderConfirmed(order.id);
+
+    return result;
   }
 };

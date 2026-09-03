@@ -18,6 +18,12 @@ export class ProductReview extends Model<InferAttributes<ProductReview>, InferCr
   declare verified_purchase: CreationOptional<boolean>;
   declare customer_name: string | null;
   declare review_source: CreationOptional<ReviewSource>;
+  // Optional admin-controlled public review date (Customer Review Enhancement
+  // Stage 1). DATEONLY → Sequelize returns/accepts a plain "YYYY-MM-DD" string
+  // with no timezone conversion. NULL means "no custom date" — the storefront
+  // resolves the public date as `review_date ?? created_at`. Only ever set on
+  // the admin-authored/admin-managed review paths; never from customer input.
+  declare review_date: CreationOptional<string | null>;
   declare created_at: CreationOptional<Date>;
   declare updated_at: CreationOptional<Date>;
 
@@ -44,6 +50,7 @@ export function initializeProductReviewTable(sequelize: Sequelize): typeof Produ
       verified_purchase: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       customer_name: { type: DataTypes.STRING(120), allowNull: true, validate: { len: [0, 120] } },
       review_source: { type: DataTypes.ENUM(...REVIEW_SOURCE_VALUES), allowNull: false, defaultValue: "customer" },
+      review_date: { type: DataTypes.DATEONLY, allowNull: true },
       created_at: DataTypes.DATE,
       updated_at: DataTypes.DATE
     },

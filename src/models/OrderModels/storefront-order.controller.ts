@@ -64,6 +64,32 @@ export async function handleGetCustomerOrder(req: Request, res: Response, next: 
   }
 }
 
+// Customer self-service cancellation of an unfinished `pending` Order. Body is
+// deliberately empty — the Order is identified by the path id and owned by the
+// session. Returns the resulting Order detail (200), matching handleGetCustomerOrder.
+export async function handleCancelCustomerOrder(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const orderId = parseOrderId(req.params.orderId);
+    const order = await OrderService.cancelPendingOrder(requireCustomerId(req), orderId);
+    sendSuccess(res, 200, order);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Guest equivalent of handleCancelCustomerOrder — authorized by the opaque
+// recovery token in the path, exactly like handleGetGuestOrder. Returns the
+// guest-safe Order detail (no shipping coordinates).
+export async function handleCancelGuestOrder(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const token = parseGuestOrderToken(req.params.token);
+    const order = await OrderService.cancelPendingGuestOrder(token);
+    sendSuccess(res, 200, order);
+  } catch (error) {
+    next(error);
+  }
+}
+
 // Binary response — deliberately not sendSuccess()'s {success,data} JSON
 // envelope. Ownership is entirely enforced by ReceiptService/OrderService
 // (OrderNotFoundError on any mismatch, same as handleGetCustomerOrder above)

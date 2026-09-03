@@ -116,6 +116,18 @@ export class OrderInvalidStatusTransitionError extends OrderError {
   }
 }
 
+export class OrderPaymentRequiredForFulfilmentError extends OrderError {
+  public constructor(orderId: number, nextStatus: string) {
+    super(
+      "ORDER_PAYMENT_REQUIRED_FOR_FULFILMENT",
+      `Order '${orderId}' must be paid or confirmed for Cash on Delivery before it can move to '${nextStatus}'.`,
+      422,
+      { orderId, nextStatus }
+    );
+    this.name = "OrderPaymentRequiredForFulfilmentError";
+  }
+}
+
 // Cancelling an already-paid Order now triggers a real refund (see
 // order.service.ts restoreStockForCancelledOrder / RefundService
 // .createPendingCancellationRefund) — the same real-money guard already
@@ -148,5 +160,22 @@ export class OrderShippingAddressNotEditableError extends OrderError {
       { orderId, status }
     );
     this.name = "OrderShippingAddressNotEditableError";
+  }
+}
+
+// The customer/guest self-service pending-cancel endpoint only ever acts on an
+// unfinished `pending` Order (never paid, no stock moved). Any other state —
+// a confirmed Order (PayU-paid OR COD-confirmed), processing/shipped/delivered,
+// or an already-terminal return/cancel — must go through the existing
+// admin/return/refund flows, never this one.
+export class OrderNotCancellableError extends OrderError {
+  public constructor(orderId: number, status: string) {
+    super(
+      "ORDER_NOT_CANCELLABLE",
+      `Order '${orderId}' cannot be cancelled from its current status '${status}'.`,
+      422,
+      { orderId, status }
+    );
+    this.name = "OrderNotCancellableError";
   }
 }

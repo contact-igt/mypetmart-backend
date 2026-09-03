@@ -1,6 +1,17 @@
 import type { ReturnStatus } from "../../constants/database.constants.js";
 import type { ReplacementJSON } from "../ReplacementModels/replacement.types.js";
 import type { ReturnShipmentJSON } from "../ReturnShipmentModels/return-shipment.types.js";
+import type { ReturnPickupAddressJSON } from "./return-pickup-address.js";
+
+export type UpdateReturnPickupAddressInput = {
+  recipientName: string;
+  phone: string;
+  line1: string;
+  line2?: string | undefined;
+  city: string;
+  state: string;
+  postalCode: string;
+};
 
 // Guest Returns are explicitly deferred (no approved guest-Order-recovery
 // path for post-delivery service actions exists yet — see the Returns +
@@ -66,6 +77,10 @@ export type ReturnRequestJSON = {
 
 export type ReturnRequestDetailJSON = ReturnRequestJSON & {
   notes: ReturnNoteJSON[];
+  // The effective reverse-pickup address (admin override resolved over the
+  // Order's shipping snapshot — see resolvePickupAddress). Detail-only, same
+  // "richer detail, lighter list" split as returnShipment above.
+  pickupAddress: ReturnPickupAddressJSON;
   canCancel: boolean;
   paymentProvider: string | null;
   paymentMethod: string | null;

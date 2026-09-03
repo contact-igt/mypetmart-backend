@@ -24,6 +24,18 @@ export class ReturnRequest extends Model<InferAttributes<ReturnRequest>, InferCr
   declare evidence_image_url: string | null;
   declare item_received_at: Date | null;
   declare item_received_by_admin_id: ForeignKey<User["id"]> | null;
+  // Editable reverse-pickup address snapshot (migration 064). NULL means
+  // "no override" — every reader resolves as `pickup_* ?? order.ship_*`
+  // (see ReturnModels/return.service.ts resolvePickupAddress). Written only
+  // by ReturnService.updatePickupAddress; never touches the Order.
+  declare pickup_recipient_name: string | null;
+  declare pickup_phone: string | null;
+  declare pickup_line_1: string | null;
+  declare pickup_line_2: string | null;
+  declare pickup_city: string | null;
+  declare pickup_state: string | null;
+  declare pickup_postal_code: string | null;
+  declare pickup_country: string | null;
   declare cancelled_at: Date | null;
   declare cancellation_reason: string | null;
   declare cancelled_by_user_id: ForeignKey<User["id"]> | null;
@@ -72,6 +84,14 @@ export function initializeReturnRequestTable(sequelize: Sequelize): typeof Retur
       evidence_image_url: { type: DataTypes.STRING(1000), allowNull: true, validate: { len: [0, 1000] } },
       item_received_at: { type: DataTypes.DATE, allowNull: true },
       item_received_by_admin_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+      pickup_recipient_name: { type: DataTypes.STRING(160), allowNull: true, validate: { len: [0, 160] } },
+      pickup_phone: { type: DataTypes.STRING(32), allowNull: true, validate: { len: [0, 32] } },
+      pickup_line_1: { type: DataTypes.STRING(255), allowNull: true, validate: { len: [0, 255] } },
+      pickup_line_2: { type: DataTypes.STRING(255), allowNull: true, validate: { len: [0, 255] } },
+      pickup_city: { type: DataTypes.STRING(120), allowNull: true, validate: { len: [0, 120] } },
+      pickup_state: { type: DataTypes.STRING(120), allowNull: true, validate: { len: [0, 120] } },
+      pickup_postal_code: { type: DataTypes.STRING(20), allowNull: true, validate: { len: [0, 20] } },
+      pickup_country: { type: DataTypes.STRING(2), allowNull: true, validate: { len: [0, 2] } },
       cancelled_at: { type: DataTypes.DATE, allowNull: true },
       cancellation_reason: { type: DataTypes.TEXT, allowNull: true },
       cancelled_by_user_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },

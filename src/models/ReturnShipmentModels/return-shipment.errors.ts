@@ -28,6 +28,14 @@ export class ReturnShipmentPackageDataError extends ReturnShipmentError {
 export class ReturnShipmentServiceabilityError extends ReturnShipmentError {
   public constructor() { super("RETURN_SHIPMENT_DESTINATION_UNSERVICEABLE", "No reverse-pickup-capable courier is currently serviceable for this pickup address.", 422); }
 }
+// The admin picked a courier from a return-shipment quote that a fresh
+// reverse rate check no longer offers (rates/serviceability moved between
+// quote and booking, or a bogus carrier/serviceType pair). Never silently
+// falls back to the automatic cheapest pick — mirrors ShipmentModels'
+// ShipmentCourierSelectionInvalidError for the forward flow.
+export class ReturnShipmentCourierSelectionInvalidError extends ReturnShipmentError {
+  public constructor() { super("RETURN_SHIPMENT_COURIER_SELECTION_INVALID", "The selected reverse courier is no longer available. Re-check the options and try again.", 409); }
+}
 export class ReturnShipmentProviderError extends ReturnShipmentError {
   public constructor(code: string, message: string, statusCode = 502) { super(code, message, statusCode); }
 }
