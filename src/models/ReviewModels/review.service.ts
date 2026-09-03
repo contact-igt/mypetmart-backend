@@ -167,32 +167,56 @@ function emptyDistribution(): ReviewRatingDistribution {
 // deliberately no denormalized products.average_rating/review_count column
 // (see CLAUDE.md Written Product Reviews §23). Only APPROVED Reviews are ever
 // summed here.
-async function computeReviewSummary(productId: number): Promise<ReviewSummaryJSON> {
-  const rows = (await ProductReview.findAll({
-    attributes: ["rating", [sequelize.fn("COUNT", sequelize.col("id")), "count"]],
-    where: { product_id: productId, status: "approved" },
-    group: ["rating"],
-    raw: true
-  })) as unknown as Array<{ rating: number; count: string | number }>;
+//
+// Batched so a Product List/Detail page can score every product it returns
+// with ONE grouped query (group by product_id + rating) instead of one query
+// per product — see ProductModels/product.service.ts's storefront DTO
+// builders, which are the only other callers. computeReviewSummary below is
+// just this with a single-id input, so the single-product and list surfaces
+// can never disagree.
+export async function computeReviewSummaries(productIds: number[], transaction?: Transaction): Promise<Map<number, ReviewSummaryJSON>> {
+  const result = new Map<number, ReviewSummaryJSON>();
+  if (productIds.length === 0) return result;
 
-  const distribution = emptyDistribution();
-  let reviewCount = 0;
-  let ratingSum = 0;
+  const rows = (await ProductReview.findAll({
+    attributes: ["product_id", "rating", [sequelize.fn("COUNT", sequelize.col("id")), "count"]],
+    where: { product_id: { [Op.in]: productIds }, status: "approved" },
+    group: ["product_id", "rating"],
+    raw: true,
+    ...(transaction ? { transaction } : {})
+  })) as unknown as Array<{ product_id: number; rating: number; count: string | number }>;
+
+  const accumulators = new Map<number, { distribution: ReviewRatingDistribution; reviewCount: number; ratingSum: number }>();
   for (const row of rows) {
+    const productId = Number(row.product_id);
     const rating = Number(row.rating) as 1 | 2 | 3 | 4 | 5;
     const count = Number(row.count);
-    if (rating >= 1 && rating <= 5) {
-      distribution[rating] = count;
-      reviewCount += count;
-      ratingSum += rating * count;
+    if (rating < 1 || rating > 5) continue;
+
+    let accumulator = accumulators.get(productId);
+    if (!accumulator) {
+      accumulator = { distribution: emptyDistribution(), reviewCount: 0, ratingSum: 0 };
+      accumulators.set(productId, accumulator);
     }
+    accumulator.distribution[rating] = count;
+    accumulator.reviewCount += count;
+    accumulator.ratingSum += rating * count;
   }
 
-  return {
-    averageRating: reviewCount > 0 ? Math.round((ratingSum / reviewCount) * 10) / 10 : 0,
-    reviewCount,
-    distribution
-  };
+  for (const [productId, accumulator] of accumulators) {
+    result.set(productId, {
+      averageRating: accumulator.reviewCount > 0 ? Math.round((accumulator.ratingSum / accumulator.reviewCount) * 10) / 10 : 0,
+      reviewCount: accumulator.reviewCount,
+      distribution: accumulator.distribution
+    });
+  }
+
+  return result;
+}
+
+async function computeReviewSummary(productId: number): Promise<ReviewSummaryJSON> {
+  const summaries = await computeReviewSummaries([productId]);
+  return summaries.get(productId) ?? { averageRating: 0, reviewCount: 0, distribution: emptyDistribution() };
 }
 
 export class ReviewService {

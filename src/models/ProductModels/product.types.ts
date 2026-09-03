@@ -142,6 +142,8 @@ export type StorefrontProductListItemJSON = {
   inStock: boolean;
   category: StorefrontCategorySummaryJSON;
   primaryImage: ProductImageJSON | null;
+  averageRating: number;
+  reviewCount: number;
 };
 
 export type StorefrontProductDetailJSON = StorefrontProductListItemJSON & {
