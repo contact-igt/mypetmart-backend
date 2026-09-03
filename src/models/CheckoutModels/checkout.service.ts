@@ -3,6 +3,7 @@ import { Address } from "../../database/tables/index.js";
 import { formatPaiseAsMoney, parseMoneyToPaise } from "../../utils/product-money.js";
 import { CartService } from "../CartModels/cart.service.js";
 import type { CartIdentity } from "../CartModels/cart.types.js";
+import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
 import { CheckoutAddressNotFoundError, CheckoutAddressRequiredError, CheckoutCartEmptyError, CheckoutEmailRequiredError } from "./checkout.errors.js";
 import type {
   CheckoutAddressCandidate,
@@ -91,13 +92,18 @@ export const CheckoutService = {
 
     // Cart may show an unavailable line; Checkout must block progressing on it.
     const cartReady = cart.items.every((item) => item.available);
+    const serviceability = input.paymentMethod
+      ? await ServiceabilityService.checkForCheckout(identity, shippingAddress.postalCode, input.paymentMethod)
+      : null;
+    const serviceable = serviceability?.serviceable === true;
 
     const readiness: CheckoutReadiness = {
       cartReady,
       addressReady: true,
-      shippingReady: false,
-      paymentReady: false,
-      orderReady: false
+      shippingReady: serviceable,
+      paymentReady: serviceable,
+      orderReady: serviceable,
+      serviceable
     };
 
     return {
@@ -115,6 +121,8 @@ export const CheckoutService = {
         shippingAmount: V1_FREE_SHIPPING_FEE,
         payableTotal: formatPaiseAsMoney(parseMoneyToPaise(cart.subtotal) + parseMoneyToPaise(V1_FREE_SHIPPING_FEE))
       },
+      paymentMethod: input.paymentMethod ?? null,
+      serviceability: serviceability ? { paymentMode: serviceability.paymentMode, serviceable: serviceability.serviceable } : null,
       readiness
     };
   }

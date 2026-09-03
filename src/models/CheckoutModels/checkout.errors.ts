@@ -1,11 +1,12 @@
 import { ApplicationError } from "../../utils/application-error.js";
 
 export class CheckoutError extends ApplicationError {
-  public constructor(code: string, message: string, statusCode: number = 400) {
+  public constructor(code: string, message: string, statusCode: number = 400, details?: unknown) {
     super({
       statusCode,
       code,
       message,
+      details,
       isOperational: true
     });
     this.name = "CheckoutError";
@@ -41,5 +42,38 @@ export class CheckoutEmailRequiredError extends CheckoutError {
   public constructor() {
     super("CHECKOUT_EMAIL_REQUIRED", "A contact email is required to preview checkout as a guest.", 400);
     this.name = "CheckoutEmailRequiredError";
+  }
+}
+
+export class CheckoutInvalidPincodeError extends CheckoutError {
+  public constructor() {
+    super("CHECKOUT_INVALID_PINCODE", "Enter a valid 6-digit Indian pincode.", 422);
+    this.name = "CheckoutInvalidPincodeError";
+  }
+}
+
+export class CheckoutServiceabilityUnavailableError extends CheckoutError {
+  public constructor() {
+    super("CHECKOUT_SERVICEABILITY_UNAVAILABLE", "Delivery availability is temporarily unavailable. Please try again.", 503);
+    this.name = "CheckoutServiceabilityUnavailableError";
+  }
+}
+
+export class CheckoutDestinationUnserviceableError extends CheckoutError {
+  public constructor(paymentMode: "prepaid" | "cod") {
+    super(
+      "CHECKOUT_DESTINATION_UNSERVICEABLE",
+      paymentMode === "cod" ? "Cash on Delivery is not available for this pincode." : "We do not currently deliver to this pincode.",
+      422,
+      { paymentMode }
+    );
+    this.name = "CheckoutDestinationUnserviceableError";
+  }
+}
+
+export class CheckoutCodUnavailableError extends CheckoutError {
+  public constructor() {
+    super("CHECKOUT_COD_UNAVAILABLE", "Cash on Delivery is not available for this delivery address.", 422);
+    this.name = "CheckoutCodUnavailableError";
   }
 }

@@ -77,11 +77,11 @@ async function post(path: string, data: JsonRecord, options: IThinkPostOptions =
   } catch {
     throw new IThinkClientError(options.create ? "CREATE_UNCERTAIN" : "PROVIDER_UNAVAILABLE", "iThink Logistics did not return a response.", Boolean(options.create || options.mutating));
   }
-  if (!response.ok) throw new IThinkClientError("PROVIDER_UNAVAILABLE", `iThink Logistics returned HTTP ${response.status}.`, false);
+  if (!response.ok) throw new IThinkClientError("PROVIDER_UNAVAILABLE", `iThink Logistics returned HTTP ${response.status}.`, Boolean(options.create || options.mutating));
   const parsed: unknown = await response.json().catch(() => undefined);
   if (isTrackingRequest && Array.isArray(parsed) && parsed.length === 0) return [];
   const payload = record(parsed);
-  if (!payload) throw new IThinkClientError("INVALID_RESPONSE", "iThink Logistics returned an invalid response.", Boolean(options.create));
+  if (!payload) throw new IThinkClientError("INVALID_RESPONSE", "iThink Logistics returned an invalid response.", Boolean(options.create || options.mutating));
   return payload;
 }
 
@@ -210,8 +210,48 @@ export const IThinkClient = {
 
   async cancel(awb: string): Promise<void> {
     const payload = await post("/api_v3/order/cancel.json", { awb_numbers: awb }, { mutating: true });
-    const result = record(record(payload.data)?.["1"] ?? (Array.isArray(payload.data) ? payload.data[0] : undefined));
-    if (!success(payload.status) || !success(result?.status)) throw new IThinkClientError("CANCELLATION_REJECTED", text(result?.remark) ?? "iThink Logistics rejected cancellation.");
+    if (!success(payload.status)) throw new IThinkClientError("CANCELLATION_REJECTED", text(payload.remark) ?? text(payload.html_message) ?? "iThink Logistics rejected cancellation.");
+
+    const data = payload.data;
+    const identityFields = ["awb", "awb_no", "awb_number", "waybill", "tracking_number"];
+    const identity = (result: JsonRecord): string | null => {
+      for (const field of identityFields) {
+        const value = text(result[field]);
+        if (value) return value;
+      }
+      const numbers = result.awb_numbers;
+      if (Array.isArray(numbers) && numbers.length === 1) return text(numbers[0]);
+      return text(numbers);
+    };
+    const matching = (result: JsonRecord): boolean => {
+      const resultAwb = identity(result);
+      return resultAwb === null || resultAwb.trim() === awb.trim();
+    };
+
+    let result: JsonRecord | undefined;
+    if (Array.isArray(data)) {
+      const records = data.flatMap((value) => { const row = record(value); return row ? [row] : []; });
+      const exact = records.filter((row) => identity(row)?.trim() === awb.trim());
+      if (exact.length === 1) result = exact[0];
+      else if (records.length === 1 && matching(records[0]!)) result = records[0];
+    } else if (record(data)) {
+      const dataRecord = record(data)!;
+      const direct = record(dataRecord[awb]);
+      if (direct && matching(direct)) {
+        result = direct;
+      } else {
+        const entries = Object.entries(dataRecord).flatMap(([key, value]) => {
+          const row = record(value);
+          return row ? [{ key, row }] : [];
+        });
+        const exact = entries.filter(({ key, row }) => key === awb || identity(row)?.trim() === awb.trim());
+        if (exact.length === 1) result = exact[0]!.row;
+        else if (entries.length === 1 && ["0", "1"].includes(entries[0]!.key) && matching(entries[0]!.row)) result = entries[0]!.row;
+      }
+    }
+
+    if (!result) throw new IThinkClientError("CANCELLATION_AMBIGUOUS", `iThink Logistics did not return an unambiguous cancellation result for AWB '${awb}'.`, true);
+    if (!success(result.status)) throw new IThinkClientError("CANCELLATION_REJECTED", text(result.remark) ?? "iThink Logistics rejected cancellation.");
   },
 
   async ndr(input: { awb: string; action: 1 | 2; date?: string; time?: string; phone?: string; address?: string; reason?: string }): Promise<void> {

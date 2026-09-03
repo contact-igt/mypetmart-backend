@@ -227,7 +227,26 @@ export const NOTIFICATION_EVENT_TYPE_VALUES = [
   // ingest path once the courier's own scans report those milestones.
   "RETURN_PICKUP_CREATED",
   "RETURN_PICKED_UP",
-  "RETURN_DELIVERED"
+  "RETURN_DELIVERED",
+  // Operational admin-team emails (migration 066). Deliberately a distinct
+  // event vocabulary from the customer events above — the notification_log
+  // dedupe key is (event_type, entity_type, entity_id) with no audience
+  // dimension, so a separate ADMIN_* event_type is the migration-minimal way
+  // to give the admin copy of an event its own durable, non-colliding dedupe
+  // claim. entity_id is the same real id the customer event uses. Sent to the
+  // configured ADMIN_NOTIFICATION_EMAILS operations mailbox(es), never to
+  // individual admin user accounts.
+  "ADMIN_ORDER_PLACED",
+  "ADMIN_PAYMENT_RECEIVED",
+  "ADMIN_PAYMENT_FAILED",
+  "ADMIN_COD_CONFIRMED",
+  "ADMIN_ORDER_PROCESSING",
+  "ADMIN_ORDER_SHIPPED",
+  "ADMIN_ORDER_DELIVERED",
+  "ADMIN_ORDER_CANCELLED",
+  "ADMIN_SHIPMENT_CREATED",
+  "ADMIN_COMMERCE_EXCEPTION",
+  "ADMIN_RETURN_REQUESTED"
 ] as const;
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPE_VALUES)[number];
 

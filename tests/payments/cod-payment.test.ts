@@ -1,7 +1,23 @@
 /* eslint-disable */
 import crypto from "node:crypto";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mockedShippingConfig = vi.hoisted(() => ({
+  provider: "ithink",
+  accessToken: "test-access-token",
+  secretKey: "test-secret-key",
+  apiBaseUrl: "https://pre-alpha.ithinklogistics.com",
+  trackingBaseUrl: "https://pre-alpha.ithinklogistics.com",
+  storeId: "test-store",
+  pickupAddressId: "test-pickup",
+  returnAddressId: "test-return",
+  originPincode: "400001",
+  timeoutMs: 1_000,
+  ready: true
+}));
+
+vi.mock("../../src/config/shipping.config.js", () => ({ shippingConfig: mockedShippingConfig }));
 
 import { app } from "../../src/app.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
@@ -25,6 +41,7 @@ import { connectDatabase, disconnectDatabase, sequelize } from "../../src/databa
 import { PasswordService } from "../../src/services/auth/password.service.js";
 import { SessionService } from "../../src/services/auth/session.service.js";
 import { TokenService } from "../../src/services/auth/token.service.js";
+import { IThinkClient } from "../../src/models/ShipmentModels/ithink.client.js";
 
 const CART_URL = "/api/v1/storefront/cart";
 const ADDRESS_URL = "/api/v1/storefront/addresses";
@@ -221,6 +238,11 @@ describe("Cash on Delivery (COD)", () => {
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     categoryId = await createCategory();
+    vi.spyOn(IThinkClient, "checkServiceability").mockResolvedValue(["test-courier"]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   // ---------------------------------------------------------------------
@@ -248,6 +270,19 @@ describe("Cash on Delivery (COD)", () => {
       expect(order?.status).toBe("confirmed");
       // Critical Phase 1 rule: COD must never be auto-marked "paid".
       expect(order?.payment_status).toBe("pending");
+    });
+
+    it("allows an Admin to move a valid COD Order into fulfilment", async () => {
+      const { orderId } = await createCustomerOrder(customerAToken);
+      await request(app).post(COD_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId });
+
+      const res = await request(app)
+        .patch(`/api/v1/admin/orders/${orderId}/status`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ status: "processing" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe("processing");
     });
 
     it("decrements stock exactly once on COD confirmation", async () => {
@@ -301,6 +336,18 @@ describe("Cash on Delivery (COD)", () => {
       expect(payment).toBeNull();
       const refreshedOrder = await Order.findByPk(order.body.data.id);
       expect(refreshedOrder?.status).toBe("pending");
+    });
+
+    it("rejects COD for an unserviceable persisted Order address before opening the stock transaction", async () => {
+      const { orderId } = await createCustomerOrder(customerAToken);
+      const check = vi.spyOn(IThinkClient, "checkServiceability").mockResolvedValue([]);
+
+      const res = await request(app).post(COD_URL).set("Authorization", `Bearer ${customerAToken}`).send({ orderId });
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe("CHECKOUT_COD_UNAVAILABLE");
+      expect(check).toHaveBeenCalledWith("400001", "cod");
+      expect(await Payment.count({ where: { order_id: orderId } })).toBe(0);
+      expect((await Order.findByPk(orderId))?.status).toBe("pending");
     });
   });
 

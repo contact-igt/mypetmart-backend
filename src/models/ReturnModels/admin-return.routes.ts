@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 import { authenticate } from "../../middlewares/auth/authenticate.middleware.js";
-import { handleAdminAddReturnNote, handleAdminCancelReturn, handleAdminCreateReturnShipment, handleAdminGetReturn, handleAdminListReturns, handleAdminMarkItemReceived, handleAdminRefreshReturnShipment, handleAdminReviewReturn, handleAdminUpdateReplacement } from "./admin-return.controller.js";
+import { handleAdminAddReturnNote, handleAdminCancelReturn, handleAdminCreateReturnShipment, handleAdminGetReturn, handleAdminListReturns, handleAdminMarkItemReceived, handleAdminQuoteReturnShipment, handleAdminRefreshReturnShipment, handleAdminReviewReturn, handleAdminUpdateReplacement, handleAdminUpdateReturnPickupAddress } from "./admin-return.controller.js";
 
 export const adminReturnRouter = Router();
 
@@ -47,6 +47,17 @@ adminReturnRouter.post("/:returnId/receive", (req, res, next) => {
 
 adminReturnRouter.patch("/:returnId/replacement", (req, res, next) => {
   void handleAdminUpdateReplacement(req, res, next);
+});
+
+// Reverse rate quote for the courier picker — read-only, creates nothing.
+adminReturnRouter.post("/:returnId/return-shipment/quote", (req, res, next) => {
+  void handleAdminQuoteReturnShipment(req, res, next);
+});
+
+// Edit the reverse-pickup address snapshot (return_requests.pickup_*) — never
+// the Order's own shipping address.
+adminReturnRouter.patch("/:returnId/pickup-address", (req, res, next) => {
+  void handleAdminUpdateReturnPickupAddress(req, res, next);
 });
 
 adminReturnRouter.post("/:returnId/create-shipment", (req, res, next) => {

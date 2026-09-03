@@ -1,6 +1,22 @@
 /* eslint-disable */
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mockedShippingConfig = vi.hoisted(() => ({
+  provider: "ithink",
+  accessToken: "test-access-token",
+  secretKey: "test-secret-key",
+  apiBaseUrl: "https://pre-alpha.ithinklogistics.com",
+  trackingBaseUrl: "https://pre-alpha.ithinklogistics.com",
+  storeId: "test-store",
+  pickupAddressId: "test-pickup",
+  returnAddressId: "test-return",
+  originPincode: "400001",
+  timeoutMs: 1_000,
+  ready: true
+}));
+
+vi.mock("../../src/config/shipping.config.js", () => ({ shippingConfig: mockedShippingConfig }));
 
 import { app } from "../../src/app.js";
 import { Category } from "../../src/database/tables/CategoryTable/index.js";
@@ -21,6 +37,7 @@ import { connectDatabase, disconnectDatabase, sequelize } from "../../src/databa
 import { PasswordService } from "../../src/services/auth/password.service.js";
 import { SessionService } from "../../src/services/auth/session.service.js";
 import { TokenService } from "../../src/services/auth/token.service.js";
+import { IThinkClient, IThinkClientError } from "../../src/models/ShipmentModels/ithink.client.js";
 
 const CART_URL = "/api/v1/storefront/cart";
 const ADDRESS_URL = "/api/v1/storefront/addresses";
@@ -201,6 +218,10 @@ describe("Checkout Preview Backend Integration Tests", () => {
     await Product.destroy({ where: {}, truncate: false, force: true });
     await Category.destroy({ where: {}, truncate: false, force: true });
     categoryId = await createCategory();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   // ---------------------------------------------------------------------
@@ -480,6 +501,72 @@ describe("Checkout Preview Backend Integration Tests", () => {
 
       const reloaded = await Product.findByPk(product.id);
       expect(reloaded?.stock).toBe(10);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Stage 1 payment-mode serviceability safety
+  // ---------------------------------------------------------------------
+  describe("Payment-mode serviceability", () => {
+    async function createCartAndAddress() {
+      const product = await createSimpleProduct({ stock: 10 });
+      await request(app).post(`${CART_URL}/items`).set("Authorization", `Bearer ${customerAToken}`).send({ productId: product.id, quantity: 1 });
+      const address = await request(app).post(ADDRESS_URL).set("Authorization", `Bearer ${customerAToken}`).send(validAddressPayload());
+      return address.body.data.id as number;
+    }
+
+    it("reports prepaid and COD serviceability using the selected payment mode", async () => {
+      const addressId = await createCartAndAddress();
+      const check = vi.spyOn(IThinkClient, "checkServiceability").mockImplementation(async (_pincode, paymentMode) =>
+        paymentMode === "cod" ? [] : ["test-courier"]
+      );
+
+      const prepaid = await request(app)
+        .post(CHECKOUT_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ savedAddressId: addressId, paymentMethod: "payu" });
+      expect(prepaid.status).toBe(200);
+      expect(prepaid.body.data.serviceability).toEqual({ paymentMode: "prepaid", serviceable: true });
+      expect(prepaid.body.data.readiness.orderReady).toBe(true);
+
+      const cod = await request(app)
+        .post(CHECKOUT_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ savedAddressId: addressId, paymentMethod: "cod" });
+      expect(cod.status).toBe(200);
+      expect(cod.body.data.serviceability).toEqual({ paymentMode: "cod", serviceable: false });
+      expect(cod.body.data.readiness.orderReady).toBe(false);
+      expect(check).toHaveBeenNthCalledWith(1, "400001", "prepaid");
+      expect(check).toHaveBeenNthCalledWith(2, "400001", "cod");
+    });
+
+    it("returns a generic 503 when the serviceability provider fails", async () => {
+      const addressId = await createCartAndAddress();
+      vi.spyOn(IThinkClient, "checkServiceability").mockRejectedValue(new IThinkClientError("PROVIDER_UNAVAILABLE", "provider detail"));
+
+      const res = await request(app)
+        .post(CHECKOUT_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ savedAddressId: addressId, paymentMethod: "payu" });
+      expect(res.status).toBe(503);
+      expect(res.body.error.code).toBe("CHECKOUT_SERVICEABILITY_UNAVAILABLE");
+      expect(res.body.error.message).not.toContain("provider detail");
+    });
+
+    it("rejects malformed checkout pincodes before calling iThink", async () => {
+      const addressId = await createCartAndAddress();
+      const address = await Address.findByPk(addressId);
+      address!.postal_code = "012345";
+      await address!.save();
+      const check = vi.spyOn(IThinkClient, "checkServiceability");
+
+      const res = await request(app)
+        .post(CHECKOUT_URL)
+        .set("Authorization", `Bearer ${customerAToken}`)
+        .send({ savedAddressId: addressId, paymentMethod: "payu" });
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe("CHECKOUT_INVALID_PINCODE");
+      expect(check).not.toHaveBeenCalled();
     });
   });
 

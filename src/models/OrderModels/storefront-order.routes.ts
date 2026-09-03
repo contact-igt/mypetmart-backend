@@ -3,7 +3,7 @@ import { Router } from "express";
 import { authenticate } from "../../middlewares/auth/authenticate.middleware.js";
 import { authRateLimiter } from "../../middlewares/auth/rate-limiter.middleware.js";
 import { resolveCartIdentity } from "../../middlewares/cart/resolve-cart-identity.middleware.js";
-import { handleCreateOrder, handleDownloadCustomerReceipt, handleDownloadGuestReceipt, handleGetCustomerOrder, handleGetGuestOrder, handleListCustomerOrders } from "./storefront-order.controller.js";
+import { handleCancelCustomerOrder, handleCancelGuestOrder, handleCreateOrder, handleDownloadCustomerReceipt, handleDownloadGuestReceipt, handleGetCustomerOrder, handleGetGuestOrder, handleListCustomerOrders } from "./storefront-order.controller.js";
 
 export const storefrontOrderRouter = Router();
 
@@ -32,6 +32,15 @@ storefrontOrderRouter.get("/guest/:token/receipt", authRateLimiter, (req, res, n
   void handleDownloadGuestReceipt(req, res, next);
 });
 
+// Guest self-service cancellation of an unfinished pending Order — same
+// token-gated, pre-auth-gate placement as guest Order recovery above.
+// Rate-limited (reusing the existing auth limiter, the same precedent every
+// other unauthenticated guest Order/payment mutation follows) since it is an
+// unauthenticated surface that also triggers a PayU Verify reconciliation call.
+storefrontOrderRouter.post("/guest/:token/cancel", authRateLimiter, (req, res, next) => {
+  void handleCancelGuestOrder(req, res, next);
+});
+
 // Order history/detail remain customer-authenticated only — guest Order
 // recovery uses the dedicated token-gated route above instead.
 storefrontOrderRouter.use(authenticate("customer"));
@@ -42,6 +51,13 @@ storefrontOrderRouter.get("/", (req, res, next) => {
 
 storefrontOrderRouter.get("/:orderId", (req, res, next) => {
   void handleGetCustomerOrder(req, res, next);
+});
+
+// Customer self-service cancellation of their own unfinished pending Order.
+// Shares the auth limiter used by the sensitive payment mutations (/initiate,
+// /cod) — cancellation likewise triggers an outbound PayU Verify call.
+storefrontOrderRouter.post("/:orderId/cancel", authRateLimiter, (req, res, next) => {
+  void handleCancelCustomerOrder(req, res, next);
 });
 
 storefrontOrderRouter.get("/:orderId/receipt", (req, res, next) => {

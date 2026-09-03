@@ -189,6 +189,12 @@ const environmentSchema = z
     SMTP_PASS: optionalTrimmedStringSchema,
     MAIL_FROM_NAME: requiredString("MAIL_FROM_NAME").default("MyPetMart"),
     MAIL_FROM_EMAIL: requiredString("MAIL_FROM_EMAIL").default("noreply@mypetmart.com"),
+    // Operations mailbox(es) that receive the operational admin copies of
+    // commerce events (new order / payment / COD / fulfilment / cancellation /
+    // commerce exception). Comma-separated; optional — when unset, admin
+    // notifications are safely skipped and never block a commerce transaction.
+    // Not a secret: an internal distribution address, never exposed to a client.
+    ADMIN_NOTIFICATION_EMAILS: optionalTrimmedStringSchema,
 
     R2_ACCOUNT_ID: optionalTrimmedStringSchema,
     R2_ACCESS_KEY_ID: optionalTrimmedStringSchema,

@@ -80,3 +80,21 @@ export class PaymentProviderNotConfiguredError extends PaymentError {
     this.name = "PaymentProviderNotConfiguredError";
   }
 }
+
+// A pending online Payment Attempt for the Order could not be authoritatively
+// resolved (PayU Verify returned an uncertain result or was unreachable, or a
+// Breeze attempt is pending and Breeze has no client-pollable verify API).
+// Cancelling would risk abandoning an Order that a provider actually captured
+// funds for, so the caller must retry once the provider state settles. The
+// message is deliberately provider-agnostic and safe for a customer to read.
+export class PaymentStatusUncertainError extends PaymentError {
+  public constructor(orderId: number) {
+    super(
+      "PAYMENT_STATUS_UNCERTAIN",
+      "We are still checking the payment status for this order. Please try again shortly.",
+      409,
+      { orderId }
+    );
+    this.name = "PaymentStatusUncertainError";
+  }
+}

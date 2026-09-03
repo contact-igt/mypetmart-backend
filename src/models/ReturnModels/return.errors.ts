@@ -101,6 +101,18 @@ export class ReturnItemReceiptNotApplicableError extends ReturnError {
   }
 }
 
+// The reverse-pickup address can only be corrected while a pickup can still
+// be booked with it: the return must be approved and must not already have a
+// live (non-failed) ReturnShipment. Once a courier has the address, it is
+// frozen — a change there would need a provider-side update this flow does
+// not implement.
+export class ReturnPickupAddressNotEditableError extends ReturnError {
+  public constructor(reason: string) {
+    super("RETURN_PICKUP_ADDRESS_NOT_EDITABLE", `The return pickup address cannot be edited: ${reason}`, 409, { reason });
+    this.name = "ReturnPickupAddressNotEditableError";
+  }
+}
+
 export class ReturnCancellationNotAllowedError extends ReturnError {
   public constructor(reason: string) {
     super("RETURN_CANCELLATION_NOT_ALLOWED", `This return cannot be cancelled: ${reason}`, 409, { reason });

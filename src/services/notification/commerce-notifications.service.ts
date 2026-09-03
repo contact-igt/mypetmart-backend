@@ -11,12 +11,39 @@
 // guards content correctness, NotificationService's durable dedupe guards
 // against ever sending the same milestone twice).
 import { environmentConfig } from "../../config/environment.config.js";
-import { Order, OrderItem, Payment, Refund, Replacement, ReturnRequest, ReturnShipment, Shipment } from "../../database/tables/index.js";
+import { Order, OrderItem, Payment, Refund, Replacement, ReturnRequest, ReturnShipment, Shipment, User } from "../../database/tables/index.js";
 import type { Order as OrderModel } from "../../database/tables/OrderTable/index.js";
 import type { OrderItem as OrderItemModel } from "../../database/tables/OrderItemTable/index.js";
 import { formatMoney } from "../../utils/product-money.js";
 import { NotificationService } from "./notification.service.js";
+import { AdminNotificationService } from "./admin-notification.service.js";
 import * as templates from "../email/commerce-email.templates.js";
+import * as adminTemplates from "../email/admin-email.templates.js";
+
+// Operator-safe buyer label for an admin email — the customer's own name, or
+// "Guest" for a guest Order. Never derived from, and never exposing, an email
+// or any auth material.
+async function buyerLabel(order: OrderModel): Promise<string> {
+  if (order.user_id === null) return "Guest";
+  const user = await User.findByPk(order.user_id);
+  return user?.name?.trim() || "Customer";
+}
+
+function adminOrderContext(order: OrderModel, buyer: string): adminTemplates.AdminOrderContext {
+  return {
+    orderId: order.id,
+    orderNumber: order.order_number,
+    buyerLabel: buyer,
+    contactEmail: order.contact_email ?? "—",
+    shipRecipient: order.ship_recipient_name,
+    shipCity: order.ship_city,
+    shipState: order.ship_state,
+    shipPostalCode: order.ship_postal_code,
+    total: formatMoney(order.total),
+    currency: order.currency,
+    orderStatus: order.status
+  };
+}
 
 // A guest Order's deep link can only ever be built with the raw recovery
 // token handed back at the moment it was minted (createOrder / a pending-
@@ -74,6 +101,20 @@ export const CommerceNotifications = {
           viewOrderUrl: orderViewUrl(order, rawGuestToken)
         })
     });
+
+    await AdminNotificationService.notify({
+      eventType: "ADMIN_ORDER_PLACED",
+      entityType: "order",
+      entityId: order.id,
+      build: async () => {
+        const fresh = await Order.findByPk(orderId);
+        if (!fresh || fresh.status !== "pending") return null;
+        const codPayment = await Payment.findOne({ where: { order_id: orderId, provider: "cod" } });
+        const payuPayment = codPayment ? null : await Payment.findOne({ where: { order_id: orderId, provider: "payu" } });
+        const paymentMethodLabel = codPayment ? "Cash on Delivery" : payuPayment ? "PayU — Pending" : "Not selected yet";
+        return adminTemplates.getAdminNewOrderTemplate({ ...adminOrderContext(fresh, await buyerLabel(fresh)), paymentMethodLabel });
+      }
+    });
   },
 
   /**
@@ -96,6 +137,51 @@ export const CommerceNotifications = {
       recipientEmail: order.contact_email,
       build: () => templates.getPaymentSuccessfulTemplate({ orderNumber: order.order_number, amount: formatMoney(payment.amount), currency: payment.currency, viewOrderUrl: orderViewUrl(order) })
     });
+
+    // A verified capture that could NOT confirm the Order (inventory/state
+    // exception) is a high-priority manual-attention alert, not a routine
+    // "payment received" — deduped separately (ADMIN_COMMERCE_EXCEPTION).
+    if (order.commerce_exception) {
+      await AdminNotificationService.notify({
+        eventType: "ADMIN_COMMERCE_EXCEPTION",
+        entityType: "order",
+        entityId: order.id,
+        build: async () => {
+          const fresh = await Order.findByPk(orderId);
+          if (!fresh || fresh.payment_status !== "paid" || !fresh.commerce_exception) return null;
+          return adminTemplates.getAdminCommerceExceptionTemplate({
+            orderId: fresh.id,
+            orderNumber: fresh.order_number,
+            amount: formatMoney(payment.amount),
+            currency: payment.currency,
+            paymentStatus: fresh.payment_status,
+            commerceException: fresh.commerce_exception
+          });
+        }
+      });
+      return;
+    }
+
+    await AdminNotificationService.notify({
+      eventType: "ADMIN_PAYMENT_RECEIVED",
+      entityType: "order",
+      entityId: order.id,
+      build: async () => {
+        const fresh = await Order.findByPk(orderId);
+        if (!fresh || fresh.payment_status !== "paid") return null;
+        return adminTemplates.getAdminPaymentReceivedTemplate({
+          orderId: fresh.id,
+          orderNumber: fresh.order_number,
+          buyerLabel: await buyerLabel(fresh),
+          amount: formatMoney(payment.amount),
+          currency: payment.currency,
+          provider: payment.provider,
+          providerReference: payment.provider_payment_id ?? payment.provider_order_id,
+          orderStatus: fresh.status,
+          paymentStatus: fresh.payment_status
+        });
+      }
+    });
   },
 
   /** Dedup is per-Payment-attempt: each distinct failed retry is its own real, customer-meaningful event (unlike success, which is order-scoped). */
@@ -111,6 +197,28 @@ export const CommerceNotifications = {
       recipientEmail: order.contact_email,
       build: () => templates.getPaymentFailedTemplate({ orderNumber: order.order_number, amount: formatMoney(payment.amount), currency: payment.currency, retryUrl: orderViewUrl(order) })
     });
+
+    // Deduped per failed attempt (entity = payment.id), so a duplicate
+    // callback for the same attempt never re-emails, while a genuinely new
+    // failed retry is its own alert.
+    await AdminNotificationService.notify({
+      eventType: "ADMIN_PAYMENT_FAILED",
+      entityType: "payment",
+      entityId: payment.id,
+      build: async () => {
+        const fresh = await Payment.findByPk(paymentId);
+        if (!fresh || fresh.status !== "failed") return null;
+        return adminTemplates.getAdminPaymentFailedTemplate({
+          orderId: order.id,
+          orderNumber: order.order_number,
+          amount: formatMoney(fresh.amount),
+          currency: fresh.currency,
+          provider: fresh.provider,
+          providerReference: fresh.provider_order_id,
+          attemptStatus: fresh.status
+        });
+      }
+    });
   },
 
   async orderProcessing(orderId: number): Promise<void> {
@@ -122,6 +230,17 @@ export const CommerceNotifications = {
       entityId: order.id,
       recipientEmail: order.contact_email,
       build: () => templates.getOrderProcessingTemplate({ orderNumber: order.order_number, viewOrderUrl: orderViewUrl(order) })
+    });
+
+    await AdminNotificationService.notify({
+      eventType: "ADMIN_ORDER_PROCESSING",
+      entityType: "order",
+      entityId: order.id,
+      build: async () => {
+        const fresh = await Order.findByPk(orderId);
+        if (!fresh || fresh.status !== "processing") return null;
+        return adminTemplates.getAdminOrderStatusTemplate({ orderId: fresh.id, orderNumber: fresh.order_number, buyerLabel: await buyerLabel(fresh), newStatus: "processing" });
+      }
     });
   },
 
@@ -145,6 +264,20 @@ export const CommerceNotifications = {
       recipientEmail: order.contact_email,
       build: () =>
         templates.getOrderShippedTemplate({ orderNumber: order.order_number, carrier: shipment?.carrier ?? null, awbNumber: shipment?.tracking_number ?? null, trackOrderUrl: orderViewUrl(order) })
+    });
+
+    await AdminNotificationService.notify({
+      eventType: "ADMIN_ORDER_SHIPPED",
+      entityType: "order",
+      entityId: order.id,
+      build: async () => {
+        const fresh = await Order.findByPk(orderId);
+        if (!fresh || fresh.status !== "shipped") return null;
+        return adminTemplates.getAdminOrderStatusTemplate({
+          orderId: fresh.id, orderNumber: fresh.order_number, buyerLabel: await buyerLabel(fresh),
+          newStatus: "shipped", carrier: shipment?.carrier ?? null, awbNumber: shipment?.tracking_number ?? null
+        });
+      }
     });
   },
 
@@ -174,6 +307,17 @@ export const CommerceNotifications = {
       recipientEmail: order.contact_email,
       build: () => templates.getOrderDeliveredTemplate({ orderNumber: order.order_number, viewOrderUrl: orderViewUrl(order), returnEligible: true })
     });
+
+    await AdminNotificationService.notify({
+      eventType: "ADMIN_ORDER_DELIVERED",
+      entityType: "order",
+      entityId: order.id,
+      build: async () => {
+        const fresh = await Order.findByPk(orderId);
+        if (!fresh || (fresh.status !== "delivered" && fresh.status !== "return_requested")) return null;
+        return adminTemplates.getAdminOrderStatusTemplate({ orderId: fresh.id, orderNumber: fresh.order_number, buyerLabel: await buyerLabel(fresh), newStatus: "delivered" });
+      }
+    });
   },
 
   /**
@@ -202,6 +346,21 @@ export const CommerceNotifications = {
       entityId: shipment.id,
       recipientEmail: order.contact_email,
       build: () => templates.getShipmentCreatedTemplate({ orderNumber: order.order_number, carrier: shipment.carrier, awbNumber: shipment.tracking_number, trackOrderUrl: orderViewUrl(order) })
+    });
+
+    await AdminNotificationService.notify({
+      eventType: "ADMIN_SHIPMENT_CREATED",
+      entityType: "shipment",
+      entityId: shipment.id,
+      build: async () => {
+        const fresh = await Shipment.findByPk(shipmentId);
+        if (!fresh || fresh.source_type !== "order" || !fresh.tracking_number) return null;
+        return adminTemplates.getAdminShipmentCreatedTemplate({
+          orderId: order.id, orderNumber: order.order_number, shipmentId: fresh.id,
+          carrier: fresh.carrier, awbNumber: fresh.tracking_number, shipmentStatus: fresh.status,
+          shipRecipient: order.ship_recipient_name, shipPostalCode: order.ship_postal_code
+        });
+      }
     });
   },
 
@@ -260,6 +419,26 @@ export const CommerceNotifications = {
           quantity: returnRequest.quantity,
           resolution: returnRequest.type === "replacement" ? "replacement" : "refund"
         })
+    });
+
+    await AdminNotificationService.notify({
+      eventType: "ADMIN_RETURN_REQUESTED",
+      entityType: "return",
+      entityId: returnRequest.id,
+      build: async () => {
+        const fresh = await ReturnRequest.findByPk(returnRequestId);
+        if (!fresh) return null;
+        return adminTemplates.getAdminReturnRequestedTemplate({
+          orderId: loaded.order.id,
+          orderNumber: loaded.order.order_number,
+          returnNumber: fresh.return_number,
+          buyerLabel: await buyerLabel(loaded.order),
+          itemName: itemLabel(loaded.orderItem),
+          quantity: fresh.quantity,
+          resolution: fresh.type === "replacement" ? "replacement" : "refund",
+          reason: fresh.reason
+        });
+      }
     });
   },
 
@@ -460,6 +639,76 @@ export const CommerceNotifications = {
       entityId: replacement.id,
       recipientEmail: loaded.order.contact_email,
       build: () => templates.getReplacementCompletedTemplate({ replacementNumber: replacement.replacement_number, itemName: itemLabel(loaded.orderItem) })
+    });
+  },
+
+  // ---------------------------------------------------------------------------
+  // Admin-only operational events (no existing customer email for these)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * COD Order confirmed — admin-only. Called from PaymentService.confirmCodOrder
+   * AFTER its transaction commits (Order pending -> confirmed, stock + Cart
+   * finalized). Re-verifies the Order is genuinely confirmed with a pending
+   * COD Payment before sending, and never labels COD as "paid".
+   */
+  async codOrderConfirmed(orderId: number): Promise<void> {
+    const order = await Order.findByPk(orderId);
+    if (!order) return;
+    await AdminNotificationService.notify({
+      eventType: "ADMIN_COD_CONFIRMED",
+      entityType: "order",
+      entityId: order.id,
+      build: async () => {
+        const fresh = await Order.findByPk(orderId);
+        if (!fresh || fresh.status === "pending" || fresh.status === "cancelled") return null;
+        const codPayment = await Payment.findOne({ where: { order_id: orderId, provider: "cod" } });
+        if (!codPayment || codPayment.status === "paid") return null;
+        return adminTemplates.getAdminCodConfirmedTemplate(adminOrderContext(fresh, await buyerLabel(fresh)));
+      }
+    });
+  },
+
+  /**
+   * Order cancelled — admin-only operational record, sent to the central
+   * operations mailbox (never to individual admin accounts). Covers both an
+   * admin-initiated cancel (AdminOrderService.updateStatus/bulkUpdateStatus)
+   * and a customer/guest pending-Order self-service cancel
+   * (OrderService.performPendingOrderCancellation). One cancellation per Order
+   * (terminal state) so a single ADMIN_ORDER_CANCELLED claim covers it.
+   */
+  async orderCancelled(orderId: number, cancelledBy: "customer" | "guest" | "admin"): Promise<void> {
+    const order = await Order.findByPk(orderId);
+    if (!order || order.status !== "cancelled") return;
+    await AdminNotificationService.notify({
+      eventType: "ADMIN_ORDER_CANCELLED",
+      entityType: "order",
+      entityId: order.id,
+      build: async () => {
+        const fresh = await Order.findByPk(orderId);
+        if (!fresh || fresh.status !== "cancelled") return null;
+        const payments = await Payment.findAll({ where: { order_id: orderId }, order: [["id", "ASC"]] });
+        const paid = payments.find((p) => p.status === "paid");
+        const pendingOnline = payments.find((p) => p.status === "pending" && (p.provider === "payu" || p.provider === "breeze"));
+        const failedOnline = payments.find((p) => p.status === "failed" || p.status === "cancelled");
+        const paymentContext = paid
+          ? "Was paid — refund handled via the admin/refund flow"
+          : pendingOnline
+          ? `Pending ${pendingOnline.provider} attempt (not captured)`
+          : failedOnline
+          ? `${failedOnline.provider} attempt did not complete`
+          : "No payment attempt";
+        return adminTemplates.getAdminOrderCancelledTemplate({
+          orderId: fresh.id,
+          orderNumber: fresh.order_number,
+          buyerLabel: await buyerLabel(fresh),
+          total: formatMoney(fresh.total),
+          currency: fresh.currency,
+          cancelledBy,
+          paymentContext,
+          cancelledAt: fresh.cancelled_at ? fresh.cancelled_at.toISOString() : "—"
+        });
+      }
     });
   }
 };
