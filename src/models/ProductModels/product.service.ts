@@ -467,6 +467,26 @@ const RELATED_PRODUCTS_CANDIDATE_POOL = 50;
 const RELATED_PRODUCTS_PRICE_BAND = 0.3;
 
 export class ProductService {
+  private static async nextWebsitePosition(transaction: Transaction): Promise<number> {
+    const products = await Product.findAll({ attributes: ["id", "display_order"], order: [["id", "ASC"]], transaction, lock: transaction.LOCK.UPDATE });
+    return products.reduce((max, product) => Math.max(max, product.display_order), 0) + 1;
+  }
+  static async moveWebsiteOrder(id: number, direction: "up" | "down"): Promise<void> {
+    await sequelize.transaction(async (transaction) => {
+      // Lock in ID order so simultaneous moves serialize consistently.
+      const products = await Product.findAll({ order: [["id", "ASC"]], transaction, lock: transaction.LOCK.UPDATE });
+      products.sort((a, b) => a.display_order - b.display_order || b.id - a.id);
+      const index = products.findIndex((product) => product.id === id);
+      if (index === -1) throw new ProductNotFoundError(id);
+      const target = index + (direction === "up" ? -1 : 1);
+      if (target >= 0 && target < products.length) {
+        [products[index], products[target]] = [products[target]!, products[index]!];
+      }
+      for (const [position, product] of products.entries()) {
+        await product.update({ display_order: position + 1 }, { transaction });
+      }
+    });
+  }
   // Storefront Product List
   static async listStorefrontProducts(query: StorefrontProductListQuery): Promise<{
     items: StorefrontProductListItemJSON[];
@@ -516,7 +536,8 @@ export class ProductService {
       }
     }
 
-    let order: Array<[string, string]> = [["created_at", "DESC"], ["id", "DESC"]];
+    let order: Array<[string, string]> = [["display_order", "ASC"], ["id", "DESC"]];
+    if (query.sort === "newest") order = [["created_at", "DESC"], ["id", "DESC"]];
     if (query.sort === "price_asc") order = [["price", "ASC"], ["id", "ASC"]];
     if (query.sort === "price_desc") order = [["price", "DESC"], ["id", "ASC"]];
     if (query.sort === "name") order = [["name", "ASC"], ["id", "ASC"]];
@@ -777,7 +798,7 @@ export class ProductService {
       ];
     }
 
-    const sortCol = query.sort === "price" ? "price" : query.sort === "name" ? "name" : query.sort === "stock" ? "stock" : "created_at";
+    const sortCol = query.sort === "display_order" ? "display_order" : query.sort === "price" ? "price" : query.sort === "name" ? "name" : query.sort === "stock" ? "stock" : "created_at";
     const sortOrder = query.order === "ASC" ? "ASC" : "DESC";
 
     const { count, rows } = await Product.findAndCountAll({
@@ -788,7 +809,7 @@ export class ProductService {
         { model: ProductImage, as: "images", where: { is_primary: true }, required: false },
         { model: ProductVariant, as: "variants", attributes: ["id"], required: false }
       ],
-      order: [[sortCol, sortOrder], ["id", sortOrder]],
+      order: [[sortCol, sortOrder], ["id", query.sort === "display_order" ? "DESC" : sortOrder]],
       limit: pageSize,
       offset,
       distinct: true
@@ -816,6 +837,7 @@ export class ProductService {
         stock: p.stock,
         hasVariants: p.has_variants,
         featured: p.featured,
+        displayOrder: p.display_order,
         weightGrams: p.weight_grams,
         lengthCm: p.length_cm ? formatMoney(p.length_cm) : null,
         widthCm: p.width_cm ? formatMoney(p.width_cm) : null,
@@ -944,6 +966,7 @@ export class ProductService {
       stock: product.stock,
       hasVariants: product.has_variants,
       featured: product.featured,
+      displayOrder: product.display_order,
       weightGrams: product.weight_grams,
       lengthCm: product.length_cm ? formatMoney(product.length_cm) : null,
       widthCm: product.width_cm ? formatMoney(product.width_cm) : null,
@@ -1032,6 +1055,7 @@ export class ProductService {
           stock: !hasVariants && input.stock ? input.stock : 0,
           has_variants: hasVariants,
           featured: Boolean(input.featured),
+          display_order: await ProductService.nextWebsitePosition(t),
           tags: input.tags || [],
           meta_title: input.metaTitle || null,
           meta_description: input.metaDescription || null,
@@ -1342,8 +1366,9 @@ export class ProductService {
         }
       }
 
+      const displayOrder = await ProductService.nextWebsitePosition(t);
       await locked.restore({ transaction: t });
-      await locked.update({ status: "draft" }, { transaction: t });
+      await locked.update({ status: "draft", display_order: displayOrder }, { transaction: t });
       return await ProductService.getAdminProductById(id, t);
     });
   }
@@ -1388,6 +1413,7 @@ export class ProductService {
           stock: 0,
           has_variants: source.has_variants,
           featured: false,
+          display_order: await ProductService.nextWebsitePosition(t),
           tags: source.tags,
           meta_title: source.meta_title,
           meta_description: source.meta_description,

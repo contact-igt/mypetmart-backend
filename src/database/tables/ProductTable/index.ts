@@ -29,6 +29,7 @@ export class Product extends Model<InferAttributes<Product>, InferCreationAttrib
   declare stock: CreationOptional<number>;
   declare has_variants: CreationOptional<boolean>;
   declare featured: CreationOptional<boolean>;
+  declare display_order: CreationOptional<number>;
   declare tags: unknown[] | null;
   declare meta_title: string | null;
   declare meta_description: string | null;
@@ -88,6 +89,7 @@ export function initializeProductTable(sequelize: Sequelize): typeof Product {
       stock: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0 } },
       has_variants: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       featured: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      display_order: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1000, validate: { min: 0, max: 2147483647 } },
       tags: { type: DataTypes.JSON, allowNull: true },
       meta_title: { type: DataTypes.STRING(190), allowNull: true, validate: { len: [0, 190] } },
       meta_description: { type: DataTypes.STRING(255), allowNull: true, validate: { len: [0, 255] } },
