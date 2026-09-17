@@ -183,6 +183,7 @@ export type AdminProductListItemJSON = {
   stock: number;
   hasVariants: boolean;
   featured: boolean;
+  displayOrder: number;
   weightGrams: number | null;
   lengthCm: string | null;
   widthCm: string | null;
@@ -393,7 +394,7 @@ export type StorefrontProductListQuery = {
   search?: string;
   category?: string;
   petType?: PetType;
-  sort?: "newest" | "price_asc" | "price_desc" | "name";
+  sort?: "recommended" | "newest" | "price_asc" | "price_desc" | "name";
   featured?: boolean;
 };
 
@@ -405,6 +406,6 @@ export type AdminProductListQuery = {
   status?: ProductStatus | "deleted";
   petType?: PetType;
   stockLevel?: "in_stock" | "out_of_stock" | "low_stock";
-  sort?: "created_at" | "price" | "name" | "stock";
+  sort?: "display_order" | "created_at" | "price" | "name" | "stock";
   order?: "ASC" | "DESC";
 };

@@ -12,7 +12,17 @@ import {
   updateProductSchema,
   updateProductStatusSchema
 } from "./product.validation.js";
+import { moveWebsiteOrderSchema } from "./product.validation.js";
 import type { AdminProductListQuery, CreateProductInput, StorefrontProductListQuery, UpdateProductInput } from "./product.types.js";
+
+export async function handleAdminMoveWebsiteOrder(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const id = parseProductId(req.params.productId);
+    const { direction } = moveWebsiteOrderSchema.parse(req.body);
+    await ProductService.moveWebsiteOrder(id, direction);
+    sendSuccess(res, 200, { moved: true });
+  } catch (error) { next(error); }
+}
 
 export async function handleStorefrontListProducts(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {

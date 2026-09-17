@@ -359,6 +359,7 @@ export const createProductSchema = z
     stock: z.number().int().min(0, "Stock cannot be negative").optional().default(0),
     hasVariants: z.boolean().optional().default(false),
     featured: z.boolean().optional().default(false),
+    displayOrder: z.never({ message: "New products are added to the end of website order" }).optional(),
     tags: z.array(z.string().trim().min(1).max(50)).max(20).optional().default([]),
     metaTitle: z.string().trim().max(190).nullable().optional(),
     metaDescription: z.string().trim().max(255).nullable().optional(),
@@ -408,6 +409,7 @@ export const updateProductSchema = z.object({
   stock: z.number().int().min(0, "Stock cannot be negative").optional(),
   hasVariants: z.never({ message: "hasVariants is immutable after product creation" }).optional(),
   featured: z.boolean().optional(),
+  displayOrder: z.never({ message: "Use the website order move controls to reorder products" }).optional(),
   tags: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
   metaTitle: z.string().trim().max(190).nullable().optional(),
   metaDescription: z.string().trim().max(255).nullable().optional(),
@@ -419,6 +421,8 @@ export const updateProductSchema = z.object({
   careInstructions: optionalLongTextSchema,
   safetyInfo: optionalLongTextSchema
 });
+
+export const moveWebsiteOrderSchema = z.object({ direction: z.enum(["up", "down"]) });
 
 const positiveQueryInteger = z.preprocess(
   (value) => (typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value.trim()) : value),
@@ -438,7 +442,7 @@ export const storefrontProductListQuerySchema = z.object({
   search: z.string().trim().max(190).optional(),
   category: z.string().trim().min(1).max(190).optional(),
   petType: z.enum(PET_TYPE_VALUES).optional(),
-  sort: z.enum(["newest", "price_asc", "price_desc", "name"]).optional(),
+  sort: z.enum(["recommended", "newest", "price_asc", "price_desc", "name"]).optional(),
   featured: queryBoolean.optional()
 });
 
@@ -450,7 +454,7 @@ export const adminProductListQuerySchema = z.object({
   status: z.enum([...PRODUCT_STATUS_VALUES, "deleted"]).optional(),
   petType: z.enum(PET_TYPE_VALUES).optional(),
   stockLevel: z.enum(["in_stock", "out_of_stock", "low_stock"]).optional(),
-  sort: z.enum(["created_at", "price", "name", "stock"]).optional(),
+  sort: z.enum(["display_order", "created_at", "price", "name", "stock"]).optional(),
   order: z.preprocess((value) => (typeof value === "string" ? value.toUpperCase() : value), z.enum(["ASC", "DESC"])).optional()
 });
 

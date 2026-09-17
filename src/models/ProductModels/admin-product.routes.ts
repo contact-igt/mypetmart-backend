@@ -10,6 +10,7 @@ import {
   handleAdminGetProductById,
   handleAdminGetProductSummary,
   handleAdminListProducts,
+  handleAdminMoveWebsiteOrder,
   handleAdminRestoreProduct,
   handleAdminUpdateProduct,
   handleAdminUpdateProductStatus
@@ -41,6 +42,9 @@ adminProductRouter.get("/summary", (req, res, next) => {
 });
 
 // Dynamic product ID routes
+adminProductRouter.patch("/:productId/website-order", (req, res, next) => {
+  void handleAdminMoveWebsiteOrder(req, res, next);
+});
 adminProductRouter.get("/:productId", (req, res, next) => {
   void handleAdminGetProductById(req, res, next);
 });
