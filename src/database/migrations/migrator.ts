@@ -106,7 +106,8 @@ export function createMigrator(database: Sequelize = sequelize): Umzug<Migration
     migrations: {
       glob,
       resolve: ({ name, path: migrationPath, context }) => ({
-        name,
+        // Keep the recorded identity stable when TypeScript is compiled for deployment.
+        name: name.replace(/\.js$/u, ".ts"),
         up: async () => {
           if (!migrationPath) throw new Error(`Migration path missing for ${name}.`);
           const module = (await import(pathToFileURL(migrationPath).href)) as {
