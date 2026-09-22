@@ -598,6 +598,21 @@ describe("Cart Backend Integration Tests", () => {
       expect(forgedRes.body.data.id).toBeNull();
       expect(forgedRes.body.data.items).toHaveLength(0);
     });
+
+    it("reuses an ordered guest cart as an empty cart", async () => {
+      const orderedProduct = await createSimpleProduct({ stock: 10 });
+      const nextProduct = await createSimpleProduct({ stock: 10 });
+      const guest = request.agent(app);
+
+      const first = await guest.post(`${CART_URL}/items`).send({ productId: orderedProduct.id, quantity: 1 });
+      await Cart.update({ status: "ordered" }, { where: { id: first.body.data.id } });
+
+      const next = await guest.post(`${CART_URL}/items`).send({ productId: nextProduct.id, quantity: 1 });
+      expect(next.status).toBe(201);
+      expect(next.body.data.id).toBe(first.body.data.id);
+      expect(next.body.data.items).toHaveLength(1);
+      expect(next.body.data.items[0].productId).toBe(nextProduct.id);
+    });
   });
 
   // ---------------------------------------------------------------------

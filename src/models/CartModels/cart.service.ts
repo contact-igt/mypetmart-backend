@@ -60,11 +60,16 @@ async function findOrCreateCustomerCart(userId: number, transaction: Transaction
 
 async function findOrCreateGuestCart(tokenHash: string, transaction: Transaction): Promise<Cart> {
   const existing = await Cart.findOne({
-    where: { guest_token_hash: tokenHash, status: "active" },
+    where: { guest_token_hash: tokenHash },
     transaction,
     lock: transaction.LOCK.UPDATE
   });
   if (existing) {
+    if (existing.status !== "active") {
+      await CartItem.destroy({ where: { cart_id: existing.id }, transaction });
+      existing.status = "active";
+      await existing.save({ transaction });
+    }
     return existing;
   }
 
@@ -74,11 +79,16 @@ async function findOrCreateGuestCart(tokenHash: string, transaction: Transaction
   } catch (error) {
     if (error instanceof UniqueConstraintError) {
       const raced = await Cart.findOne({
-        where: { guest_token_hash: tokenHash, status: "active" },
+        where: { guest_token_hash: tokenHash },
         transaction,
         lock: transaction.LOCK.UPDATE
       });
       if (raced) {
+        if (raced.status !== "active") {
+          await CartItem.destroy({ where: { cart_id: raced.id }, transaction });
+          raced.status = "active";
+          await raced.save({ transaction });
+        }
         return raced;
       }
     }
