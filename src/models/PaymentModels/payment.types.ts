@@ -112,6 +112,10 @@ export type PaymentStatusResultJSON = {
   commerceException: string | null;
 };
 
+export type AdminPayuVerificationResultJSON = PaymentStatusResultJSON & {
+  verification: "verified" | "not_required" | "unavailable";
+};
+
 // ---------------------------------------------------------------------------
 // Cash on Delivery (COD)
 // ---------------------------------------------------------------------------
