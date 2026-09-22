@@ -3,6 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import type { UserRole } from "../../constants/database.constants.js";
 import { sendSuccess } from "../../utils/api-response.js";
 import { AdminOrderService } from "./order.service.js";
+import { PaymentService } from "../PaymentModels/payment.service.js";
 import {
   addOrderNoteSchema,
   adminOrderListQuerySchema,
@@ -88,6 +89,16 @@ export async function handleAdminAddOrderNote(req: Request, res: Response, next:
     const validated = addOrderNoteSchema.parse(req.body);
     const note = await AdminOrderService.addNote(orderId, requireAdmin(req), validated);
     sendSuccess(res, 201, note);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleAdminVerifyPayuPayment(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const orderId = parseOrderId(req.params.orderId);
+    const result = await PaymentService.verifyPayuPaymentForAdmin(orderId);
+    sendSuccess(res, 200, result);
   } catch (error) {
     next(error);
   }

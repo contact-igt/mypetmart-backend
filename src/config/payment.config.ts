@@ -1,3 +1,4 @@
+import { primaryOrigin } from "../utils/origins.js";
 import { environmentConfig } from "./environment.config.js";
 
 // PayU's published Hosted Checkout form-post endpoints (test vs. live) — see
@@ -59,15 +60,15 @@ export const paymentConfig = Object.freeze({
   breezePublicKey: environmentConfig.BREEZE_PUBLIC_KEY,
   // Breeze Web SDK initiate() `shopUrl`. Non-secret. Falls back to the
   // already-trusted storefront origin when BREEZE_SHOP_URL is unset.
-  breezeShopUrl: environmentConfig.BREEZE_SHOP_URL ?? environmentConfig.STOREFRONT_ORIGIN,
+  breezeShopUrl: environmentConfig.BREEZE_SHOP_URL ?? primaryOrigin(environmentConfig.STOREFRONT_ORIGIN),
   gatewayUrl: resolveGatewayUrl(),
   verifyApiUrl: resolveVerifyApiUrl(),
   // Trusted, backend-configured browser return targets — never a
   // client-supplied callback URL, so PayU's surl/furl can never be used for
   // an open redirect. Reuses the already-validated storefront origin CORS
   // already trusts, plus fixed, backend-owned paths.
-  successReturnUrl: `${environmentConfig.STOREFRONT_ORIGIN}/order/payment/success`,
-  failureReturnUrl: `${environmentConfig.STOREFRONT_ORIGIN}/order/payment/failure`,
+  successReturnUrl: `${primaryOrigin(environmentConfig.STOREFRONT_ORIGIN)}/order/payment/success`,
+  failureReturnUrl: `${primaryOrigin(environmentConfig.STOREFRONT_ORIGIN)}/order/payment/failure`,
   // PayU's V1 refund API (cancel_refund_transaction / check_action_status_txnid)
   // is served by the exact same merchant postservice endpoint as Verify
   // Payment — confirmed 2026-08-17 against docs.payu.in/reference/

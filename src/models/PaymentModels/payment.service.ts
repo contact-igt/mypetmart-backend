@@ -40,7 +40,8 @@ import type {
   PaymentInitiationCaller,
   PaymentInitiationResultJSON,
   PaymentProvider,
-  PaymentStatusResultJSON
+  PaymentStatusResultJSON,
+  AdminPayuVerificationResultJSON
 } from "./payment.types.js";
 
 function buildCodResult(order: Order, payment: Payment): CodConfirmationResultJSON {
@@ -146,9 +147,9 @@ function generateBreezeTxnRef(paymentId: number): string {
  * proceeds with the last-known local state, exactly like every other
  * reconciliation path in this codebase.
  */
-async function reconcilePendingAttempt(payment: Payment): Promise<void> {
+async function reconcilePendingAttempt(payment: Payment): Promise<boolean> {
   if (!payment.provider_order_id) {
-    return;
+    return false;
   }
   // Provider-specific reconciliation. PayU has a documented Verify Payment
   // API used here as a proactive cross-check. Breeze has NO documented
@@ -159,14 +160,16 @@ async function reconcilePendingAttempt(payment: Payment): Promise<void> {
   // TODO — BREEZE CONFIRMATION REQUIRED: a Breeze payment/order status query
   // API, if one exists, would slot in here as a BreezeVerifyClient.
   if (payment.provider !== "payu") {
-    return;
+    return false;
   }
   try {
     const raw = await PayuVerifyClient.verifyPayment(payment.provider_order_id);
     const normalized = normalizeVerifyApiResult(payment.provider_order_id, raw);
     await PaymentFinalizationService.processVerifiedPaymentResult(normalized);
+    return true;
   } catch (error) {
     logger.warn({ err: error, paymentAttemptId: payment.id }, "payment reconciliation: Verify Payment API call failed, proceeding with last-known local state");
+    return false;
   }
 }
 
@@ -581,6 +584,30 @@ export const PaymentService = {
       amount: payment.amount,
       currency: payment.currency,
       commerceException: refreshedOrder?.commerce_exception ?? order.commerce_exception
+    };
+  },
+
+  /** Admin-only recovery for a pending PayU attempt. It never hand-sets a
+   * status: the PayU Verify response still flows through the shared finalizer. */
+  async verifyPayuPaymentForAdmin(orderId: number): Promise<AdminPayuVerificationResultJSON> {
+    const order = await Order.findByPk(orderId);
+    if (!order) throw new OrderNotFoundError(orderId);
+
+    const payment = await Payment.findOne({ where: { order_id: order.id, provider: "payu" }, order: [["id", "DESC"]] });
+    if (!payment) {
+      return { paymentStatus: order.payment_status, orderId: order.id, orderStatus: order.status, amount: order.total, currency: order.currency, commerceException: order.commerce_exception, verification: "unavailable" };
+    }
+
+    const verification = payment.status === "pending" ? (await reconcilePendingAttempt(payment) ? "verified" : "unavailable") : "not_required";
+    const [refreshedOrder, refreshedPayment] = await Promise.all([Order.findByPk(order.id), Payment.findByPk(payment.id)]);
+    return {
+      paymentStatus: refreshedPayment?.status ?? payment.status,
+      orderId: order.id,
+      orderStatus: refreshedOrder?.status ?? order.status,
+      amount: payment.amount,
+      currency: payment.currency,
+      commerceException: refreshedOrder?.commerce_exception ?? order.commerce_exception,
+      verification
     };
   },
 

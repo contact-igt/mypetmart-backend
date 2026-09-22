@@ -1,11 +1,8 @@
 import type { CorsOptions } from "cors";
 
 import { ApplicationError } from "../utils/application-error.js";
+import { parseOrigins } from "../utils/origins.js";
 import { environmentConfig } from "./environment.config.js";
-
-function parseOrigins(value: string): string[] {
-  return value.split(",").map((s) => s.trim()).filter(Boolean);
-}
 
 const parsedAllowedOrigins = [
   ...parseOrigins(environmentConfig.STOREFRONT_ORIGIN),

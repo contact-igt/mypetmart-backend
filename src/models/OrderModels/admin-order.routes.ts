@@ -7,6 +7,7 @@ import {
   handleAdminGetOrderById,
   handleAdminGetOrderSummary,
   handleAdminListOrders,
+  handleAdminVerifyPayuPayment,
   handleAdminUpdateOrderShippingAddress,
   handleAdminUpdateOrderStatus
 } from "./admin-order.controller.js";
@@ -44,6 +45,10 @@ adminOrderRouter.patch("/:orderId/shipping-address", (req, res, next) => {
 
 adminOrderRouter.post("/:orderId/notes", (req, res, next) => {
   void handleAdminAddOrderNote(req, res, next);
+});
+
+adminOrderRouter.post("/:orderId/verify-payu", (req, res, next) => {
+  void handleAdminVerifyPayuPayment(req, res, next);
 });
 
 // Deliberately NOT implemented in V1 (see final report §11-§13):
