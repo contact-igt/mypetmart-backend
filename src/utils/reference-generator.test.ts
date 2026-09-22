@@ -23,8 +23,8 @@ describe("shipment business references", () => {
     expect(buildBusinessReference("shipment", 1)).toBe("SHP-000001");
   });
 
-  it("does not change other business reference prefixes", () => {
-    expect(buildBusinessReference("order", 1)).toBe("ORD-000001");
+  it("uses the MyPetMart order-number format without changing other references", () => {
+    expect(buildBusinessReference("order", 2430)).toBe("MPM-2430");
     expect(buildBusinessReference("replacement", 1)).toBe("RPL-000001");
   });
 });

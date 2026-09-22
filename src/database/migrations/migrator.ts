@@ -44,7 +44,8 @@ const SCHEMA_ALTER_MIGRATION_NAMES = [
   "065-add-review-date-to-product-reviews.ts",
   "066-add-admin-notification-events.ts",
   "067-add-product-display-order.ts",
-  "068-normalize-website-product-order.ts"
+  "068-normalize-website-product-order.ts",
+  "070-migrate-order-numbers-to-mpm.ts"
 ] as const;
 export const MIGRATION_FILE_NAMES = [
   ...INITIAL_SCHEMA_TABLES.map((table) => `${table.migrationName}.ts`),

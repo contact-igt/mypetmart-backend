@@ -16,8 +16,7 @@ export function buildBusinessReference(type: "customer" | "admin" | "super_admin
       prefix = "SUP";
       break;
     case "order":
-      prefix = "ORD";
-      break;
+      return `MPM-${id}`;
     case "return":
       prefix = "RET";
       break;
