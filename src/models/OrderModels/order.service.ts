@@ -736,7 +736,8 @@ export const OrderService = {
       const total = formatPaiseAsMoney(subtotalPaise + shippingFeePaise);
 
       const orderId = await IdSequenceService.allocateNextId(DATABASE_TABLE_NAMES.orders, t);
-      const orderNumber = buildBusinessReference("order", orderId);
+      const orderNumberId = await IdSequenceService.allocateNextId("order_numbers", t);
+      const orderNumber = buildBusinessReference("order", orderNumberId);
       const guestAccess = identity.type === "guest" ? generateGuestAccessToken() : null;
 
       const order = await Order.create(
