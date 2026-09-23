@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { addressFieldsSchema } from "../AddressModels/address.validation.js";
+import { couponCodeSchema } from "../CouponModels/coupon.validation.js";
 import { CHECKOUT_PAYMENT_METHOD_VALUES } from "./checkout.types.js";
 
 export const checkoutPreviewSchema = z
@@ -10,7 +11,8 @@ export const checkoutPreviewSchema = z
     billingSameAsShipping: z.boolean().optional().default(true),
     billingAddress: addressFieldsSchema.optional(),
     contactEmail: z.string().email().optional(),
-    paymentMethod: z.enum(CHECKOUT_PAYMENT_METHOD_VALUES).optional()
+    paymentMethod: z.enum(CHECKOUT_PAYMENT_METHOD_VALUES).optional(),
+    couponCode: couponCodeSchema.optional()
   })
   .refine((data) => data.billingSameAsShipping || data.billingAddress !== undefined, {
     message: "billingAddress is required when billingSameAsShipping is false.",

@@ -6,7 +6,7 @@ import type { Order } from "../../database/tables/OrderTable/index.js";
 import { OrderItem, Payment, Refund, ReturnRequest } from "../../database/tables/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
 import { buildBusinessReference } from "../../utils/reference-generator.js";
-import { formatMoney, parseMoneyToPaise } from "../../utils/product-money.js";
+import { formatMoney, formatPaiseAsMoney, parseMoneyToPaise } from "../../utils/product-money.js";
 import { logger } from "../../utils/logger.js";
 import { ReturnItemNotReceivedError, ReturnRequestNotFoundError } from "../ReturnModels/return.errors.js";
 import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
@@ -139,8 +139,19 @@ export const RefundService = {
         throw new RefundProviderNotConfiguredError();
       }
 
-      const amount = formatMoney(Number(orderItem.unit_price) * returnRequest.quantity);
-      const amountPaise = parseMoneyToPaise(amount);
+      // Module 3: the refundable amount for a partial (line-level) return is
+      // the price actually PAID for the returned units — the immutable,
+      // persisted order_items.discount_allocated_paise snapshot (Module 2),
+      // never a re-derivation from the coupon's current configuration (which
+      // may have since changed or been archived). A coupon-eligible line's
+      // discount is prorated to just the units being returned, so refunding
+      // fewer than all units of a line never over-refunds the discounted
+      // portion still retained on the unreturned units.
+      const grossPaise = parseMoneyToPaise(orderItem.unit_price) * returnRequest.quantity;
+      const discountSharePaise =
+        orderItem.discount_allocated_paise > 0 ? Math.floor((orderItem.discount_allocated_paise * returnRequest.quantity) / orderItem.quantity) : 0;
+      const amountPaise = grossPaise - discountSharePaise;
+      const amount = formatPaiseAsMoney(amountPaise);
       const alreadyRefundedPaise = await loadRefundedTotalPaise(payment.id);
       const remainingPaise = parseMoneyToPaise(payment.amount) - alreadyRefundedPaise;
       if (amountPaise > remainingPaise) {

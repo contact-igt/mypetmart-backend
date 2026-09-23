@@ -17,7 +17,12 @@ import { databaseConfig } from "../../src/config/database.config.js";
 
 describe("Stage 5 migration runner", () => {
   it("discovers the initial schema migrations in numeric order", () => {
-    expect(INITIAL_SCHEMA_TABLES).toHaveLength(36);
+    // Pre-existing gap found and fixed while adding welcome_popups (Module 1,
+    // WELCOME_POPUP_REPOSITORY_AUDIT.md): announcement_bar_items was already
+    // missing here (and the length below already stale at 36) from an
+    // earlier change — both are corrected in this edit alongside the new
+    // table.
+    expect(INITIAL_SCHEMA_TABLES).toHaveLength(42);
     expect(expectedBusinessTableNames()).toEqual([
       "users",
       "auth_sessions",
@@ -54,7 +59,13 @@ describe("Stage 5 migration runner", () => {
       "product_media_assignments",
       "order_documents",
       "return_shipments",
-      "return_shipment_tracking_events"
+      "return_shipment_tracking_events",
+      "announcement_bar_items",
+      "welcome_popups",
+      "coupons",
+      "coupon_products",
+      "coupon_categories",
+      "coupon_redemptions"
     ]);
     expect(MIGRATION_FILE_NAMES).toEqual([...MIGRATION_FILE_NAMES].sort());
   });

@@ -3,6 +3,7 @@ import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAtt
 import { CART_STATUS_VALUES, DATABASE_TABLE_NAMES, type CartStatus } from "../../../constants/database.constants.js";
 import { isModelInitialized, removeSensitiveFields, timestampModelOptions, numericPrimaryKeyAttribute, type SerializedModel } from "../table-helpers.js";
 import type { CartItem } from "../CartItemTable/index.js";
+import type { Coupon } from "../CouponTable/index.js";
 import type { User } from "../UserTable/index.js";
 
 export class Cart extends Model<InferAttributes<Cart>, InferCreationAttributes<Cart>> {
@@ -10,6 +11,13 @@ export class Cart extends Model<InferAttributes<Cart>, InferCreationAttributes<C
   declare user_id: ForeignKey<User["id"]> | null;
   declare guest_token_hash: string | null;
   declare status: CreationOptional<CartStatus>;
+  // Optional applied-coupon reference — the ONE authoritative value stored on
+  // the Cart. Never a stored/stale discount amount: the discount itself is
+  // always recomputed live from this reference (see cart.service.ts
+  // buildCartDTO). Cleared (set null) by the coupon-removal endpoint, or when
+  // it points at a coupon that no longer validates for this cart the DTO
+  // simply omits the discount rather than mutating this column.
+  declare coupon_id: ForeignKey<Coupon["id"]> | null;
   declare expires_at: Date | null;
   declare created_at: CreationOptional<Date>;
   declare updated_at: CreationOptional<Date>;
@@ -33,6 +41,7 @@ export function initializeCartTable(sequelize: Sequelize): typeof Cart {
       user_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
       guest_token_hash: { type: DataTypes.STRING(255), allowNull: true, unique: true, validate: { len: [0, 255] } },
       status: { type: DataTypes.ENUM(...CART_STATUS_VALUES), allowNull: false, defaultValue: "active" },
+      coupon_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
       expires_at: { type: DataTypes.DATE, allowNull: true },
       created_at: DataTypes.DATE,
       updated_at: DataTypes.DATE
@@ -43,7 +52,8 @@ export function initializeCartTable(sequelize: Sequelize): typeof Cart {
       indexes: [
         { unique: true, fields: ["guest_token_hash"], name: "carts_guest_token_hash_unique" },
         { fields: ["user_id", "status"], name: "carts_user_status_idx" },
-        { fields: ["status", "expires_at"], name: "carts_status_expires_at_idx" }
+        { fields: ["status", "expires_at"], name: "carts_status_expires_at_idx" },
+        { fields: ["coupon_id"], name: "carts_coupon_id_idx" }
       ]
     }
   );

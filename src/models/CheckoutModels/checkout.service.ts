@@ -2,16 +2,67 @@ import { DEFAULT_COUNTRY_CODE, V1_FREE_SHIPPING_FEE } from "../../constants/data
 import { Address } from "../../database/tables/index.js";
 import { formatPaiseAsMoney, parseMoneyToPaise } from "../../utils/product-money.js";
 import { CartService } from "../CartModels/cart.service.js";
-import type { CartIdentity } from "../CartModels/cart.types.js";
+import type { CartIdentity, CartItemJSON, CartJSON } from "../CartModels/cart.types.js";
+import { CouponPricingService } from "../CouponModels/coupon.service.js";
+import { normalizeCouponCode } from "../CouponModels/coupon.validation.js";
+import type { CouponPricingLine } from "../CouponModels/coupon.types.js";
 import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
 import { CheckoutAddressNotFoundError, CheckoutAddressRequiredError, CheckoutCartEmptyError, CheckoutEmailRequiredError } from "./checkout.errors.js";
 import type {
   CheckoutAddressCandidate,
+  CheckoutCouponJSON,
   CheckoutPreviewInput,
   CheckoutPreviewJSON,
   CheckoutReadiness,
+  CheckoutTotals,
   InlineAddressInput
 } from "./checkout.types.js";
+
+function toPricingLines(items: CartItemJSON[]): CouponPricingLine[] {
+  return items.map((item) => ({
+    productId: item.productId,
+    categoryId: item.categoryId,
+    unitPricePaise: parseMoneyToPaise(item.price),
+    quantity: item.quantity
+  }));
+}
+
+/**
+ * Revalidates whichever coupon is in effect for this preview — an explicit
+ * couponCode override, or else whatever's already applied on the live Cart —
+ * against the CURRENT cart lines every single call. Never caches or trusts a
+ * prior evaluation: a cart quantity/price/product change since the coupon
+ * was applied is exactly what this re-evaluation catches (V1 requirement:
+ * "revalidate coupon eligibility whenever cart quantities, products, or
+ * prices change"). Returns null when no coupon is in effect at all.
+ */
+async function evaluateCheckoutCoupon(
+  cart: CartJSON,
+  couponCodeOverride: string | undefined,
+  identityUserId: number | null
+): Promise<{ coupon: CheckoutCouponJSON; eligibleMerchandisePaise: number; discountAmountPaise: number }> {
+  const effectiveCode = couponCodeOverride ?? cart.coupon?.code;
+  if (!effectiveCode) {
+    return { coupon: null, eligibleMerchandisePaise: 0, discountAmountPaise: 0 };
+  }
+
+  const code = normalizeCouponCode(effectiveCode);
+  const lines = toPricingLines(cart.items);
+  const evaluation = await CouponPricingService.evaluateCoupon({ code, lines, identity: { userId: identityUserId } });
+
+  if (evaluation.ok) {
+    return {
+      coupon: { code: evaluation.codeSnapshot, eligible: true, message: null },
+      eligibleMerchandisePaise: evaluation.eligibleMerchandisePaise,
+      discountAmountPaise: evaluation.discountAmountPaise
+    };
+  }
+  return {
+    coupon: { code, eligible: false, message: evaluation.message },
+    eligibleMerchandisePaise: 0,
+    discountAmountPaise: 0
+  };
+}
 
 function fromSavedAddress(address: Address): CheckoutAddressCandidate {
   return {
@@ -106,6 +157,23 @@ export const CheckoutService = {
       serviceable
     };
 
+    const identityUserId = identity.type === "customer" ? identity.userId : null;
+    const { coupon, eligibleMerchandisePaise, discountAmountPaise } = await evaluateCheckoutCoupon(cart, input.couponCode, identityUserId);
+
+    const shippingAmountPaise = parseMoneyToPaise(V1_FREE_SHIPPING_FEE);
+    const merchandiseSubtotalPaise = parseMoneyToPaise(cart.subtotal);
+    const totalBeforeDiscountPaise = merchandiseSubtotalPaise + shippingAmountPaise;
+    const payableTotalPaise = totalBeforeDiscountPaise - discountAmountPaise;
+
+    const totals: CheckoutTotals = {
+      merchandiseSubtotal: cart.subtotal,
+      eligibleMerchandiseSubtotal: formatPaiseAsMoney(eligibleMerchandisePaise),
+      shippingAmount: V1_FREE_SHIPPING_FEE,
+      totalBeforeDiscount: formatPaiseAsMoney(totalBeforeDiscountPaise),
+      discountAmount: formatPaiseAsMoney(discountAmountPaise),
+      payableTotal: formatPaiseAsMoney(payableTotalPaise)
+    };
+
     return {
       cart: {
         itemCount: cart.itemCount,
@@ -116,11 +184,8 @@ export const CheckoutService = {
       billingSameAsShipping: input.billingSameAsShipping,
       billingAddress,
       shipping: { status: "pending", amount: V1_FREE_SHIPPING_FEE },
-      totals: {
-        merchandiseSubtotal: cart.subtotal,
-        shippingAmount: V1_FREE_SHIPPING_FEE,
-        payableTotal: formatPaiseAsMoney(parseMoneyToPaise(cart.subtotal) + parseMoneyToPaise(V1_FREE_SHIPPING_FEE))
-      },
+      totals,
+      coupon,
       paymentMethod: input.paymentMethod ?? null,
       serviceability: serviceability ? { paymentMode: serviceability.paymentMode, serviceable: serviceability.serviceable } : null,
       readiness

@@ -39,7 +39,8 @@ function createShipmentInput(orderNumber = "ORD-1"): IThinkPackageInput {
   return {
     orderNumber, orderDate: "2026-08-18", totalAmount: "999.00",
     recipient: { name: "Alex", address1: "Line 1", address2: "Line 2", pincode: "400001", city: "Mumbai", state: "Maharashtra", country: "India", phone: "9876543210", email: "alex@example.com" },
-    products: [{ name: "Dog Food", sku: "DOG-1", quantity: 2, price: "499.50" }],
+    products: [{ name: "Dog Food", sku: "DOG-1", quantity: 2, price: "499.50", discount: "99.00" }],
+    shippingAmount: "50.00", totalDiscount: "99.00",
     lengthCm: "10.00", widthCm: "8.00", heightCm: "12.00", weightKg: "1.000", logistics: "Courier A", serviceType: "Surface",
     paymentMode: "Prepaid", codAmount: "0"
   };
@@ -135,7 +136,9 @@ describe("iThink Logistics V3 request contracts", () => {
       order_type: "forward"
     });
     const shipment = (request.data.shipments as Array<Record<string, unknown>>)[0];
-    expect(shipment).toMatchObject({ order: "TEST-SHP-000001", total_amount: "999.00", advance_amount: "999.00", cod_amount: "0", payment_mode: "Prepaid", return_address_id: "returns-1", store_id: "27377" });
+    expect(shipment).toMatchObject({ order: shipmentNumber, total_amount: "999.00", advance_amount: "999.00", cod_amount: "0", payment_mode: "Prepaid", return_address_id: "returns-1", store_id: "27377" });
+    expect(shipment).toMatchObject({ shipping_charges: "50.00", total_discount: "99.00" });
+    expect((shipment!.products as Array<Record<string, unknown>>)[0]).toMatchObject({ product_price: "499.50", product_quantity: "2", product_discount: "99.00" });
     expect(request.data).not.toHaveProperty("store_id");
     expect(typeof shipment?.store_id).toBe("string");
     expect(request.data.pickup_address_id).not.toBe(shipment?.store_id);
@@ -341,6 +344,18 @@ describe("ShipmentService fulfilment invariants", () => {
     expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ orderNumber: first.shipmentNumber }));
     await order.reload();
     expect(order).toMatchObject({ payment_status: "paid", total: "1000.00", shipping_fee: "0.00", fulfilment_status: "processing" });
+  });
+
+  it("blocks shipment booking when persisted discounts do not reconcile", async () => {
+    const { order } = await createOrder();
+    await order.update({ coupon_discount_amount_paise: 10000, total: "900.00" });
+    const createSpy = mockSuccessfulProvider();
+
+    await expect(ShipmentService.createForOrder(order.id)).rejects.toMatchObject({
+      code: "SHIPMENT_PACKAGE_DATA_INVALID",
+      message: "Order financial totals do not reconcile; shipment booking was blocked."
+    });
+    expect(createSpy).not.toHaveBeenCalled();
   });
 
   it("preserves a stored legacy shipment reference across reads and repeat creation", async () => {

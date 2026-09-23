@@ -1,8 +1,9 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
-import { DATABASE_TABLE_NAMES, DEFAULT_COUNTRY_CODE, DEFAULT_CURRENCY_CODE, FULFILMENT_STATUS_VALUES, MONEY_PRECISION, MONEY_SCALE, ORDER_COMMERCE_EXCEPTION_VALUES, ORDER_STATUS_VALUES, PAYMENT_STATUS_VALUES, type FulfilmentStatus, type OrderCommerceException, type OrderStatus, type PaymentStatus } from "../../../constants/database.constants.js";
+import { COUPON_DISCOUNT_TYPE_VALUES, DATABASE_TABLE_NAMES, DEFAULT_COUNTRY_CODE, DEFAULT_CURRENCY_CODE, FULFILMENT_STATUS_VALUES, MONEY_PRECISION, MONEY_SCALE, ORDER_COMMERCE_EXCEPTION_VALUES, ORDER_STATUS_VALUES, PAYMENT_STATUS_VALUES, type CouponDiscountType, type FulfilmentStatus, type OrderCommerceException, type OrderStatus, type PaymentStatus } from "../../../constants/database.constants.js";
 import { isModelInitialized, isNonNegativeDecimal, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { Cart } from "../CartTable/index.js";
+import type { Coupon } from "../CouponTable/index.js";
 import type { OrderItem } from "../OrderItemTable/index.js";
 import type { OrderNote } from "../OrderNoteTable/index.js";
 import type { Payment } from "../PaymentTable/index.js";
@@ -41,6 +42,17 @@ export class Order extends Model<InferAttributes<Order>, InferCreationAttributes
   declare subtotal: CreationOptional<string>;
   declare shipping_fee: CreationOptional<string>;
   declare total: CreationOptional<string>;
+  // Immutable coupon/discount snapshot, written once at Order creation (see
+  // order.service.ts createOrder) and never altered afterward — a used
+  // coupon's terms may not retroactively change an existing Order's
+  // financials (V1 rule). All six are null/zero together on an Order created
+  // without a coupon, and never re-derived from the live Coupon row later.
+  declare coupon_id: ForeignKey<Coupon["id"]> | null;
+  declare coupon_code_snapshot: string | null;
+  declare coupon_discount_type_snapshot: CouponDiscountType | null;
+  declare coupon_discount_value_snapshot: number | null;
+  declare coupon_eligible_merchandise_paise: number | null;
+  declare coupon_discount_amount_paise: CreationOptional<number>;
   declare currency: CreationOptional<string>;
   declare ship_recipient_name: string;
   declare ship_phone: string;
@@ -98,6 +110,12 @@ export function initializeOrderTable(sequelize: Sequelize): typeof Order {
       subtotal: { type: DataTypes.DECIMAL(MONEY_PRECISION, MONEY_SCALE), allowNull: false, defaultValue: "0.00", validate: { isNonNegative: nonNegativeMoneyValidator("Subtotal") } },
       shipping_fee: { type: DataTypes.DECIMAL(MONEY_PRECISION, MONEY_SCALE), allowNull: false, defaultValue: "0.00", validate: { isNonNegative: nonNegativeMoneyValidator("Shipping fee") } },
       total: { type: DataTypes.DECIMAL(MONEY_PRECISION, MONEY_SCALE), allowNull: false, defaultValue: "0.00", validate: { isNonNegative: nonNegativeMoneyValidator("Total") } },
+      coupon_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+      coupon_code_snapshot: { type: DataTypes.STRING(40), allowNull: true },
+      coupon_discount_type_snapshot: { type: DataTypes.ENUM(...COUPON_DISCOUNT_TYPE_VALUES), allowNull: true },
+      coupon_discount_value_snapshot: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+      coupon_eligible_merchandise_paise: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+      coupon_discount_amount_paise: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },
       currency: { type: DataTypes.STRING(3), allowNull: false, defaultValue: DEFAULT_CURRENCY_CODE, validate: { len: [3, 3] } },
       ship_recipient_name: { type: DataTypes.STRING(160), allowNull: false, validate: { notEmpty: true, len: [1, 160] } },
       ship_phone: { type: DataTypes.STRING(32), allowNull: false, validate: { notEmpty: true, len: [1, 32] } },
@@ -127,7 +145,8 @@ export function initializeOrderTable(sequelize: Sequelize): typeof Order {
         { fields: ["fulfilment_status"], name: "orders_fulfilment_status_idx" },
         { fields: ["ship_state", "ship_city"], name: "orders_ship_state_city_idx" },
         { fields: ["cart_id"], name: "orders_cart_id_idx" },
-        { fields: ["commerce_exception"], name: "orders_commerce_exception_idx" }
+        { fields: ["commerce_exception"], name: "orders_commerce_exception_idx" },
+        { fields: ["coupon_id"], name: "orders_coupon_id_idx" }
       ]
     }
   );

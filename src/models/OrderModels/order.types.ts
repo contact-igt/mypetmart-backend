@@ -11,6 +11,11 @@ export type CreateOrderInput = {
   shippingAddress?: InlineAddressInput;
   contactEmail?: string;
   paymentMethod?: CheckoutPaymentMethod;
+  // Optional override — when omitted, falls back to whatever coupon is
+  // already applied on the caller's Cart (same override-or-fallback contract
+  // as CheckoutPreviewInput.couponCode). Always revalidated and priced fresh
+  // inside the Order creation transaction — never trusted at face value.
+  couponCode?: string;
 };
 
 export type OrderItemJSON = {
@@ -25,6 +30,16 @@ export type OrderItemJSON = {
   quantity: number;
   unitPrice: string;
   lineTotal: string;
+  discountAllocated: string;
+};
+
+// null when the Order was created without a coupon. Everything here is an
+// immutable snapshot taken at Order creation (see order.service.ts
+// createOrder) — never re-derived from the live Coupon row afterward.
+export type OrderCouponJSON = {
+  code: string;
+  eligibleMerchandiseSubtotal: string;
+  discountAmount: string;
 };
 
 export type OrderShippingAddressJSON = {
@@ -93,6 +108,11 @@ export type OrderDetailJSON = OrderListItemJSON & {
   shipment?: ShipmentJSON;
   payments: CustomerOrderPaymentJSON[];
   refundSummary: CustomerOrderRefundSummaryJSON | null;
+  // subtotal + shippingFee, before any coupon discount — total is always
+  // totalBeforeDiscount minus coupon.discountAmount (or exactly
+  // totalBeforeDiscount when coupon is null).
+  totalBeforeDiscount: string;
+  coupon: OrderCouponJSON | null;
 };
 
 // Additive-only wrapper around OrderDetailJSON used solely by Order Creation's

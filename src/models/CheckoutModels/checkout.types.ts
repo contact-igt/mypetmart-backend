@@ -40,6 +40,11 @@ export type CheckoutPreviewInput = {
   // Optional for backwards compatibility with the existing one-step client.
   // Stage 2 will send this explicitly before Order creation.
   paymentMethod?: CheckoutPaymentMethod;
+  // Optional override — when omitted, preview falls back to whatever coupon
+  // is already applied on the live Cart (see CheckoutService.preview). Never
+  // trusted at face value: always re-evaluated fresh against live cart
+  // lines, same as Order creation.
+  couponCode?: string;
 };
 
 export type CheckoutServiceabilityJSON = {
@@ -58,9 +63,22 @@ export type CheckoutReadiness = {
 
 export type CheckoutTotals = {
   merchandiseSubtotal: string;
+  eligibleMerchandiseSubtotal: string;
   shippingAmount: string | null;
+  totalBeforeDiscount: string;
+  discountAmount: string;
   payableTotal: string | null;
 };
+
+// null when no coupon is in effect for this preview (no code on the Cart,
+// no couponCode override, or the override was empty). eligible mirrors
+// CartCouponJSON's own field — false means the code is currently invalid
+// (see message) and totals.discountAmount is "0.00" for this preview.
+export type CheckoutCouponJSON = {
+  code: string;
+  eligible: boolean;
+  message: string | null;
+} | null;
 
 export type CheckoutPreviewJSON = {
   cart: {
@@ -76,6 +94,7 @@ export type CheckoutPreviewJSON = {
     amount: string | null;
   };
   totals: CheckoutTotals;
+  coupon: CheckoutCouponJSON;
   paymentMethod: CheckoutPaymentMethod | null;
   serviceability: CheckoutServiceabilityJSON;
   readiness: CheckoutReadiness;

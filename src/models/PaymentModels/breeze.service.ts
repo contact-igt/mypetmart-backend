@@ -1,3 +1,4 @@
+import { primaryOrigin } from "../../utils/origins.js";
 import { environmentConfig } from "../../config/environment.config.js";
 import { paymentConfig } from "../../config/payment.config.js";
 import { parseMoneyToPaise } from "../../utils/product-money.js";
@@ -72,7 +73,7 @@ export const BreezeService = {
       // SDK actually performs a full-page redirect to returnUrl (and with
       // which query params), or completes inside the SDK overlay and only
       // emits `processResult`.
-      returnUrl: `${environmentConfig.STOREFRONT_ORIGIN}/order/payment/result?provider=breeze&orderId=${order.id}`,
+      returnUrl: `${primaryOrigin(environmentConfig.STOREFRONT_ORIGIN)}/order/payment/result?provider=breeze&orderId=${order.id}`,
       orderId: order.id
     };
   }

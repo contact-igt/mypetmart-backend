@@ -2,13 +2,17 @@ import { UniqueConstraintError, type Transaction } from "sequelize";
 
 import { DATABASE_TABLE_NAMES } from "../../constants/database.constants.js";
 import { sequelize } from "../../database/index.js";
-import { Cart, CartItem, Product, ProductImage, ProductVariant, User } from "../../database/tables/index.js";
+import { Cart, CartItem, Coupon, Product, ProductImage, ProductVariant, User } from "../../database/tables/index.js";
 import type { Order } from "../../database/tables/OrderTable/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
+import { CouponPricingService } from "../CouponModels/coupon.service.js";
+import { normalizeCouponCode } from "../CouponModels/coupon.validation.js";
+import type { CouponPricingLine } from "../CouponModels/coupon.types.js";
 import { formatImageDTO } from "../ProductModels/product.service.js";
 import { ProductNotFoundError, ProductVariantNotFoundError } from "../ProductModels/product.errors.js";
 import { MAX_CART_ITEM_QUANTITY } from "./cart.constants.js";
 import {
+  CartCouponEmptyCartError,
   CartItemNotFoundError,
   CartInsufficientStockError,
   CartProductNotAvailableError,
@@ -20,7 +24,9 @@ import {
 } from "./cart.errors.js";
 import type {
   AddCartItemInput,
+  ApplyCartCouponInput,
   CartAvailabilityReason,
+  CartCouponJSON,
   CartIdentity,
   CartItemImageJSON,
   CartItemJSON,
@@ -66,8 +72,11 @@ async function findOrCreateGuestCart(tokenHash: string, transaction: Transaction
   });
   if (existing) {
     if (existing.status !== "active") {
+      // A new shopping session on a reused guest cart starts empty — including
+      // no coupon carried over from the order that finalized this cart.
       await CartItem.destroy({ where: { cart_id: existing.id }, transaction });
       existing.status = "active";
+      existing.coupon_id = null;
       await existing.save({ transaction });
     }
     return existing;
@@ -87,6 +96,7 @@ async function findOrCreateGuestCart(tokenHash: string, transaction: Transaction
         if (raced.status !== "active") {
           await CartItem.destroy({ where: { cart_id: raced.id }, transaction });
           raced.status = "active";
+          raced.coupon_id = null;
           await raced.save({ transaction });
         }
         return raced;
@@ -103,6 +113,10 @@ async function findActiveCart(identity: CartIdentity, transaction?: Transaction)
 
 async function findOrCreateCart(identity: CartIdentity, transaction: Transaction): Promise<Cart> {
   return identity.type === "customer" ? findOrCreateCustomerCart(identity.userId, transaction) : findOrCreateGuestCart(identity.tokenHash, transaction);
+}
+
+function identityUserId(identity: CartIdentity): number | null {
+  return identity.type === "customer" ? identity.userId : null;
 }
 
 async function getPrimaryImageDTO(productId: number, transaction?: Transaction): Promise<CartItemImageJSON | null> {
@@ -177,6 +191,7 @@ function buildCartItemDTO(item: CartItem, product: Product, variant: ProductVari
   return {
     cartItemId: item.id,
     productId: product.id,
+    categoryId: product.category_id,
     variantId: variant ? variant.id : null,
     productName: product.name,
     productSlug: product.slug,
@@ -194,9 +209,43 @@ function buildCartItemDTO(item: CartItem, product: Product, variant: ProductVari
   };
 }
 
-async function buildCartDTO(cart: Cart | null, transaction?: Transaction): Promise<CartJSON> {
+// Re-evaluates the Cart's applied coupon live, every time the Cart is
+// rendered — never trusts a stored discount amount (there isn't one; only
+// coupon_id is ever persisted). `eligible: false` deliberately does not
+// clear cart.coupon_id: a coupon that's temporarily ineligible (e.g. the
+// cart total dropped below its minimum) should resume applying automatically
+// once the cart becomes eligible again, without the customer re-applying it.
+async function buildCartCouponJSON(couponId: number, lines: CouponPricingLine[], identityUserId: number | null, transaction?: Transaction): Promise<CartCouponJSON> {
+  const coupon = await Coupon.findByPk(couponId, transaction ? { transaction } : undefined);
+  if (!coupon) {
+    // Coupons are archived, never hard-deleted (see coupon.errors.js) — this
+    // should be unreachable, but a missing reference renders as "no
+    // discount" rather than throwing from a read path.
+    return null;
+  }
+
+  const evaluation = await CouponPricingService.evaluateCoupon({ code: coupon.code, lines, identity: { userId: identityUserId } });
+  if (evaluation.ok) {
+    return {
+      code: evaluation.codeSnapshot,
+      eligible: true,
+      discountAmount: paiseToMoneyString(evaluation.discountAmountPaise),
+      eligibleMerchandiseSubtotal: paiseToMoneyString(evaluation.eligibleMerchandisePaise),
+      message: null
+    };
+  }
+  return {
+    code: coupon.code,
+    eligible: false,
+    discountAmount: "0.00",
+    eligibleMerchandiseSubtotal: "0.00",
+    message: evaluation.message
+  };
+}
+
+async function buildCartDTO(cart: Cart | null, identityUserId: number | null, transaction?: Transaction): Promise<CartJSON> {
   if (!cart) {
-    return { id: null, status: "active", itemCount: 0, subtotal: "0.00", items: [] };
+    return { id: null, status: "active", itemCount: 0, subtotal: "0.00", items: [], coupon: null };
   }
 
   const rows = await CartItem.findAll({
@@ -206,6 +255,7 @@ async function buildCartDTO(cart: Cart | null, transaction?: Transaction): Promi
   });
 
   const items: CartItemJSON[] = [];
+  const pricingLines: CouponPricingLine[] = [];
   for (const item of rows) {
     // paranoid:false so a Product/Variant soft-deleted after being added still renders
     // (as unavailable) instead of silently disappearing from the cart.
@@ -220,17 +270,25 @@ async function buildCartDTO(cart: Cart | null, transaction?: Transaction): Promi
     const image = await getPrimaryImageDTO(product.id, transaction);
 
     items.push(buildCartItemDTO(item, product, variant, image));
+    pricingLines.push({
+      productId: product.id,
+      categoryId: product.category_id,
+      unitPricePaise: moneyToPaise(variant ? variant.price : product.price),
+      quantity: item.quantity
+    });
   }
 
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
   const subtotalPaise = items.reduce((sum, item) => sum + moneyToPaise(item.subtotal), 0);
+  const coupon = cart.coupon_id !== null ? await buildCartCouponJSON(cart.coupon_id, pricingLines, identityUserId, transaction) : null;
 
   return {
     id: cart.id,
     status: cart.status,
     itemCount,
     subtotal: paiseToMoneyString(subtotalPaise),
-    items
+    items,
+    coupon
   };
 }
 
@@ -304,7 +362,7 @@ export const CartService = {
 
   async getCart(identity: CartIdentity): Promise<CartJSON> {
     const cart = await findActiveCart(identity);
-    return buildCartDTO(cart);
+    return buildCartDTO(cart, identityUserId(identity));
   },
 
   async addCartItem(identity: CartIdentity, input: AddCartItemInput): Promise<CartJSON> {
@@ -338,7 +396,7 @@ export const CartService = {
             },
             { transaction: t }
           );
-          return buildCartDTO(cart, t);
+          return buildCartDTO(cart, identityUserId(identity), t);
         } catch (error) {
           if (!(error instanceof UniqueConstraintError)) {
             throw error;
@@ -366,7 +424,7 @@ export const CartService = {
       cartItem.unit_price_snapshot = unitPriceSnapshot;
       await cartItem.save({ transaction: t });
 
-      return buildCartDTO(cart, t);
+      return buildCartDTO(cart, identityUserId(identity), t);
     });
   },
 
@@ -399,7 +457,7 @@ export const CartService = {
       cartItem.unit_price_snapshot = variant ? variant.price : product.price;
       await cartItem.save({ transaction: t });
 
-      return buildCartDTO(cart, t);
+      return buildCartDTO(cart, identityUserId(identity), t);
     });
   },
 
@@ -420,7 +478,7 @@ export const CartService = {
       }
 
       await cartItem.destroy({ transaction: t });
-      return buildCartDTO(cart, t);
+      return buildCartDTO(cart, identityUserId(identity), t);
     });
   },
 
@@ -428,14 +486,82 @@ export const CartService = {
     return sequelize.transaction(async (t) => {
       const cart = await findActiveCart(identity, t);
       if (!cart) {
-        return buildCartDTO(null);
+        return buildCartDTO(null, identityUserId(identity));
       }
 
       await CartItem.destroy({ where: { cart_id: cart.id }, transaction: t });
-      return buildCartDTO(cart, t);
+      return buildCartDTO(cart, identityUserId(identity), t);
     });
   },
 
+  async applyCoupon(identity: CartIdentity, input: ApplyCartCouponInput): Promise<CartJSON> {
+    return sequelize.transaction(async (t) => {
+      const cart = await findOrCreateCart(identity, t);
+      const code = normalizeCouponCode(input.code);
+
+      const rows = await CartItem.findAll({ where: { cart_id: cart.id }, order: [["id", "ASC"]], transaction: t });
+      if (rows.length === 0) {
+        throw new CartCouponEmptyCartError();
+      }
+
+      const lines: CouponPricingLine[] = [];
+      for (const item of rows) {
+        const product = await Product.findByPk(item.product_id, { paranoid: false, transaction: t });
+        if (!product) {
+          throw new Error(`Cart item ${item.id} references missing product ${item.product_id}.`);
+        }
+        const variant = item.product_variant_id ? await ProductVariant.findByPk(item.product_variant_id, { paranoid: false, transaction: t }) : null;
+        lines.push({
+          productId: product.id,
+          categoryId: product.category_id,
+          unitPricePaise: moneyToPaise(variant ? variant.price : product.price),
+          quantity: item.quantity
+        });
+      }
+
+      // Throws CouponNotApplicableError (422) if the code doesn't validate
+      // right now — an Apply request never silently no-ops on an invalid
+      // code. Only the coupon_id REFERENCE is ever persisted here — no
+      // discount amount is stored. Re-applying the same already-applied
+      // code is idempotent (overwrites coupon_id with the same value) and
+      // never creates a redemption — redemptions only ever come from Order
+      // creation (see CouponPricingService.reserveCouponForOrder).
+      const evaluation = await CouponPricingService.assertCouponApplicable({ code, lines, identity: { userId: identityUserId(identity) } });
+
+      cart.coupon_id = evaluation.couponId;
+      await cart.save({ transaction: t });
+
+      return buildCartDTO(cart, identityUserId(identity), t);
+    });
+  },
+
+  async removeCoupon(identity: CartIdentity): Promise<CartJSON> {
+    return sequelize.transaction(async (t) => {
+      const cart = await findActiveCart(identity, t);
+      if (!cart) {
+        return buildCartDTO(null, identityUserId(identity));
+      }
+
+      if (cart.coupon_id !== null) {
+        cart.coupon_id = null;
+        await cart.save({ transaction: t });
+      }
+
+      return buildCartDTO(cart, identityUserId(identity), t);
+    });
+  },
+
+  // Coupon merge policy (Module 2 — explicitly decided, not pre-specified by
+  // the audit): a guest cart's applied coupon (guestCart.coupon_id) is
+  // deliberately NEVER copied onto the customer cart here. The customer
+  // cart's own existing coupon_id (if any) is left completely untouched.
+  // Rationale: a coupon a guest applied was only ever validated under
+  // guest rules (evaluateCoupon already refuses any per-customer-limit or
+  // first-order-only coupon for a guest), so carrying it over adds no value
+  // and risks surprising the now-authenticated customer with a discount they
+  // never explicitly chose under their own identity. Dropping it is safe and
+  // cheap to recover from: applying a coupon is idempotent and the customer
+  // can simply re-apply it (via POST /cart/coupon) if it's still eligible.
   async mergeGuestCartIntoCustomerCart(userId: number, guestTokenHash: string | null): Promise<CartMergeResult> {
     return sequelize.transaction(async (t) => {
       const customerCart = await findOrCreateCustomerCart(userId, t);
@@ -450,7 +576,7 @@ export const CartService = {
         : null;
 
       if (!guestCart) {
-        return { cart: await buildCartDTO(customerCart, t), mergeReport };
+        return { cart: await buildCartDTO(customerCart, userId, t), mergeReport };
       }
 
       const guestItems = await CartItem.findAll({
@@ -524,9 +650,10 @@ export const CartService = {
       await CartItem.destroy({ where: { cart_id: guestCart.id }, transaction: t });
       guestCart.status = "abandoned";
       guestCart.guest_token_hash = null;
+      guestCart.coupon_id = null;
       await guestCart.save({ transaction: t });
 
-      return { cart: await buildCartDTO(customerCart, t), mergeReport };
+      return { cart: await buildCartDTO(customerCart, userId, t), mergeReport };
     });
   }
 };

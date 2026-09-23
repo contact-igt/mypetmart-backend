@@ -3,6 +3,12 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   authSessions: "auth_sessions",
   addresses: "addresses",
   categories: "categories",
+  announcementBarItems: "announcement_bar_items",
+  welcomePopups: "welcome_popups",
+  coupons: "coupons",
+  couponProducts: "coupon_products",
+  couponCategories: "coupon_categories",
+  couponRedemptions: "coupon_redemptions",
   products: "products",
   productVariants: "product_variants",
   productImages: "product_images",
@@ -54,6 +60,50 @@ export type PetType = (typeof PET_TYPE_VALUES)[number];
 
 export const PRODUCT_STATUS_VALUES = ["active", "draft", "archived"] as const;
 export type ProductStatus = (typeof PRODUCT_STATUS_VALUES)[number];
+
+// Coupon system (see COUPON_SYSTEM_REPOSITORY_AUDIT.md §H Module 1).
+// "draft" = being configured, never usable; "active" = usable subject to its
+// own dates/limits; "inactive" = manually turned off (Products' own
+// active/draft/archived convention, minus "archived" — a coupon is never
+// hard-deleted, only turned inactive, so there is no separate retired state).
+export const COUPON_STATUS_VALUES = ["draft", "active", "inactive"] as const;
+export type CouponStatus = (typeof COUPON_STATUS_VALUES)[number];
+
+// "discount_value" on the coupons table means basis points (1/100 of a
+// percent; 1000 = 10.00%) for "percentage", or integer paise for "fixed" —
+// see coupon.service.ts's calculateDiscountPaise, the single place that
+// interprets it.
+export const COUPON_DISCOUNT_TYPE_VALUES = ["percentage", "fixed"] as const;
+export type CouponDiscountType = (typeof COUPON_DISCOUNT_TYPE_VALUES)[number];
+
+// A redemption row exists the moment an order reserves a coupon (created in
+// the same transaction as the order, in Module 2 — not yet implemented here)
+// and is never deleted afterward, so usage limits and audit history stay
+// accurate regardless of what later happens to the order.
+// "reserved": order created, payment not yet verified — still counts against
+//   usage limits so a concurrent order cannot also claim the last use.
+// "consumed": the order's payment was verified (or COD was confirmed) —
+//   permanent, financially final.
+// "released": the pending order was safely cancelled before payment —
+//   frees the usage-limit slot this redemption was holding.
+export const COUPON_REDEMPTION_STATUS_VALUES = ["reserved", "consumed", "released"] as const;
+export type CouponRedemptionStatus = (typeof COUPON_REDEMPTION_STATUS_VALUES)[number];
+
+// Two fixed layouts only (see WELCOME_POPUP_REPOSITORY_AUDIT.md §H Module 1) —
+// content fields differ per template and are validated at the service layer,
+// not by this enum.
+export const WELCOME_POPUP_TEMPLATE_VALUES = ["template_1", "template_2"] as const;
+export type WelcomePopupTemplate = (typeof WELCOME_POPUP_TEMPLATE_VALUES)[number];
+
+export const WELCOME_POPUP_CTA_MODE_VALUES = ["email_signup", "navigation"] as const;
+export type WelcomePopupCtaMode = (typeof WELCOME_POPUP_CTA_MODE_VALUES)[number];
+
+// Publication lifecycle only — deliberately separate from "is this the one
+// popup shown on the homepage right now" (see is_homepage_active on
+// WelcomePopupTable), so multiple drafts and multiple published-but-inactive
+// popups can coexist alongside at most one homepage-active popup.
+export const WELCOME_POPUP_STATUS_VALUES = ["draft", "published", "archived"] as const;
+export type WelcomePopupStatus = (typeof WELCOME_POPUP_STATUS_VALUES)[number];
 
 // V1 media library types: image (existing) and video (MP4 only — see
 // object-storage.service.ts's MEDIA_LIBRARY_VIDEO_TYPES). Derived server-side

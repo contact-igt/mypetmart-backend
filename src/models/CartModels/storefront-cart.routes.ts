@@ -4,10 +4,12 @@ import { authenticate } from "../../middlewares/auth/authenticate.middleware.js"
 import { resolveCartIdentity } from "../../middlewares/cart/resolve-cart-identity.middleware.js";
 import {
   handleAddCartItem,
+  handleApplyCoupon,
   handleClearCart,
   handleGetCart,
   handleMergeCart,
   handleRemoveCartItem,
+  handleRemoveCoupon,
   handleUpdateCartItem
 } from "./cart.controller.js";
 
@@ -39,4 +41,12 @@ storefrontCartRouter.delete("/items/:cartItemId", (req, res, next) => {
 
 storefrontCartRouter.delete("/items", (req, res, next) => {
   void handleClearCart(req, res, next);
+});
+
+storefrontCartRouter.post("/coupon", (req, res, next) => {
+  void handleApplyCoupon(req, res, next);
+});
+
+storefrontCartRouter.delete("/coupon", (req, res, next) => {
+  void handleRemoveCoupon(req, res, next);
 });

@@ -37,6 +37,7 @@ const SCHEMA_ALTER_MIGRATION_NAMES = [
   "049-add-media-type-to-media-assets.ts",
   "052-add-usage-care-safety-to-products.ts",
   "056-add-review-source-to-product-reviews.ts",
+  "057-add-shipment-notification-events.ts",
   "058-add-shipment-eta-fields.ts",
   "062-add-return-shipment-notification-events.ts",
   "063-add-return-cancellation.ts",
@@ -45,7 +46,13 @@ const SCHEMA_ALTER_MIGRATION_NAMES = [
   "066-add-admin-notification-events.ts",
   "067-add-product-display-order.ts",
   "068-normalize-website-product-order.ts",
-  "070-migrate-order-numbers-to-mpm.ts"
+  "070-migrate-order-numbers-to-mpm.ts",
+  "071-add-link-label-to-announcement-bar-items.ts",
+  "073-add-welcome-popup-cta-and-timing.ts",
+  "078-add-coupon-to-carts.ts",
+  "079-add-coupon-to-orders.ts",
+  "080-add-discount-allocation-to-order-items.ts",
+  "081-add-coupon-to-welcome-popups.ts"
 ] as const;
 export const MIGRATION_FILE_NAMES = [
   ...INITIAL_SCHEMA_TABLES.map((table) => `${table.migrationName}.ts`),

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { couponCodeSchema } from "../CouponModels/coupon.validation.js";
 import { MAX_CART_ITEM_QUANTITY } from "./cart.constants.js";
 import { InvalidCartItemIdError } from "./cart.errors.js";
 
@@ -28,4 +29,8 @@ export const addCartItemSchema = z.object({
 
 export const updateCartItemSchema = z.object({
   quantity: quantitySchema
+});
+
+export const applyCouponSchema = z.object({
+  code: couponCodeSchema
 });

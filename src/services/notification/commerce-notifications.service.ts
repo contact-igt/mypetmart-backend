@@ -10,6 +10,7 @@
 // didn't actually change on this particular invocation — the re-verify
 // guards content correctness, NotificationService's durable dedupe guards
 // against ever sending the same milestone twice).
+import { primaryOrigin } from "../../utils/origins.js";
 import { environmentConfig } from "../../config/environment.config.js";
 import { Order, OrderItem, Payment, Refund, Replacement, ReturnRequest, ReturnShipment, Shipment, User } from "../../database/tables/index.js";
 import type { Order as OrderModel } from "../../database/tables/OrderTable/index.js";
@@ -55,10 +56,10 @@ function adminOrderContext(order: OrderModel, buyer: string): adminTemplates.Adm
 // around by weakening the token hashing.
 function orderViewUrl(order: OrderModel, rawGuestToken?: string): string | null {
   if (order.user_id !== null) {
-    return `${environmentConfig.STOREFRONT_ORIGIN}/account/orders/${order.id}`;
+    return `${primaryOrigin(environmentConfig.STOREFRONT_ORIGIN)}/account/orders/${order.id}`;
   }
   if (rawGuestToken) {
-    return `${environmentConfig.STOREFRONT_ORIGIN}/order/guest/${rawGuestToken}`;
+    return `${primaryOrigin(environmentConfig.STOREFRONT_ORIGIN)}/order/guest/${rawGuestToken}`;
   }
   return null;
 }

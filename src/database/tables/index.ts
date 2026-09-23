@@ -1,11 +1,16 @@
 import type { Model, ModelStatic, Sequelize } from "sequelize";
 
 import { Address, initializeAddressTable } from "./AddressTable/index.js";
+import { AnnouncementBarItem, initializeAnnouncementBarItemTable } from "./AnnouncementBarTable/index.js";
 import { AuthChallenge, initializeAuthChallengeTable } from "./AuthChallengeTable/index.js";
 import { AuthSession, initializeAuthSessionTable } from "./AuthSessionTable/index.js";
 import { Cart, initializeCartTable } from "./CartTable/index.js";
 import { CartItem, initializeCartItemTable } from "./CartItemTable/index.js";
 import { Category, initializeCategoryTable } from "./CategoryTable/index.js";
+import { Coupon, initializeCouponTable } from "./CouponTable/index.js";
+import { CouponProduct, initializeCouponProductTable } from "./CouponProductTable/index.js";
+import { CouponCategory, initializeCouponCategoryTable } from "./CouponCategoryTable/index.js";
+import { CouponRedemption, initializeCouponRedemptionTable } from "./CouponRedemptionTable/index.js";
 import { ContactEnquiry, initializeContactEnquiryTable } from "./ContactEnquiryTable/index.js";
 import { Order, initializeOrderTable } from "./OrderTable/index.js";
 import { OrderItem, initializeOrderItemTable } from "./OrderItemTable/index.js";
@@ -35,16 +40,22 @@ import { Shipment, initializeShipmentTable } from "./ShipmentTable/index.js";
 import { ShipmentTrackingEvent, initializeShipmentTrackingEventTable } from "./ShipmentTrackingEventTable/index.js";
 import { StoreSetting, initializeStoreSettingTable } from "./StoreSettingTable/index.js";
 import { User, initializeUserTable } from "./UserTable/index.js";
+import { WelcomePopup, initializeWelcomePopupTable } from "./WelcomePopupTable/index.js";
 import { Wishlist, initializeWishlistTable } from "./WishlistTable/index.js";
 
 export {
   Address,
+  AnnouncementBarItem,
   AuthChallenge,
   AuthSession,
   Cart,
   CartItem,
   Category,
   ContactEnquiry,
+  Coupon,
+  CouponProduct,
+  CouponCategory,
+  CouponRedemption,
   MediaAsset,
   NewsletterSubscriber,
   NotificationLog,
@@ -73,6 +84,7 @@ export {
   ShipmentTrackingEvent,
   StoreSetting,
   User,
+  WelcomePopup,
   Wishlist
 };
 
@@ -80,6 +92,7 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "User",
   "AuthSession",
   "Address",
+  "AnnouncementBarItem",
   "Category",
   "Product",
   "ProductVariant",
@@ -107,12 +120,17 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "Refund",
   "Replacement",
   "ContactEnquiry",
+  "Coupon",
+  "CouponProduct",
+  "CouponCategory",
+  "CouponRedemption",
   "StoreSetting",
   "AuthChallenge",
   "PasswordResetToken",
   "Wishlist",
   "NewsletterSubscriber",
-  "NotificationLog"
+  "NotificationLog",
+  "WelcomePopup"
 ] as const;
 
 export type DatabaseModelName = (typeof EXPECTED_DATABASE_MODEL_NAMES)[number];
@@ -121,6 +139,7 @@ export type DatabaseModelRegistry = Readonly<{
   User: typeof User;
   AuthSession: typeof AuthSession;
   Address: typeof Address;
+  AnnouncementBarItem: typeof AnnouncementBarItem;
   Category: typeof Category;
   Product: typeof Product;
   ProductVariant: typeof ProductVariant;
@@ -148,12 +167,17 @@ export type DatabaseModelRegistry = Readonly<{
   Refund: typeof Refund;
   Replacement: typeof Replacement;
   ContactEnquiry: typeof ContactEnquiry;
+  Coupon: typeof Coupon;
+  CouponProduct: typeof CouponProduct;
+  CouponCategory: typeof CouponCategory;
+  CouponRedemption: typeof CouponRedemption;
   StoreSetting: typeof StoreSetting;
   AuthChallenge: typeof AuthChallenge;
   PasswordResetToken: typeof PasswordResetToken;
   Wishlist: typeof Wishlist;
   NewsletterSubscriber: typeof NewsletterSubscriber;
   NotificationLog: typeof NotificationLog;
+  WelcomePopup: typeof WelcomePopup;
 }>;
 
 let initializedRegistry: DatabaseModelRegistry | undefined;
@@ -166,6 +190,7 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeUserTable(sequelize);
   initializeAuthSessionTable(sequelize);
   initializeAddressTable(sequelize);
+  initializeAnnouncementBarItemTable(sequelize);
   initializeCategoryTable(sequelize);
   initializeProductTable(sequelize);
   initializeProductVariantTable(sequelize);
@@ -193,17 +218,23 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeRefundTable(sequelize);
   initializeReplacementTable(sequelize);
   initializeContactEnquiryTable(sequelize);
+  initializeCouponTable(sequelize);
+  initializeCouponProductTable(sequelize);
+  initializeCouponCategoryTable(sequelize);
+  initializeCouponRedemptionTable(sequelize);
   initializeStoreSettingTable(sequelize);
   initializeAuthChallengeTable(sequelize);
   initializePasswordResetTokenTable(sequelize);
   initializeWishlistTable(sequelize);
   initializeNewsletterSubscriberTable(sequelize);
   initializeNotificationLogTable(sequelize);
+  initializeWelcomePopupTable(sequelize);
 
   initializedRegistry = Object.freeze({
     User,
     AuthSession,
     Address,
+    AnnouncementBarItem,
     Category,
     Product,
     ProductVariant,
@@ -231,12 +262,17 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     Refund,
     Replacement,
     ContactEnquiry,
+    Coupon,
+    CouponProduct,
+    CouponCategory,
+    CouponRedemption,
     StoreSetting,
     AuthChallenge,
     PasswordResetToken,
     Wishlist,
     NewsletterSubscriber,
-    NotificationLog
+    NotificationLog,
+    WelcomePopup
   });
 
   return initializedRegistry;

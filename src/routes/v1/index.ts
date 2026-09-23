@@ -42,6 +42,11 @@ import { adminSettingsRouter } from "../../models/SettingsModels/admin-settings.
 import { storefrontSettingsRouter } from "../../models/SettingsModels/storefront-settings.routes.js";
 import storefrontContactRouter from "../../models/ContactModels/storefront-contact.routes.js";
 import adminContactRouter from "../../models/ContactModels/admin-contact.routes.js";
+import adminAnnouncementBarRouter from "../../models/AnnouncementBarModels/admin-announcement-bar.routes.js";
+import storefrontAnnouncementBarRouter from "../../models/AnnouncementBarModels/storefront-announcement-bar.routes.js";
+import adminWelcomePopupRouter from "../../models/WelcomePopupModels/admin-welcome-popup.routes.js";
+import storefrontWelcomePopupRouter from "../../models/WelcomePopupModels/storefront-welcome-popup.routes.js";
+import { adminCouponRouter } from "../../models/CouponModels/admin-coupon.routes.js";
 
 export const v1Router = Router();
 
@@ -89,10 +94,19 @@ v1Router.use("/admin/newsletter", adminNewsletterRouter);
 // adminRefundRouter mount so /admin/settings/* is matched here first.
 v1Router.use("/admin/settings", adminSettingsRouter);
 v1Router.use("/storefront/store-profile", storefrontSettingsRouter);
+// Same reasoning as /admin/newsletter above — registered ahead of the broad
+// adminRefundRouter mount so /admin/announcement-bar/* is matched here first.
+v1Router.use("/admin/announcement-bar", adminAnnouncementBarRouter);
+v1Router.use("/storefront/announcement-bar", storefrontAnnouncementBarRouter);
+// Same reasoning as /admin/newsletter above — registered ahead of the broad
+// adminRefundRouter mount so /admin/welcome-popups/* is matched here first.
+v1Router.use("/admin/welcome-popups", adminWelcomePopupRouter);
+v1Router.use("/storefront/welcome-popup", storefrontWelcomePopupRouter);
 v1Router.use("/storefront/contact-enquiries", storefrontContactRouter);
 // Same reasoning as /admin/newsletter above — registered ahead of the broad
 // adminRefundRouter mount so /admin/contact-enquiries/* is matched here first.
 v1Router.use("/admin/contact-enquiries", adminContactRouter);
+v1Router.use("/admin/coupons", adminCouponRouter);
 v1Router.use("/admin", adminRefundRouter);
 v1Router.use("/admin/shipments", adminShipmentRouter);
 v1Router.use("/payments/payu", payuRefundWebhookRouter);

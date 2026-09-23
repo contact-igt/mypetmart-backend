@@ -25,7 +25,7 @@ function parseStoredProfile(value: unknown): Partial<StoreProfile> {
     }
   }
   if (value && typeof value === "object") {
-    return value as Partial<StoreProfile>;
+    return value;
   }
   return {};
 }

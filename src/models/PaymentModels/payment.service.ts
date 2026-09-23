@@ -13,6 +13,7 @@ import { logger } from "../../utils/logger.js";
 import { formatMoney } from "../../utils/product-money.js";
 import { CartService } from "../CartModels/cart.service.js";
 import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
+import { CouponPricingService } from "../CouponModels/coupon.service.js";
 import { isValidOrderStatusTransition } from "../OrderModels/order.constants.js";
 import { OrderNotFoundError } from "../OrderModels/order.errors.js";
 import { CheckoutCodUnavailableError } from "../CheckoutModels/checkout.errors.js";
@@ -709,6 +710,13 @@ export const PaymentService = {
 
       lockedOrder.status = "confirmed";
       await lockedOrder.save({ transaction: t });
+
+      // A COD-confirmed Order is a genuinely completed purchase for coupon
+      // purposes even though payment_status never becomes "paid" (COD
+      // design — see the doc comment above). No-op if this Order never had
+      // a coupon. Mirrors PaymentFinalizationService's own consume call for
+      // the online-payment path.
+      await CouponPricingService.consumeCouponReservation(lockedOrder.id, t);
 
       await CartService.finalizeCartForOrder(lockedOrder, t);
 

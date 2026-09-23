@@ -99,6 +99,24 @@ describe("ReceiptService (Phase E.2)", () => {
       expect(receipt.customer).toMatchObject({ name: "Riya Sharma", email: "receipt-test@example.com", phone: "+91 98765 43210" });
       expect(receipt.address).toMatchObject({ recipientName: "Riya Sharma", phone: "+91 98765 43210", line1: "10 MG Road", line2: "Near Central Park", city: "Mumbai", state: "Maharashtra", postalCode: "400001", country: "IN" });
       expect(receipt.totals).toMatchObject({ subtotal: "1000.00", shippingFee: "0.00", total: "1000.00" });
+      expect(receipt.totals).toMatchObject({ couponCode: null, discountAmount: "0.00" });
+    });
+
+    it("uses the persisted coupon snapshot in receipt totals", async () => {
+      const user = await createUser();
+      const { order } = await createOrder({ userId: user.id });
+      await order.update({
+        coupon_id: null,
+        coupon_code_snapshot: "SAVE10",
+        coupon_discount_type_snapshot: "fixed",
+        coupon_discount_value_snapshot: 10000,
+        coupon_eligible_merchandise_paise: 100000,
+        coupon_discount_amount_paise: 10000,
+        total: "900.00"
+      });
+
+      const receipt = await ReceiptService.getReceiptDataForCustomer(user.id, order.id);
+      expect(receipt.totals).toEqual({ subtotal: "1000.00", couponCode: "SAVE10", discountAmount: "100.00", shippingFee: "0.00", total: "900.00" });
     });
 
     it("assigns the receipt number exactly once and reuses it on repeat requests, including the same receiptDate", async () => {
