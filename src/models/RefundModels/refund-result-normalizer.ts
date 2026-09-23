@@ -1,4 +1,4 @@
-import type { RawPayuRefundInitiateResponse, RawPayuRefundStatusResponse } from "./payu-refund.client.js";
+import type { RawPayuRefundInitiateResponse, RawPayuRefundStatusDetail, RawPayuRefundStatusResponse } from "./payu-refund.client.js";
 import type { NormalizedRefundOutcome, NormalizedRefundResult } from "./refund.types.js";
 
 // Single source of truth for turning an untrusted/raw PayU refund shape
@@ -16,6 +16,26 @@ function mapStatusApiOutcome(rawStatus: string | undefined): NormalizedRefundOut
     default:
       return "PENDING";
   }
+}
+
+function isRefundStatusDetail(value: unknown): value is RawPayuRefundStatusDetail {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return ["status", "request_id", "amt", "mihpayid", "action"].some((field) => field in record);
+}
+
+function findStatusDetail(raw: RawPayuRefundStatusResponse, requestId: string): RawPayuRefundStatusDetail | null {
+  const entry = raw.transaction_details?.[requestId];
+  if (isRefundStatusDetail(entry)) return entry;
+
+  // Documented PayU shape:
+  // transaction_details[request_id][request_id] = { status, amt, ... }
+  if (entry && typeof entry === "object") {
+    const nested = entry[requestId];
+    if (isRefundStatusDetail(nested)) return nested;
+  }
+
+  return null;
 }
 
 export function normalizeInitiateResponse(merchantRefundToken: string, raw: RawPayuRefundInitiateResponse): NormalizedRefundResult {
@@ -55,7 +75,7 @@ export function normalizeStatusApiResponse(merchantRefundToken: string, requestI
     };
   }
 
-  const detail = raw.transaction_details?.[requestId];
+  const detail = findStatusDetail(raw, requestId);
   if (!detail) {
     return {
       merchantRefundToken,

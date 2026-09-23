@@ -83,6 +83,19 @@ describe("normalizeInitiateResponse", () => {
 });
 
 describe("normalizeStatusApiResponse", () => {
+  it("maps PayU's documented nested request-ID response to SUCCEEDED", () => {
+    const result = normalizeStatusApiResponse("REF-000123", "req_1", {
+      status: 1,
+      transaction_details: {
+        req_1: {
+          req_1: { request_id: "req_1", status: "success", amt: "500.00", mihpayid: "mihpay1" }
+        }
+      }
+    });
+    expect(result.normalizedOutcome).toBe("SUCCEEDED");
+    expect(result.amount).toBe("500.00");
+  });
+
   it("maps SUCCESS to SUCCEEDED", () => {
     const result = normalizeStatusApiResponse("REF-000123", "req_1", {
       status: 1,
