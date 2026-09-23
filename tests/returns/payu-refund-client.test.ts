@@ -54,16 +54,16 @@ describe("PayuRefundClient.checkRefundStatus", () => {
     vi.restoreAllMocks();
   });
 
-  it("POSTs check_action_status_txnid with var1=request_id and the correct hash", async () => {
+  it("POSTs check_action_status with var1=request_id and the correct hash", async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse({ status: 1, transaction_details: {} }));
 
     await PayuRefundClient.checkRefundStatus("req_1");
 
     const [, options] = vi.mocked(fetch).mock.calls[0]!;
     const body = new URLSearchParams(options?.body as string);
-    expect(body.get("command")).toBe("check_action_status_txnid");
+    expect(body.get("command")).toBe("check_action_status");
     expect(body.get("var1")).toBe("req_1");
-    const expectedHash = crypto.createHash("sha512").update(`${paymentConfig.payuKey}|check_action_status_txnid|req_1|${paymentConfig.payuSalt}`, "utf8").digest("hex");
+    const expectedHash = crypto.createHash("sha512").update(`${paymentConfig.payuKey}|check_action_status|req_1|${paymentConfig.payuSalt}`, "utf8").digest("hex");
     expect(body.get("hash")).toBe(expectedHash);
   });
 });
