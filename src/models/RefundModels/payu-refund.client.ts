@@ -83,13 +83,13 @@ export const PayuRefundClient = {
     return (await response.json()) as RawPayuRefundInitiateResponse;
   },
 
-  /** command=check_action_status_txnid, var1=the request_id returned at initiation. */
+  /** command=check_action_status, var1=the request_id returned at initiation. */
   async checkRefundStatus(requestId: string): Promise<RawPayuRefundStatusResponse> {
     const { key, salt } = assertConfigured();
-    const hash = buildPayuCommandHash(key, "check_action_status_txnid", requestId, salt);
+    const hash = buildPayuCommandHash(key, "check_action_status", requestId, salt);
     const body = new URLSearchParams({
       key,
-      command: "check_action_status_txnid",
+      command: "check_action_status",
       var1: requestId,
       hash
     });

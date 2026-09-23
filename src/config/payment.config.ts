@@ -69,7 +69,7 @@ export const paymentConfig = Object.freeze({
   // already trusts, plus fixed, backend-owned paths.
   successReturnUrl: `${primaryOrigin(environmentConfig.STOREFRONT_ORIGIN)}/order/payment/success`,
   failureReturnUrl: `${primaryOrigin(environmentConfig.STOREFRONT_ORIGIN)}/order/payment/failure`,
-  // PayU's V1 refund API (cancel_refund_transaction / check_action_status_txnid)
+  // PayU's V1 refund API (cancel_refund_transaction / check_action_status)
   // is served by the exact same merchant postservice endpoint as Verify
   // Payment — confirmed 2026-08-17 against docs.payu.in/reference/
   // refund_transaction_api and .../check_action_status_api_with_request_id —

@@ -8,7 +8,7 @@ import crypto from "node:crypto";
 //   sha512(key|command|var1|salt)
 // — just with a different `command` literal and `var1` meaning per command
 // (mihpayid for cancel_refund_transaction, request_id for
-// check_action_status_txnid).
+// check_action_status).
 export function buildPayuCommandHash(key: string, command: string, var1: string, salt: string): string {
   const source = `${key}|${command}|${var1}|${salt}`;
   return crypto.createHash("sha512").update(source, "utf8").digest("hex");
