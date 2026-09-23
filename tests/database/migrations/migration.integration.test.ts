@@ -73,6 +73,12 @@ describe("Stage 5 initial schema migrations", () => {
     await disconnectDatabase();
   });
 
+  // The migration count has grown considerably since this timeout was last
+  // tuned (this test does a full up -> down-to-0 -> up traversal, i.e. 3x
+  // every migration) — bumped so it comfortably finishes rather than being
+  // aborted mid-DDL, which would leave a non-transactional partial schema
+  // behind for every later test file in this same (fileParallelism: false)
+  // run to inherit.
   it("applies, verifies constraints, rolls back to empty, and reapplies", async () => {
     await resetSchemaToEmpty();
     expect(await verifySchema({ expectEmpty: true })).toEqual({ ok: true, failures: [] });
@@ -141,5 +147,5 @@ describe("Stage 5 initial schema migrations", () => {
     await applySchema();
     expect(await verifySchema()).toEqual({ ok: true, failures: [] });
     await expectRegisteredMigrationsApplied();
-  }, 30_000);
+  }, 120_000);
 });

@@ -9,6 +9,7 @@ import {
   Address,
   Cart,
   CartItem,
+  Coupon,
   Order,
   OrderItem,
   OrderNote,
@@ -27,6 +28,9 @@ import { buildBusinessReference } from "../../utils/reference-generator.js";
 import { formatMoney, formatPaiseAsMoney, parseMoneyToPaise } from "../../utils/product-money.js";
 import type { CartIdentity } from "../CartModels/cart.types.js";
 import type { InlineAddressInput } from "../CheckoutModels/checkout.types.js";
+import { CouponPricingService } from "../CouponModels/coupon.service.js";
+import { normalizeCouponCode } from "../CouponModels/coupon.validation.js";
+import type { CouponPricingLine } from "../CouponModels/coupon.types.js";
 import { PaymentService } from "../PaymentModels/payment.service.js";
 import { RefundService } from "../RefundModels/refund.service.js";
 import { ShipmentService } from "../ShipmentModels/shipment.service.js";
@@ -73,6 +77,7 @@ import type {
   CustomerOrderPaymentJSON,
   CustomerOrderRefundSummaryJSON,
   GuestOrderDetailJSON,
+  OrderCouponJSON,
   OrderDetailJSON,
   OrderItemJSON,
   OrderListItemJSON,
@@ -253,7 +258,8 @@ function toOrderItemJSON(item: OrderItem): OrderItemJSON {
     productImage: item.product_image,
     quantity: item.quantity,
     unitPrice: formatMoney(item.unit_price),
-    lineTotal: formatMoney(item.line_total)
+    lineTotal: formatMoney(item.line_total),
+    discountAllocated: formatPaiseAsMoney(item.discount_allocated_paise)
   };
 }
 
@@ -322,6 +328,17 @@ function summarizeRefunds(refunds: Refund[]): CustomerOrderRefundSummaryJSON | n
   return { totalRefunded: formatPaiseAsMoney(totalRefundedPaise), status };
 }
 
+function toOrderCouponJSON(order: Order): OrderCouponJSON | null {
+  if (order.coupon_code_snapshot === null || order.coupon_eligible_merchandise_paise === null) {
+    return null;
+  }
+  return {
+    code: order.coupon_code_snapshot,
+    eligibleMerchandiseSubtotal: formatPaiseAsMoney(order.coupon_eligible_merchandise_paise),
+    discountAmount: formatPaiseAsMoney(order.coupon_discount_amount_paise)
+  };
+}
+
 function toOrderDetailJSON(order: Order, items: OrderItem[], shipment: ShipmentJSON | null = null, payments: Payment[] = [], refunds: Refund[] = []): OrderDetailJSON {
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
   return {
@@ -334,6 +351,8 @@ function toOrderDetailJSON(order: Order, items: OrderItem[], shipment: ShipmentJ
     updatedAt: order.updated_at.toISOString(),
     payments: payments.map(toCustomerOrderPaymentJSON),
     refundSummary: summarizeRefunds(refunds),
+    totalBeforeDiscount: formatPaiseAsMoney(parseMoneyToPaise(order.subtotal) + parseMoneyToPaise(order.shipping_fee)),
+    coupon: toOrderCouponJSON(order),
     ...(shipment ? { shipment } : {})
   };
 }
@@ -544,6 +563,11 @@ async function performPendingOrderCancellation(order: Order): Promise<void> {
     lockedOrder.status = "cancelled";
     lockedOrder.cancelled_at = new Date();
     await lockedOrder.save({ transaction: t });
+    // V1 rule: a safely-cancelled pending Order releases its coupon
+    // reservation back to the pool (a no-op if this Order never had a
+    // coupon). Distinct from a refund after payment, which never restores
+    // usage — this Order was never actually paid for.
+    await CouponPricingService.releaseCouponReservation(lockedOrder.id, t);
     // Intentionally NOT here: no stock change (a pending Order never
     // decremented stock), no Cart mutation (the active Cart stays active), no
     // Payment row mutation (terminal states preserved; a never-dispatched
@@ -690,6 +714,7 @@ export const OrderService = {
 
       type LineSnapshot = {
         productId: number;
+        categoryId: number;
         variantId: number | null;
         productName: string;
         productSku: string;
@@ -698,6 +723,7 @@ export const OrderService = {
         productImage: string | null;
         quantity: number;
         unitPrice: string;
+        unitPricePaise: number;
         lineTotal: string;
       };
 
@@ -706,12 +732,14 @@ export const OrderService = {
 
       for (const item of cartItems) {
         const { product, variant, unitPrice } = await loadOrderableLine(item, t);
-        const linePaise = parseMoneyToPaise(unitPrice) * item.quantity;
+        const unitPricePaise = parseMoneyToPaise(unitPrice);
+        const linePaise = unitPricePaise * item.quantity;
         subtotalPaise += linePaise;
         const productImage = await getPrimaryImageUrl(product.id, t);
 
         lines.push({
           productId: product.id,
+          categoryId: product.category_id,
           variantId: variant ? variant.id : null,
           productName: product.name,
           productSku: product.sku,
@@ -720,20 +748,62 @@ export const OrderService = {
           productImage,
           quantity: item.quantity,
           unitPrice: formatMoney(unitPrice),
+          unitPricePaise,
           lineTotal: formatPaiseAsMoney(linePaise)
         });
       }
 
       // V1 locked business rules: free shipping is an explicit business rule
       // (not an accidental placeholder — see V1_FREE_SHIPPING_FEE), and there
-      // is no tax or discount/coupon module. total is computed as
-      // subtotal + shippingFee so the formula stays correct once a future
-      // logistics/shipping-rate integration replaces V1_FREE_SHIPPING_FEE
-      // with a non-zero, per-order amount.
+      // is no tax module. total is computed as subtotal + shippingFee -
+      // discount so the formula stays correct once a future logistics/
+      // shipping-rate integration replaces V1_FREE_SHIPPING_FEE with a
+      // non-zero, per-order amount.
       const shippingFee = V1_FREE_SHIPPING_FEE;
       const shippingFeePaise = parseMoneyToPaise(shippingFee);
       const subtotal = formatPaiseAsMoney(subtotalPaise);
-      const total = formatPaiseAsMoney(subtotalPaise + shippingFeePaise);
+
+      // Coupon evaluation — an explicit couponCode on this request overrides
+      // whatever's already applied on the Cart; otherwise fall back to the
+      // Cart's own applied coupon (same contract as Checkout Preview). Never
+      // trusts the Cart's stored coupon_id's prior eligibility: this
+      // re-evaluates from scratch against the just-reloaded, just-locked
+      // `lines` above (live prices, live stock already verified). A
+      // present-but-now-invalid coupon fails the Order outright — Order
+      // creation never silently proceeds with an incorrect/zero discount.
+      const couponPricingLines: CouponPricingLine[] = lines.map((line) => ({
+        productId: line.productId,
+        categoryId: line.categoryId,
+        unitPricePaise: line.unitPricePaise,
+        quantity: line.quantity
+      }));
+
+      let effectiveCouponCode: string | null = input.couponCode ? normalizeCouponCode(input.couponCode) : null;
+      if (!effectiveCouponCode && cart.coupon_id !== null) {
+        const appliedCoupon = await Coupon.findByPk(cart.coupon_id, { transaction: t });
+        effectiveCouponCode = appliedCoupon ? appliedCoupon.code : null;
+      }
+
+      let couponEvaluation: Extract<Awaited<ReturnType<typeof CouponPricingService.evaluateCoupon>>, { ok: true }> | null = null;
+      if (effectiveCouponCode) {
+        couponEvaluation = await CouponPricingService.assertCouponApplicable({
+          code: effectiveCouponCode,
+          lines: couponPricingLines,
+          identity: { userId: identity.type === "customer" ? identity.userId : null }
+        });
+      }
+
+      const discountAmountPaise = couponEvaluation ? couponEvaluation.discountAmountPaise : 0;
+      const lineDiscounts = couponEvaluation
+        ? CouponPricingService.allocateDiscountAcrossLines(
+            couponPricingLines,
+            couponEvaluation.eligibleProductIds ? new Set(couponEvaluation.eligibleProductIds) : null,
+            couponEvaluation.eligibleCategoryIds ? new Set(couponEvaluation.eligibleCategoryIds) : null,
+            discountAmountPaise
+          )
+        : lines.map(() => 0);
+
+      const total = formatPaiseAsMoney(subtotalPaise + shippingFeePaise - discountAmountPaise);
 
       const orderId = await IdSequenceService.allocateNextId(DATABASE_TABLE_NAMES.orders, t);
       const orderNumberId = await IdSequenceService.allocateNextId("order_numbers", t);
@@ -758,6 +828,15 @@ export const OrderService = {
           subtotal,
           shipping_fee: shippingFee,
           total,
+          // Immutable coupon/discount snapshot — see the doc comment on
+          // Order.coupon_id (OrderTable/index.ts). null/0 together when
+          // couponEvaluation is null (no coupon in effect for this Order).
+          coupon_id: couponEvaluation ? couponEvaluation.couponId : null,
+          coupon_code_snapshot: couponEvaluation ? couponEvaluation.codeSnapshot : null,
+          coupon_discount_type_snapshot: couponEvaluation ? couponEvaluation.discountTypeSnapshot : null,
+          coupon_discount_value_snapshot: couponEvaluation ? couponEvaluation.discountValueSnapshot : null,
+          coupon_eligible_merchandise_paise: couponEvaluation ? couponEvaluation.eligibleMerchandisePaise : null,
+          coupon_discount_amount_paise: discountAmountPaise,
           currency: "INR",
           contact_email: contactEmail,
           ship_recipient_name: shipping.recipientName,
@@ -794,11 +873,37 @@ export const OrderService = {
             product_image: line.productImage,
             quantity: line.quantity,
             unit_price: line.unitPrice,
-            line_total: line.lineTotal
+            line_total: line.lineTotal,
+            discount_allocated_paise: lineDiscounts[index] ?? 0
           },
           { transaction: t }
         );
         orderItems.push(createdItem);
+      }
+
+      // Lock-and-reserve coupon capacity atomically, now that order.id
+      // exists (coupon_redemptions.order_id is a required, unique FK — see
+      // CouponRedemption's doc comment in Module 1). Still fully atomic with
+      // everything above: if this throws (the coupon's capacity was
+      // exhausted by a concurrent Order between evaluation and this lock),
+      // the whole transaction — including the Order and OrderItems just
+      // created above — rolls back, so no Order is ever left behind without
+      // a matching redemption.
+      if (couponEvaluation) {
+        await CouponPricingService.reserveCouponForOrder(
+          {
+            couponId: couponEvaluation.couponId,
+            orderId: order.id,
+            userId: identity.type === "customer" ? identity.userId : null,
+            guestIdentityHash: identity.type === "guest" ? identity.tokenHash : null,
+            codeSnapshot: couponEvaluation.codeSnapshot,
+            discountTypeSnapshot: couponEvaluation.discountTypeSnapshot,
+            discountValueSnapshot: couponEvaluation.discountValueSnapshot,
+            eligibleMerchandisePaise: couponEvaluation.eligibleMerchandisePaise,
+            discountAmountPaise: couponEvaluation.discountAmountPaise
+          },
+          t
+        );
       }
 
       // Intentionally no Cart mutation and no Product/ProductVariant stock

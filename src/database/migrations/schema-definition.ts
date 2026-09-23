@@ -2,6 +2,9 @@ import {
   AUTH_CHALLENGE_PURPOSE_VALUES,
   CART_STATUS_VALUES,
   CONTACT_ENQUIRY_STATUS_VALUES,
+  COUPON_DISCOUNT_TYPE_VALUES,
+  COUPON_REDEMPTION_STATUS_VALUES,
+  COUPON_STATUS_VALUES,
   DATABASE_TABLE_NAMES,
   DEFAULT_COUNTRY_CODE,
   DEFAULT_CURRENCY_CODE,
@@ -31,7 +34,10 @@ import {
   SHIPMENT_STATUS_VALUES,
   SHIPPING_METHOD_VALUES,
   USER_ROLE_VALUES,
-  USER_STATUS_VALUES
+  USER_STATUS_VALUES,
+  WELCOME_POPUP_CTA_MODE_VALUES,
+  WELCOME_POPUP_STATUS_VALUES,
+  WELCOME_POPUP_TEMPLATE_VALUES
 } from "../../constants/database.constants.js";
 
 export type ExpectedIndex = { name: string; columns: readonly string[]; unique: boolean };
@@ -321,15 +327,23 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`user_id\` INT UNSIGNED NULL,
         \`guest_token_hash\` VARCHAR(255) NULL,
         \`status\` ${enumSql(CART_STATUS_VALUES)} NOT NULL DEFAULT 'active',
+        \`coupon_id\` INT UNSIGNED NULL,
         \`expires_at\` DATETIME NULL,
         ${createdUpdated},
         PRIMARY KEY (\`id\`),
         UNIQUE KEY \`carts_guest_token_hash_unique\` (\`guest_token_hash\`),
         KEY \`carts_user_status_idx\` (\`user_id\`, \`status\`),
         KEY \`carts_status_expires_idx\` (\`status\`, \`expires_at\`),
+        KEY \`carts_coupon_id_idx\` (\`coupon_id\`),
         CONSTRAINT \`fk_carts_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE SET NULL ON UPDATE RESTRICT
       ) ${engine};
     `
+    // NOTE: coupon_id is a plain nullable column + index here (no FK in this
+    // text) even though it references coupons.id. coupons is migration 074 —
+    // created AFTER this table (008) — so a FK clause baked into this CREATE
+    // TABLE text would break fresh installs (carts would be created before
+    // coupons exists). The real FK constraint is instead added by migration
+    // 078, once coupons exists.
   },
   {
     tableName: DATABASE_TABLE_NAMES.cartItems,
@@ -376,6 +390,12 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`subtotal\` DECIMAL(10,2) NOT NULL DEFAULT 0,
         \`shipping_fee\` DECIMAL(10,2) NOT NULL DEFAULT 0,
         \`total\` DECIMAL(10,2) NOT NULL DEFAULT 0,
+        \`coupon_id\` INT UNSIGNED NULL,
+        \`coupon_code_snapshot\` VARCHAR(40) NULL,
+        \`coupon_discount_type_snapshot\` ${enumSql(COUPON_DISCOUNT_TYPE_VALUES)} NULL,
+        \`coupon_discount_value_snapshot\` INT UNSIGNED NULL,
+        \`coupon_eligible_merchandise_paise\` INT UNSIGNED NULL,
+        \`coupon_discount_amount_paise\` INT UNSIGNED NOT NULL DEFAULT 0,
         \`currency\` CHAR(3) NOT NULL DEFAULT '${DEFAULT_CURRENCY_CODE}',
         \`ship_recipient_name\` VARCHAR(160) NOT NULL,
         \`ship_phone\` VARCHAR(32) NOT NULL,
@@ -401,6 +421,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         KEY \`orders_ship_state_city_idx\` (\`ship_state\`, \`ship_city\`),
         KEY \`orders_cart_id_idx\` (\`cart_id\`),
         KEY \`orders_commerce_exception_idx\` (\`commerce_exception\`),
+        KEY \`orders_coupon_id_idx\` (\`coupon_id\`),
         CONSTRAINT \`fk_orders_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
         CONSTRAINT \`fk_orders_cart_id\` FOREIGN KEY (\`cart_id\`) REFERENCES \`carts\` (\`id\`) ON DELETE SET NULL ON UPDATE RESTRICT,
         CONSTRAINT \`chk_orders_subtotal_nonnegative\` CHECK (\`subtotal\` >= 0),
@@ -411,6 +432,13 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         CONSTRAINT \`chk_orders_ship_coord_pair\` CHECK ((\`ship_latitude\` IS NULL AND \`ship_longitude\` IS NULL) OR (\`ship_latitude\` IS NOT NULL AND \`ship_longitude\` IS NOT NULL))
       ) ${engine};
     `
+    // NOTE: coupon_id is a plain nullable column + index here (no FK in this
+    // text) even though it references coupons.id. coupons is migration 074 —
+    // created AFTER this table (010) — so a FK clause baked into this CREATE
+    // TABLE text would break fresh installs (orders would be created before
+    // coupons exists). The real FK constraint is instead added by migration
+    // 079, once coupons exists. All coupon_* columns are immutable snapshots
+    // written once at Order creation — see order.service.ts createOrder.
   },
   {
     tableName: DATABASE_TABLE_NAMES.orderItems,
@@ -429,6 +457,7 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         \`quantity\` INT NOT NULL,
         \`unit_price\` DECIMAL(10,2) NOT NULL,
         \`line_total\` DECIMAL(10,2) NOT NULL,
+        \`discount_allocated_paise\` INT UNSIGNED NOT NULL DEFAULT 0,
         ${createdUpdated},
         PRIMARY KEY (\`id\`),
         KEY \`order_items_order_id_idx\` (\`order_id\`),
@@ -441,7 +470,8 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         CONSTRAINT \`fk_order_items_variant_id\` FOREIGN KEY (\`product_variant_id\`) REFERENCES \`product_variants\` (\`id\`) ON DELETE SET NULL ON UPDATE RESTRICT,
         CONSTRAINT \`chk_order_items_quantity_positive\` CHECK (\`quantity\` > 0),
         CONSTRAINT \`chk_order_items_unit_price_nonnegative\` CHECK (\`unit_price\` >= 0),
-        CONSTRAINT \`chk_order_items_line_total_nonnegative\` CHECK (\`line_total\` >= 0)
+        CONSTRAINT \`chk_order_items_line_total_nonnegative\` CHECK (\`line_total\` >= 0),
+        CONSTRAINT \`chk_order_items_discount_allocated_nonnegative\` CHECK (\`discount_allocated_paise\` >= 0)
       ) ${engine};
     `
   },
@@ -1085,6 +1115,158 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         UNIQUE KEY \`return_shipment_events_dedupe_unique\` (\`return_shipment_id\`, \`dedupe_key\`),
         KEY \`return_shipment_events_timeline_idx\` (\`return_shipment_id\`, \`event_at\`),
         CONSTRAINT \`fk_return_shipment_events_return_shipment_id\` FOREIGN KEY (\`return_shipment_id\`) REFERENCES \`return_shipments\` (\`id\`) ON DELETE CASCADE ON UPDATE RESTRICT
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.announcementBarItems,
+    migrationName: "069-create-announcement-bar-items",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.announcementBarItems)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`message\` VARCHAR(200) NOT NULL,
+        \`link_url\` VARCHAR(1000) NULL,
+        \`link_label\` VARCHAR(60) NULL,
+        \`active\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`display_order\` INT NOT NULL DEFAULT 0,
+        \`starts_at\` DATETIME NULL,
+        \`ends_at\` DATETIME NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        KEY \`announcement_bar_items_active_display_order_idx\` (\`active\`, \`display_order\`),
+        CONSTRAINT \`chk_announcement_bar_items_display_order_nonnegative\` CHECK (\`display_order\` >= 0)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.welcomePopups,
+    migrationName: "072-create-welcome-popups",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.welcomePopups)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`name\` VARCHAR(160) NOT NULL,
+        \`template\` ${enumSql(WELCOME_POPUP_TEMPLATE_VALUES)} NOT NULL,
+        \`status\` ${enumSql(WELCOME_POPUP_STATUS_VALUES)} NOT NULL DEFAULT 'draft',
+        \`is_homepage_active\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`homepage_active_flag\` TINYINT UNSIGNED GENERATED ALWAYS AS (CASE WHEN \`is_homepage_active\` = 1 THEN 1 ELSE NULL END) STORED,
+        \`heading\` VARCHAR(200) NOT NULL,
+        \`description\` TEXT NULL,
+        \`offer_label\` VARCHAR(100) NULL,
+        \`cta_mode\` ${enumSql(WELCOME_POPUP_CTA_MODE_VALUES)} NOT NULL DEFAULT 'email_signup',
+        \`cta_label\` VARCHAR(60) NOT NULL DEFAULT 'Subscribe',
+        \`cta_url\` VARCHAR(1000) NULL,
+        \`display_delay_ms\` INT UNSIGNED NOT NULL DEFAULT 1200,
+        \`dismissal_cooldown_days\` INT UNSIGNED NOT NULL DEFAULT 7,
+        \`consent_text\` VARCHAR(500) NULL,
+        \`dismiss_label\` VARCHAR(60) NULL,
+        \`desktop_image_key\` VARCHAR(512) NULL,
+        \`desktop_image_url\` VARCHAR(1000) NULL,
+        \`desktop_image_alt\` VARCHAR(255) NULL,
+        \`mobile_image_key\` VARCHAR(512) NULL,
+        \`mobile_image_url\` VARCHAR(1000) NULL,
+        \`mobile_image_alt\` VARCHAR(255) NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`welcome_popups_one_homepage_active_unique\` (\`homepage_active_flag\`),
+        KEY \`welcome_popups_status_idx\` (\`status\`),
+        KEY \`welcome_popups_is_homepage_active_idx\` (\`is_homepage_active\`),
+        CONSTRAINT \`chk_welcome_popups_active_requires_published\` CHECK (\`is_homepage_active\` = 0 OR \`status\` = 'published')
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.coupons,
+    migrationName: "074-create-coupons",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.coupons)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`code\` VARCHAR(40) NOT NULL,
+        \`name\` VARCHAR(160) NOT NULL,
+        \`discount_type\` ${enumSql(COUPON_DISCOUNT_TYPE_VALUES)} NOT NULL,
+        \`discount_value\` INT UNSIGNED NOT NULL,
+        \`max_discount_paise\` INT UNSIGNED NULL,
+        \`min_eligible_amount_paise\` INT UNSIGNED NOT NULL DEFAULT 0,
+        \`starts_at\` DATETIME NULL,
+        \`ends_at\` DATETIME NULL,
+        \`usage_limit\` INT UNSIGNED NULL,
+        \`per_customer_limit\` INT UNSIGNED NULL,
+        \`first_order_only\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`status\` ${enumSql(COUPON_STATUS_VALUES)} NOT NULL DEFAULT 'draft',
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`coupons_code_unique\` (\`code\`),
+        KEY \`coupons_status_idx\` (\`status\`),
+        CONSTRAINT \`chk_coupons_discount_value_positive\` CHECK (\`discount_value\` > 0),
+        CONSTRAINT \`chk_coupons_percentage_range\` CHECK (\`discount_type\` <> 'percentage' OR \`discount_value\` <= 10000),
+        CONSTRAINT \`chk_coupons_max_discount_positive\` CHECK (\`max_discount_paise\` IS NULL OR \`max_discount_paise\` > 0),
+        CONSTRAINT \`chk_coupons_usage_limit_positive\` CHECK (\`usage_limit\` IS NULL OR \`usage_limit\` > 0),
+        CONSTRAINT \`chk_coupons_per_customer_limit_positive\` CHECK (\`per_customer_limit\` IS NULL OR \`per_customer_limit\` > 0),
+        CONSTRAINT \`chk_coupons_date_window\` CHECK (\`starts_at\` IS NULL OR \`ends_at\` IS NULL OR \`starts_at\` < \`ends_at\`)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.couponProducts,
+    migrationName: "075-create-coupon-products",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.couponProducts)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`coupon_id\` INT UNSIGNED NOT NULL,
+        \`product_id\` INT UNSIGNED NOT NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`coupon_products_coupon_product_unique\` (\`coupon_id\`, \`product_id\`),
+        KEY \`coupon_products_product_id_idx\` (\`product_id\`),
+        CONSTRAINT \`fk_coupon_products_coupon_id\` FOREIGN KEY (\`coupon_id\`) REFERENCES \`coupons\` (\`id\`) ON DELETE CASCADE ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_coupon_products_product_id\` FOREIGN KEY (\`product_id\`) REFERENCES \`products\` (\`id\`) ON DELETE CASCADE ON UPDATE RESTRICT
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.couponCategories,
+    migrationName: "076-create-coupon-categories",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.couponCategories)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`coupon_id\` INT UNSIGNED NOT NULL,
+        \`category_id\` INT UNSIGNED NOT NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`coupon_categories_coupon_category_unique\` (\`coupon_id\`, \`category_id\`),
+        KEY \`coupon_categories_category_id_idx\` (\`category_id\`),
+        CONSTRAINT \`fk_coupon_categories_coupon_id\` FOREIGN KEY (\`coupon_id\`) REFERENCES \`coupons\` (\`id\`) ON DELETE CASCADE ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_coupon_categories_category_id\` FOREIGN KEY (\`category_id\`) REFERENCES \`categories\` (\`id\`) ON DELETE CASCADE ON UPDATE RESTRICT
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.couponRedemptions,
+    migrationName: "077-create-coupon-redemptions",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.couponRedemptions)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`coupon_id\` INT UNSIGNED NOT NULL,
+        \`order_id\` INT UNSIGNED NOT NULL,
+        \`user_id\` INT UNSIGNED NULL,
+        \`guest_identity_hash\` VARCHAR(64) NULL,
+        \`code_snapshot\` VARCHAR(40) NOT NULL,
+        \`discount_type_snapshot\` ${enumSql(COUPON_DISCOUNT_TYPE_VALUES)} NOT NULL,
+        \`discount_value_snapshot\` INT UNSIGNED NOT NULL,
+        \`eligible_merchandise_paise\` INT UNSIGNED NOT NULL,
+        \`discount_amount_paise\` INT UNSIGNED NOT NULL,
+        \`status\` ${enumSql(COUPON_REDEMPTION_STATUS_VALUES)} NOT NULL DEFAULT 'reserved',
+        \`reserved_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`consumed_at\` DATETIME NULL,
+        \`released_at\` DATETIME NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`coupon_redemptions_order_id_unique\` (\`order_id\`),
+        KEY \`coupon_redemptions_coupon_status_idx\` (\`coupon_id\`, \`status\`),
+        KEY \`coupon_redemptions_coupon_user_status_idx\` (\`coupon_id\`, \`user_id\`, \`status\`),
+        CONSTRAINT \`fk_coupon_redemptions_coupon_id\` FOREIGN KEY (\`coupon_id\`) REFERENCES \`coupons\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_coupon_redemptions_order_id\` FOREIGN KEY (\`order_id\`) REFERENCES \`orders\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_coupon_redemptions_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`chk_coupon_redemptions_discount_not_negative\` CHECK (\`discount_amount_paise\` <= \`eligible_merchandise_paise\`)
       ) ${engine};
     `
   }

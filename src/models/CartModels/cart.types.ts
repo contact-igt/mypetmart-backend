@@ -10,6 +10,7 @@ export type CartItemImageJSON = {
 export type CartItemJSON = {
   cartItemId: number;
   productId: number;
+  categoryId: number;
   variantId: number | null;
   productName: string;
   productSlug: string;
@@ -26,12 +27,33 @@ export type CartItemJSON = {
   availableQuantity: number;
 };
 
+// null only when the Cart has no coupon_id at all (nothing ever applied).
+// When a coupon IS applied, `eligible` distinguishes "currently contributing
+// a discount" from "applied but not currently valid" (e.g. cart total
+// dropped below the coupon's minimum after an item was removed) — the
+// applied reference is deliberately left on the Cart in that case so it
+// resumes working automatically if the cart becomes eligible again, rather
+// than silently vanishing. `message` explains why when `eligible` is false;
+// always null when eligible is true.
+export type CartCouponJSON = {
+  code: string;
+  eligible: boolean;
+  discountAmount: string;
+  eligibleMerchandiseSubtotal: string;
+  message: string | null;
+} | null;
+
 export type CartJSON = {
   id: number | null;
   status: CartStatus;
   itemCount: number;
   subtotal: string;
   items: CartItemJSON[];
+  coupon: CartCouponJSON;
+};
+
+export type ApplyCartCouponInput = {
+  code: string;
 };
 
 export type AddCartItemInput = {

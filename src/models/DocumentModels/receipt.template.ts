@@ -52,6 +52,11 @@ function refundRow(receipt: CustomerReceiptJSON): string {
     </div>`;
 }
 
+function couponRow(receipt: CustomerReceiptJSON): string {
+  if (!receipt.totals.couponCode) return "";
+  return `<div class="totals-row"><span>Coupon (${escapeHtml(receipt.totals.couponCode)})</span><span>-&#8377;${escapeHtml(receipt.totals.discountAmount)}</span></div>`;
+}
+
 /**
  * Pure HTML-building function — no I/O, no DB access. Inline CSS only
  * (no external stylesheet) so pdf-renderer.ts's headless render never
@@ -164,10 +169,11 @@ export function buildReceiptHtml(receipt: CustomerReceiptJSON, storeProfile: Sto
       </div>
       <div>
         <div class="totals">
-          <div class="totals-row"><span>Subtotal</span><span>&#8377;${escapeHtml(receipt.totals.subtotal)}</span></div>
+          <div class="totals-row"><span>Original merchandise subtotal</span><span>&#8377;${escapeHtml(receipt.totals.subtotal)}</span></div>
+          ${couponRow(receipt)}
           <div class="totals-row"><span>Shipping</span><span>&#8377;${escapeHtml(receipt.totals.shippingFee)}</span></div>
           ${refundRow(receipt)}
-          <div class="totals-row grand"><span>Total Paid</span><span>&#8377;${escapeHtml(receipt.totals.total)}</span></div>
+          <div class="totals-row grand"><span>Final paid total</span><span>&#8377;${escapeHtml(receipt.totals.total)}</span></div>
         </div>
       </div>
     </div>

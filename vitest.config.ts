@@ -20,6 +20,18 @@ process.env.BREEZE_MERCHANT_ID = process.env.BREEZE_MERCHANT_ID || "mypetmart";
 process.env.BREEZE_ENVIRONMENT = process.env.BREEZE_ENVIRONMENT || "smb-release";
 process.env.BREEZE_SHOP_URL = process.env.BREEZE_SHOP_URL || "https://mypetmart.org";
 process.env.BREEZE_WEBHOOK_SECRET = process.env.BREEZE_WEBHOOK_SECRET || "test_breeze_webhook_api_key_do_not_use_in_prod";
+// environment.config.ts already defaults SHIPMENT_NUMBER_PREFIX to "TEST-SHP"
+// for any non-production NODE_ENV specifically so test-created shipment
+// numbers can never be confused with a real courier reference — but only
+// when the var is otherwise unset. The local .env file's own
+// SHIPMENT_NUMBER_PREFIX=SHP (meant for a developer's real iThink sandbox
+// testing via `npm run dev`) is loaded unconditionally regardless of
+// NODE_ENV and was silently overriding that safety default during test
+// runs. Setting it here — before environment.config.ts's loadEnvFile(".env")
+// runs — wins, since Node's native loadEnvFile never overrides an
+// already-set process.env value; this restores the intended TEST-SHP
+// behavior for tests without touching the shared .env file.
+process.env.SHIPMENT_NUMBER_PREFIX = process.env.SHIPMENT_NUMBER_PREFIX || "TEST-SHP";
 
 export default defineConfig({
   test: {

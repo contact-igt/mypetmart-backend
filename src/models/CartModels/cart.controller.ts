@@ -4,7 +4,7 @@ import { SessionInvalidError } from "../AuthModels/auth.errors.js";
 import { clearGuestCartCookie, getGuestCartTokenHash } from "../../middlewares/cart/resolve-cart-identity.middleware.js";
 import { sendSuccess } from "../../utils/api-response.js";
 import { CartService } from "./cart.service.js";
-import { addCartItemSchema, parseCartItemId, updateCartItemSchema } from "./cart.validation.js";
+import { addCartItemSchema, applyCouponSchema, parseCartItemId, updateCartItemSchema } from "./cart.validation.js";
 import type { AddCartItemInput } from "./cart.types.js";
 
 function requireCartIdentity(req: Request) {
@@ -58,6 +58,25 @@ export async function handleRemoveCartItem(req: Request, res: Response, next: Ne
 export async function handleClearCart(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const cart = await CartService.clearCart(requireCartIdentity(req));
+    sendSuccess(res, 200, cart);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleApplyCoupon(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const input = applyCouponSchema.parse(req.body);
+    const cart = await CartService.applyCoupon(requireCartIdentity(req), input);
+    sendSuccess(res, 200, cart);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleRemoveCoupon(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const cart = await CartService.removeCoupon(requireCartIdentity(req));
     sendSuccess(res, 200, cart);
   } catch (error) {
     next(error);

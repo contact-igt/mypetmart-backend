@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { Op, UniqueConstraintError, type WhereOptions } from "sequelize";
 
+import { primaryOrigin } from "../../utils/origins.js";
 import { environmentConfig } from "../../config/environment.config.js";
 import { DATABASE_TABLE_NAMES } from "../../constants/database.constants.js";
 import { sequelize } from "../../database/index.js";
@@ -117,7 +118,7 @@ export const NewsletterService = {
         }
       }
 
-      const verifyUrl = `${environmentConfig.STOREFRONT_ORIGIN}/newsletter/verify?token=${encodeURIComponent(rawToken)}`;
+      const verifyUrl = `${primaryOrigin(environmentConfig.STOREFRONT_ORIGIN)}/newsletter/verify?token=${encodeURIComponent(rawToken)}`;
       const sent = await emailService.sendNewsletterVerification(email, verifyUrl, environmentConfig.NEWSLETTER_VERIFICATION_TTL_HOURS);
       if (!sent && environmentConfig.NODE_ENV !== "test") {
         throw new NewsletterEmailDeliveryFailedError();
@@ -204,7 +205,7 @@ export const NewsletterService = {
       subscriber.unsubscribe_token_hash = computeTokenHash(rawUnsubscribeToken);
       await subscriber.save({ transaction: t });
 
-      const unsubscribeUrl = `${environmentConfig.STOREFRONT_ORIGIN}/newsletter/unsubscribe?token=${encodeURIComponent(rawUnsubscribeToken)}`;
+      const unsubscribeUrl = `${primaryOrigin(environmentConfig.STOREFRONT_ORIGIN)}/newsletter/unsubscribe?token=${encodeURIComponent(rawUnsubscribeToken)}`;
       await emailService.sendEmail({
         to: subscriber.email,
         subject: "Manage your MyPetMart newsletter subscription",

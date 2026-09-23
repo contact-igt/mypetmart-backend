@@ -4,7 +4,12 @@ import tseslint from "typescript-eslint";
 
 export default [
   {
-    ignores: ["dist/**", "coverage/**", "node_modules/**"]
+    // migration-build.check.mjs is a plain Node script run manually after
+    // `npm run build` (see its own header comment) — not part of the
+    // TypeScript source graph, so it has no tsconfig project to satisfy the
+    // type-checked rule set below and would otherwise crash the linter
+    // entirely rather than just failing a rule.
+    ignores: ["dist/**", "coverage/**", "node_modules/**", "tests/database/migration-build.check.mjs"]
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

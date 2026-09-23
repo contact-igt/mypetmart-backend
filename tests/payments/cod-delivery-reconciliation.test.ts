@@ -1,4 +1,4 @@
-/* eslint-disable */
+ 
 import { Op } from "sequelize";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 

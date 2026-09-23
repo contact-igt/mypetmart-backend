@@ -12,6 +12,7 @@ export type ReceiptItemJSON = {
   quantity: number;
   unitPrice: string;
   lineTotal: string;
+  discountAllocated: string;
 };
 
 export type ReceiptCustomerJSON = {
@@ -45,6 +46,8 @@ export type ReceiptRefundSummaryJSON = {
 
 export type ReceiptTotalsJSON = {
   subtotal: string;
+  couponCode: string | null;
+  discountAmount: string;
   shippingFee: string;
   total: string;
 };

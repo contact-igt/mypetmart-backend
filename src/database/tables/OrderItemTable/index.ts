@@ -21,6 +21,10 @@ export class OrderItem extends Model<InferAttributes<OrderItem>, InferCreationAt
   declare quantity: number;
   declare unit_price: string;
   declare line_total: string;
+  // This line's share of the parent Order's coupon_discount_amount_paise —
+  // see CouponPricingService.allocateDiscountAcrossLines. Always 0 for an
+  // Order with no coupon, or for a coupon-ineligible line.
+  declare discount_allocated_paise: CreationOptional<number>;
   declare created_at: CreationOptional<Date>;
   declare updated_at: CreationOptional<Date>;
 
@@ -58,6 +62,7 @@ export function initializeOrderItemTable(sequelize: Sequelize): typeof OrderItem
       quantity: { type: DataTypes.INTEGER, allowNull: false, validate: { min: 1 } },
       unit_price: { type: DataTypes.DECIMAL(MONEY_PRECISION, MONEY_SCALE), allowNull: false, validate: { isNonNegative: nonNegativeMoneyValidator("Unit price") } },
       line_total: { type: DataTypes.DECIMAL(MONEY_PRECISION, MONEY_SCALE), allowNull: false, validate: { isNonNegative: nonNegativeMoneyValidator("Line total") } },
+      discount_allocated_paise: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },
       created_at: DataTypes.DATE,
       updated_at: DataTypes.DATE
     },

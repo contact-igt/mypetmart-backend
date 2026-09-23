@@ -77,3 +77,10 @@ export class CartQuantityLimitExceededError extends CartError {
     this.name = "CartQuantityLimitExceededError";
   }
 }
+
+export class CartCouponEmptyCartError extends CartError {
+  public constructor() {
+    super("CART_COUPON_EMPTY_CART", "Add an item to your cart before applying a coupon.", 422);
+    this.name = "CartCouponEmptyCartError";
+  }
+}

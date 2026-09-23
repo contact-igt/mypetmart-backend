@@ -9,7 +9,7 @@ import { sequelize } from "../../database/index.js";
 import { Order, OrderItem, Payment, Product, ProductVariant, Replacement, ReturnRequest, Shipment, ShipmentTrackingEvent, User } from "../../database/tables/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
 import { buildBusinessReference } from "../../utils/reference-generator.js";
-import { formatMoney } from "../../utils/product-money.js";
+import { formatMoney, formatPaiseAsMoney, parseMoneyToPaise } from "../../utils/product-money.js";
 import { IThinkClient, IThinkClientError, type IThinkPackageInput, type IThinkTrackingEvent } from "./ithink.client.js";
 import { PaymentService } from "../PaymentModels/payment.service.js";
 import { ShipmentActionNotAllowedError, ShipmentCourierSelectionInvalidError, ShipmentNotEligibleError, ShipmentNotFoundError, ShipmentPackageDataError, ShipmentProviderError, ShipmentProviderNotConfiguredError, ShipmentServiceabilityError, ShipmentValidationError } from "./shipment.errors.js";
@@ -257,6 +257,19 @@ async function validateShippable(sourceType: ShipmentSourceType, order: Order, r
   const parcel = aggregate(lines);
   const totalAmount = sourceType === "order" ? order.total : formatMoney(Number(orderItems[0]!.unit_price) * replacement!.quantity);
 
+  if (sourceType === "order") {
+    const lineSubtotalPaise = orderItems.reduce((sum, item) => sum + parseMoneyToPaise(item.line_total), 0);
+    const allocatedDiscountPaise = orderItems.reduce((sum, item) => sum + item.discount_allocated_paise, 0);
+    const expectedTotalPaise = lineSubtotalPaise - allocatedDiscountPaise + parseMoneyToPaise(order.shipping_fee);
+    if (
+      lineSubtotalPaise !== parseMoneyToPaise(order.subtotal) ||
+      allocatedDiscountPaise !== order.coupon_discount_amount_paise ||
+      expectedTotalPaise !== parseMoneyToPaise(order.total)
+    ) {
+      throw new ShipmentPackageDataError("Order financial totals do not reconcile; shipment booking was blocked.");
+    }
+  }
+
   return { isCod, lines, parcel, totalAmount };
 }
 
@@ -348,6 +361,7 @@ async function quote(sourceType: ShipmentSourceType, sourceId: number): Promise<
 
 function createInput(prepared: Prepared, courier: string, serviceType: string): IThinkPackageInput {
   const { shipment, order, lines } = prepared;
+  const isOrderShipment = shipment.source_type === "order";
   const placed = order.placed_at;
   const orderDate = `${String(placed.getDate()).padStart(2, "0")}-${String(placed.getMonth() + 1).padStart(2, "0")}-${placed.getFullYear()}`;
   return {
@@ -355,7 +369,15 @@ function createInput(prepared: Prepared, courier: string, serviceType: string): 
     recipient: { name: order.ship_recipient_name, address1: order.ship_line_1, address2: order.ship_line_2 ?? "", pincode: order.ship_postal_code,
       city: order.ship_city, state: order.ship_state, country: order.ship_country === "IN" ? "India" : order.ship_country,
       phone: order.ship_phone.replace(/\D/gu, "").slice(-10), email: order.contact_email ?? "" },
-    products: lines.map(({ item, quantity }) => ({ name: item.variant_name ? `${item.product_name} - ${item.variant_name}` : item.product_name, sku: item.variant_sku ?? item.product_sku, quantity, price: item.unit_price })),
+    products: lines.map(({ item, quantity }) => ({
+      name: item.variant_name ? `${item.product_name} - ${item.variant_name}` : item.product_name,
+      sku: item.variant_sku ?? item.product_sku,
+      quantity,
+      price: item.unit_price,
+      discount: isOrderShipment ? formatPaiseAsMoney(item.discount_allocated_paise) : "0.00"
+    })),
+    shippingAmount: isOrderShipment ? formatMoney(order.shipping_fee) : "0.00",
+    totalDiscount: isOrderShipment ? formatPaiseAsMoney(order.coupon_discount_amount_paise) : "0.00",
     lengthCm: shipment.length_cm, widthCm: shipment.width_cm, heightCm: shipment.height_cm,
     weightKg: (shipment.weight_grams / 1000).toFixed(3), logistics: courier, serviceType,
     // Derived server-side from the Order's own Payment records (prepared.isCod,

@@ -8,6 +8,7 @@ import type { ProductVariant as ProductVariantModel } from "../../database/table
 import { logger } from "../../utils/logger.js";
 import { parseMoneyToPaise } from "../../utils/product-money.js";
 import { CartService } from "../CartModels/cart.service.js";
+import { CouponPricingService } from "../CouponModels/coupon.service.js";
 import { isValidOrderStatusTransition } from "../OrderModels/order.constants.js";
 import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import type { FinalizationOutcome, NormalizedPaymentResult } from "./payment.types.js";
@@ -208,6 +209,14 @@ export const PaymentFinalizationService = {
       await payment.save({ transaction: t });
 
       order.payment_status = "paid";
+      // This Order is now a genuinely completed purchase — consume its
+      // coupon reservation exactly once (guarded by the `order.payment_status
+      // === "paid"` early-return above, so a replayed/duplicate verification
+      // can never call this twice for the same Order). A no-op if this Order
+      // never had a coupon. Runs regardless of whether confirmation below
+      // succeeds or the Order ends up commerce_exception'd — both mean money
+      // was genuinely captured (see the notification-dispatch comment below).
+      await CouponPricingService.consumeCouponReservation(order.id, t);
 
       if (canConfirm && lockedLines) {
         // 5. Atomically decrement stock exactly once — the first and only

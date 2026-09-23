@@ -7,7 +7,9 @@ export type IThinkPackageInput = {
   orderDate: string;
   totalAmount: string;
   recipient: { name: string; address1: string; address2: string; pincode: string; city: string; state: string; country: string; phone: string; email: string };
-  products: Array<{ name: string; sku: string; quantity: number; price: string }>;
+  products: Array<{ name: string; sku: string; quantity: number; price: string; discount: string }>;
+  shippingAmount: string;
+  totalDiscount: string;
   lengthCm: string;
   widthCm: string;
   heightCm: string;
@@ -151,9 +153,9 @@ export const IThinkClient = {
         is_billing_same_as_shipping: "yes", billing_name: address.name, billing_company_name: "", billing_add: address.address1,
         billing_add2: address.address2, billing_add3: "", billing_pin: address.pincode, billing_city: address.city,
         billing_state: address.state, billing_country: address.country, billing_phone: address.phone, billing_alt_phone: "", billing_email: address.email,
-        products: input.products.map((product) => ({ product_name: product.name, product_sku: product.sku, product_quantity: String(product.quantity), product_price: product.price, product_discount: "0" })),
+        products: input.products.map((product) => ({ product_name: product.name, product_sku: product.sku, product_quantity: String(product.quantity), product_price: product.price, product_discount: product.discount })),
         shipment_length: input.lengthCm, shipment_width: input.widthCm, shipment_height: input.heightCm, weight: input.weightKg,
-        shipping_charges: "0", giftwrap_charges: "0", transaction_charges: "0", total_discount: "0", first_attemp_discount: "0",
+        shipping_charges: input.shippingAmount, giftwrap_charges: "0", transaction_charges: "0", total_discount: input.totalDiscount, first_attemp_discount: "0",
         // Prepaid: the full amount was already captured by PayU, so nothing
         // is collected on delivery (cod_amount "0"). COD: nothing was
         // captured upfront (advance_amount "0"), the full amount is
