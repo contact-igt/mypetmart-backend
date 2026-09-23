@@ -96,6 +96,29 @@ describe("normalizeStatusApiResponse", () => {
     expect(result.amount).toBe("500.00");
   });
 
+  it("accepts string API status and JSON-encoded transaction details", () => {
+    const result = normalizeStatusApiResponse("REF-000123", "req_1", {
+      status: "1",
+      transaction_details: JSON.stringify({ req_1: { req_1: { request_id: "req_1", status: "success", amt: "500.00" } } })
+    });
+    expect(result.normalizedOutcome).toBe("SUCCEEDED");
+    expect(result.amount).toBe("500.00");
+  });
+
+  it("finds the requested refund under a PayU-ID outer wrapper without accepting another action", () => {
+    const result = normalizeStatusApiResponse("REF-000123", "req_1", {
+      status: 1,
+      transaction_details: {
+        mihpay_1: {
+          capture_1: { request_id: "capture_1", status: "SUCCESS", amt: "900.00" },
+          req_1: { request_id: "req_1", status: "SUCCESS", amt: "500.00" }
+        }
+      }
+    });
+    expect(result.normalizedOutcome).toBe("SUCCEEDED");
+    expect(result.amount).toBe("500.00");
+  });
+
   it("maps SUCCESS to SUCCEEDED", () => {
     const result = normalizeStatusApiResponse("REF-000123", "req_1", {
       status: 1,

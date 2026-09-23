@@ -1,4 +1,5 @@
 import { paymentConfig } from "../../config/payment.config.js";
+import { logger } from "../../utils/logger.js";
 import { RefundProviderNotConfiguredError } from "./refund.errors.js";
 import { buildPayuCommandHash } from "./payu-refund.util.js";
 
@@ -34,12 +35,12 @@ export type RawPayuRefundStatusDetail = {
 };
 
 export type RawPayuRefundStatusResponse = {
-  status: number;
+  status: number | string;
   msg?: string;
   // PayU's request-ID status API currently wraps the detail twice using the
   // request ID at both levels. Keep the older flat shape in the union because
   // it is also returned by some PayU environments/integrations.
-  transaction_details?: Record<string, RawPayuRefundStatusDetail | Record<string, RawPayuRefundStatusDetail> | string>;
+  transaction_details?: unknown;
 };
 
 function assertConfigured(): { key: string; salt: string } {
@@ -103,6 +104,24 @@ export const PayuRefundClient = {
       throw new Error(`PayU Refund Status API responded with HTTP ${response.status}.`);
     }
 
-    return (await response.json()) as RawPayuRefundStatusResponse;
+    const raw = (await response.json()) as RawPayuRefundStatusResponse;
+    let details: unknown = raw.transaction_details;
+    if (typeof details === "string") {
+      try {
+        details = JSON.parse(details) as unknown;
+      } catch {
+        // The normalizer will safely treat malformed/unknown details as pending.
+      }
+    }
+    logger.info(
+      {
+        apiStatus: raw.status,
+        apiMessage: raw.msg ?? null,
+        transactionDetailsType: Array.isArray(details) ? "array" : typeof details,
+        transactionDetailsCount: details && typeof details === "object" ? Object.keys(details).length : 0
+      },
+      "PayU refund status response received"
+    );
+    return raw;
   }
 };

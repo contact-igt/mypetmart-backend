@@ -24,18 +24,40 @@ function isRefundStatusDetail(value: unknown): value is RawPayuRefundStatusDetai
   return ["status", "request_id", "amt", "mihpayid", "action"].some((field) => field in record);
 }
 
-function findStatusDetail(raw: RawPayuRefundStatusResponse, requestId: string): RawPayuRefundStatusDetail | null {
-  const entry = raw.transaction_details?.[requestId];
-  if (isRefundStatusDetail(entry)) return entry;
+function parseJsonValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
 
-  // Documented PayU shape:
-  // transaction_details[request_id][request_id] = { status, amt, ... }
-  if (entry && typeof entry === "object") {
-    const nested = entry[requestId];
-    if (isRefundStatusDetail(nested)) return nested;
+function findDetailByRequestId(value: unknown, requestId: string, requestScoped: boolean, depth = 0): RawPayuRefundStatusDetail | null {
+  if (depth > 4) return null;
+  const parsed = parseJsonValue(value);
+
+  if (isRefundStatusDetail(parsed)) {
+    const detailRequestId = parsed.request_id === undefined ? "" : String(parsed.request_id).trim();
+    return requestScoped || detailRequestId === requestId ? parsed : null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+
+  const record = parsed as Record<string, unknown>;
+  if (requestId in record) {
+    const exact = findDetailByRequestId(record[requestId], requestId, true, depth + 1);
+    if (exact) return exact;
   }
 
+  for (const child of Object.values(record)) {
+    const match = findDetailByRequestId(child, requestId, requestScoped, depth + 1);
+    if (match) return match;
+  }
   return null;
+}
+
+function findStatusDetail(raw: RawPayuRefundStatusResponse, requestId: string): RawPayuRefundStatusDetail | null {
+  return findDetailByRequestId(raw.transaction_details, requestId, false);
 }
 
 export function normalizeInitiateResponse(merchantRefundToken: string, raw: RawPayuRefundInitiateResponse): NormalizedRefundResult {
@@ -61,7 +83,7 @@ export function normalizeInitiateResponse(merchantRefundToken: string, raw: RawP
 }
 
 export function normalizeStatusApiResponse(merchantRefundToken: string, requestId: string, raw: RawPayuRefundStatusResponse): NormalizedRefundResult {
-  if (raw.status !== 1) {
+  if (Number(raw.status) !== 1) {
     return {
       merchantRefundToken,
       providerRequestId: requestId,
