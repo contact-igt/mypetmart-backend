@@ -361,7 +361,14 @@ describe("Refunds", () => {
     it("a genuine SUCCESS from the Status API marks the Refund succeeded and rolls up Payment/Order to fully refunded (single-item order)", async () => {
       vi.mocked(fetch)
         .mockResolvedValueOnce(jsonResponse({ status: 1, request_id: "req_1" })) // initiate
-        .mockResolvedValueOnce(jsonResponse({ status: 1, transaction_details: { req_1: { status: "SUCCESS", amt: "500.00", mihpayid: "mihpay1" } } })); // recheck
+        .mockResolvedValueOnce(
+          jsonResponse({
+            status: 1,
+            transaction_details: {
+              req_1: { req_1: { request_id: "req_1", status: "SUCCESS", amt: "500.00", mihpayid: "mihpay1" } }
+            }
+          })
+        ); // recheck: PayU's documented request-ID response is nested twice
 
       const { orderId, returnId } = await createApprovedReturn(customerAToken, adminToken, { unitPrice: "500.00", quantity: 1, returnQuantity: 1 });
       const initiated = await request(app).post(`${ADMIN_RETURNS_URL}/${returnId}/refunds`).set("Authorization", `Bearer ${superAdminToken}`).send({});

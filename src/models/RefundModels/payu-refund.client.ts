@@ -36,7 +36,10 @@ export type RawPayuRefundStatusDetail = {
 export type RawPayuRefundStatusResponse = {
   status: number;
   msg?: string;
-  transaction_details?: Record<string, RawPayuRefundStatusDetail>;
+  // PayU's request-ID status API currently wraps the detail twice using the
+  // request ID at both levels. Keep the older flat shape in the union because
+  // it is also returned by some PayU environments/integrations.
+  transaction_details?: Record<string, RawPayuRefundStatusDetail | Record<string, RawPayuRefundStatusDetail> | string>;
 };
 
 function assertConfigured(): { key: string; salt: string } {
