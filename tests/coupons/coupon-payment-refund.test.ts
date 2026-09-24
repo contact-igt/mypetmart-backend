@@ -562,6 +562,42 @@ describe("Coupon Module 3 — Payment and Redemption Lifecycle", () => {
       expect(order!.coupon_id).toBe(coupon.id); // immutable snapshot untouched
     });
 
+    it("an admin cancelling an unpaid pending Order releases its coupon reservation", async () => {
+      const coupon = await createCoupon({ usage_limit: 1 });
+      const { orderId } = await placeOrderWithCoupon(coupon);
+
+      const cancelRes = await request(app).patch(`${ADMIN_ORDERS_URL}/${orderId}/status`).set("Authorization", `Bearer ${adminToken}`).send({ status: "cancelled" });
+      expect(cancelRes.status).toBe(200);
+
+      const redemption = await CouponRedemption.findOne({ where: { coupon_id: coupon.id, order_id: orderId } });
+      expect(redemption!.status).toBe("released");
+      expect(redemption!.released_at).not.toBeNull();
+    });
+
+    it("an admin cancellation keeps the reservation while a PayU attempt is still unresolved", async () => {
+      const coupon = await createCoupon();
+      const { orderId } = await placeOrderWithCoupon(coupon);
+      const initRes = await request(app).post(INITIATE_URL).set("Authorization", `Bearer ${customerToken}`).send({ orderId });
+      expect(initRes.status).toBe(200);
+
+      const cancelRes = await request(app).patch(`${ADMIN_ORDERS_URL}/${orderId}/status`).set("Authorization", `Bearer ${adminToken}`).send({ status: "cancelled" });
+      expect(cancelRes.status).toBe(200);
+
+      const redemption = await CouponRedemption.findOne({ where: { coupon_id: coupon.id, order_id: orderId } });
+      expect(redemption!.status).toBe("reserved");
+    });
+
+    it("an admin bulk cancellation of an unpaid pending Order releases its coupon reservation", async () => {
+      const coupon = await createCoupon();
+      const { orderId } = await placeOrderWithCoupon(coupon);
+
+      const bulkRes = await request(app).patch(`${ADMIN_ORDERS_URL}/bulk-status`).set("Authorization", `Bearer ${adminToken}`).send({ ids: [orderId], status: "cancelled" });
+      expect(bulkRes.status).toBe(200);
+
+      const redemption = await CouponRedemption.findOne({ where: { coupon_id: coupon.id, order_id: orderId } });
+      expect(redemption!.status).toBe("released");
+    });
+
     it("a full-order cancellation refund refunds exactly the captured (already-discounted) Payment amount", async () => {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: 1, request_id: "req_coupon_cancel_1" })));
       const coupon = await createCoupon({ discount_type: "fixed", discount_value: 10_000 });

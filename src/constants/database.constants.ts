@@ -76,6 +76,15 @@ export type CouponStatus = (typeof COUPON_STATUS_VALUES)[number];
 export const COUPON_DISCOUNT_TYPE_VALUES = ["percentage", "fixed"] as const;
 export type CouponDiscountType = (typeof COUPON_DISCOUNT_TYPE_VALUES)[number];
 
+// Which payment methods a coupon is valid for.
+// "both"  — eligible for PayU and COD (backward-compatible default).
+// "payu"  — eligible for online payment (PayU) only.
+// "cod"   — eligible for Cash on Delivery only.
+// Added as migration 082 (additive ALTER TABLE only; existing rows default
+// to "both" via the column DEFAULT, preserving all prior coupon behavior).
+export const COUPON_PAYMENT_METHOD_ELIGIBILITY_VALUES = ["both", "payu", "cod"] as const;
+export type CouponPaymentMethodEligibility = (typeof COUPON_PAYMENT_METHOD_ELIGIBILITY_VALUES)[number];
+
 // A redemption row exists the moment an order reserves a coupon (created in
 // the same transaction as the order, in Module 2 — not yet implemented here)
 // and is never deleted afterward, so usage limits and audit history stay

@@ -79,7 +79,7 @@ export class CategoryService {
     };
 
     if (query.petType) {
-      where.pet_type = query.petType;
+      where.pet_type = { [Op.in]: [query.petType, "all"] };
     }
 
     if (query.showOnHomepage) {

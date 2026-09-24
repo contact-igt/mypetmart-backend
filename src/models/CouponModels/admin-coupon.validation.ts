@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { COUPON_DISCOUNT_TYPE_VALUES, COUPON_REDEMPTION_STATUS_VALUES, COUPON_STATUS_VALUES } from "../../constants/database.constants.js";
+import { COUPON_DISCOUNT_TYPE_VALUES, COUPON_PAYMENT_METHOD_ELIGIBILITY_VALUES, COUPON_REDEMPTION_STATUS_VALUES, COUPON_STATUS_VALUES } from "../../constants/database.constants.js";
 import { parseStrictIdClaim } from "../../utils/claim-parser.js";
 import { CouponError } from "./coupon.errors.js";
 
@@ -19,6 +19,9 @@ export const AdminCouponInputSchema = z.object({
   usageLimit: nullablePositiveInt,
   perCustomerLimit: nullablePositiveInt,
   firstOrderOnly: z.boolean(),
+  // Which payment method(s) this coupon is valid for. Defaults to "both" —
+  // all existing coupons created without this field behave as before.
+  paymentMethodEligibility: z.enum(COUPON_PAYMENT_METHOD_ELIGIBILITY_VALUES).default("both"),
   eligibleProductIds: idList,
   eligibleCategoryIds: idList
 }).superRefine((value, context) => {

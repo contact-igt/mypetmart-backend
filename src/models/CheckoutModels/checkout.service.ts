@@ -35,11 +35,19 @@ function toPricingLines(items: CartItemJSON[]): CouponPricingLine[] {
  * was applied is exactly what this re-evaluation catches (V1 requirement:
  * "revalidate coupon eligibility whenever cart quantities, products, or
  * prices change"). Returns null when no coupon is in effect at all.
+ *
+ * paymentMethod is forwarded to CouponPricingService.evaluateCoupon so that
+ * payment-method-restricted coupons are evaluated against the customer's
+ * current selection. When the coupon fails only due to payment method, the
+ * alternativeSaving from the engine is forwarded to the response — the
+ * frontend uses it to show the "Switch to Prepaid and save ₹X" offer without
+ * computing any discount itself.
  */
 async function evaluateCheckoutCoupon(
   cart: CartJSON,
   couponCodeOverride: string | undefined,
-  identityUserId: number | null
+  identityUserId: number | null,
+  paymentMethod?: import("./checkout.types.js").CheckoutPaymentMethod
 ): Promise<{ coupon: CheckoutCouponJSON; eligibleMerchandisePaise: number; discountAmountPaise: number }> {
   const effectiveCode = couponCodeOverride ?? cart.coupon?.code;
   if (!effectiveCode) {
@@ -48,7 +56,12 @@ async function evaluateCheckoutCoupon(
 
   const code = normalizeCouponCode(effectiveCode);
   const lines = toPricingLines(cart.items);
-  const evaluation = await CouponPricingService.evaluateCoupon({ code, lines, identity: { userId: identityUserId } });
+  const evaluation = await CouponPricingService.evaluateCoupon({
+    code,
+    lines,
+    identity: { userId: identityUserId },
+    ...(paymentMethod ? { paymentMethod } : {})
+  });
 
   if (evaluation.ok) {
     return {
@@ -58,7 +71,16 @@ async function evaluateCheckoutCoupon(
     };
   }
   return {
-    coupon: { code, eligible: false, message: evaluation.message },
+    coupon: {
+      code,
+      eligible: false,
+      message: evaluation.message,
+      // Forward the backend-authoritative alternative saving so the frontend
+      // can show the exact ₹X without computing it client-side.
+      ...(evaluation.reason === "payment_method_ineligible" && evaluation.alternativeSaving
+        ? { alternativeSaving: evaluation.alternativeSaving }
+        : {})
+    },
     eligibleMerchandisePaise: 0,
     discountAmountPaise: 0
   };
@@ -158,7 +180,9 @@ export const CheckoutService = {
     };
 
     const identityUserId = identity.type === "customer" ? identity.userId : null;
-    const { coupon, eligibleMerchandisePaise, discountAmountPaise } = await evaluateCheckoutCoupon(cart, input.couponCode, identityUserId);
+    // Pass the selected payment method so payment-method-restricted coupons
+    // are correctly rejected and an alternativeSaving is returned.
+    const { coupon, eligibleMerchandisePaise, discountAmountPaise } = await evaluateCheckoutCoupon(cart, input.couponCode, identityUserId, input.paymentMethod);
 
     const shippingAmountPaise = parseMoneyToPaise(V1_FREE_SHIPPING_FEE);
     const merchandiseSubtotalPaise = parseMoneyToPaise(cart.subtotal);
