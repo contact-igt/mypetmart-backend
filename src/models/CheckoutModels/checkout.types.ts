@@ -70,6 +70,17 @@ export type CheckoutTotals = {
   payableTotal: string | null;
 };
 
+// Server-calculated saving when a coupon is ineligible only because of the
+// current payment method. The frontend uses this for the "Switch to Prepaid
+// and save ₹X" offer — the amount is ALWAYS from the server, never computed
+// on the client.
+export type CheckoutAlternativeSaving = {
+  eligiblePaymentMethod: "payu" | "cod";
+  // Amount in paise — use formatPaiseAsMoney on the frontend to display ₹X.XX
+  discountAmountPaise: number;
+  code: string;
+};
+
 // null when no coupon is in effect for this preview (no code on the Cart,
 // no couponCode override, or the override was empty). eligible mirrors
 // CartCouponJSON's own field — false means the code is currently invalid
@@ -78,6 +89,10 @@ export type CheckoutCouponJSON = {
   code: string;
   eligible: boolean;
   message: string | null;
+  // Only present when the coupon failed SOLELY due to payment method
+  // mismatch (reason === "payment_method_ineligible"). Populated from
+  // the server coupon engine — never derived by the frontend.
+  alternativeSaving?: CheckoutAlternativeSaving;
 } | null;
 
 export type CheckoutPreviewJSON = {

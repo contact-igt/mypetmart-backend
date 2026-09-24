@@ -4,7 +4,7 @@ import { IdSequenceService } from "../../database/sequences/id-sequence.service.
 import { Coupon, CouponCategory, CouponProduct, CouponRedemption, Order } from "../../database/tables/index.js";
 import { CouponNotApplicableError } from "./coupon.errors.js";
 import { normalizeCouponCode } from "./coupon.validation.js";
-import type { CouponEvaluationInput, CouponEvaluationResult, CouponPricingLine, CouponReservationInput } from "./coupon.types.js";
+import type { CouponEvaluationFailure, CouponEvaluationInput, CouponEvaluationResult, CouponPricingLine, CouponReservationInput } from "./coupon.types.js";
 
 // Redemption states that still occupy a usage-limit slot. "released" rows
 // (a pending order that was safely cancelled — Module 2) explicitly do not
@@ -124,6 +124,13 @@ export class CouponPricingService {
    * Usage-limit counts read here are a courtesy for preview purposes only —
    * the authoritative, race-safe check happens when Module 2 locks the
    * coupon row inside the order-creation transaction.
+   *
+   * Payment method eligibility is checked as the LAST guard before computing
+   * the discount — all other eligibility rules run first so that the
+   * "alternative saving" returned for payment_method_ineligible failures is
+   * always meaningful (the coupon IS valid for the cart, just not this method).
+   * When no paymentMethod is supplied (e.g. cart-apply, admin preview) the
+   * payment-method check is skipped entirely for backward compatibility.
    */
   public static async evaluateCoupon(input: CouponEvaluationInput): Promise<CouponEvaluationResult> {
     const code = normalizeCouponCode(input.code);
@@ -194,6 +201,27 @@ export class CouponPricingService {
       }
     }
 
+    // Payment method eligibility check — runs AFTER all other eligibility
+    // checks so that "alternativeSaving" is meaningful (the cart qualifies for
+    // this coupon, just not via the current payment method). When paymentMethod
+    // is omitted (cart-apply path, admin preview) the check is skipped so
+    // existing behavior is fully preserved.
+    const paymentMethodEligibility = coupon.payment_method_eligibility ?? "both";
+    if (input.paymentMethod && paymentMethodEligibility !== "both" && paymentMethodEligibility !== input.paymentMethod) {
+      const discountAmountPaise = this.calculateDiscountPaise(coupon.discount_type, coupon.discount_value, eligibleMerchandisePaise, coupon.max_discount_paise);
+
+      const methodLabel = paymentMethodEligibility === "payu" ? "Prepaid (Pay Online)" : "Cash on Delivery";
+      const failureResult: CouponEvaluationFailure = {
+        ok: false,
+        reason: "payment_method_ineligible",
+        message: `This coupon is valid only for ${methodLabel}.`,
+        ...(discountAmountPaise > 0
+          ? { alternativeSaving: { eligiblePaymentMethod: paymentMethodEligibility as "payu" | "cod", discountAmountPaise, code: coupon.code } }
+          : {})
+      };
+      return failureResult;
+    }
+
     const discountAmountPaise = this.calculateDiscountPaise(coupon.discount_type, coupon.discount_value, eligibleMerchandisePaise, coupon.max_discount_paise);
     if (discountAmountPaise <= 0) {
       return failure("no_eligible_items", "This coupon doesn't apply any discount to your cart.");
@@ -253,6 +281,17 @@ export class CouponPricingService {
     }
     if (coupon.ends_at && now >= coupon.ends_at) {
       throw new CouponNotApplicableError("This coupon has expired.");
+    }
+
+    // Payment-method eligibility re-check inside the reservation lock.
+    // This ensures a stale checkout preview (e.g. preview was for PayU but
+    // the customer somehow submits as COD) can never force a prepaid-only
+    // discount onto a COD order. Mirrors evaluateCoupon's check so the two
+    // are always consistent, but runs on the locked coupon row.
+    const paymentMethodEligibility = coupon.payment_method_eligibility ?? "both";
+    if (input.paymentMethod && paymentMethodEligibility !== "both" && paymentMethodEligibility !== input.paymentMethod) {
+      const methodLabel = paymentMethodEligibility === "payu" ? "Prepaid (Pay Online)" : "Cash on Delivery";
+      throw new CouponNotApplicableError(`This coupon is valid only for ${methodLabel}.`);
     }
 
     // Both recounts MUST be locking reads. Under REPEATABLE READ a plain

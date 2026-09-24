@@ -504,7 +504,7 @@ export class ProductService {
     };
 
     if (query.petType) {
-      whereClause.pet_type = query.petType;
+      whereClause.pet_type = { [Op.in]: [query.petType, "all"] };
     }
 
     if (query.featured) {

@@ -24,6 +24,25 @@ export type CouponEvaluationInput = {
   code: string;
   lines: CouponPricingLine[];
   identity: CouponEvaluationIdentity;
+  // Which payment method the customer has currently selected. When omitted,
+  // the coupon is evaluated without payment-method gating — used by admin
+  // previews and cart-apply (which has no payment method yet). Checkout and
+  // Order creation must always supply this so payment-method-restricted
+  // coupons are correctly rejected.
+  paymentMethod?: "payu" | "cod";
+};
+
+// The backend-authoritative "alternative saving" returned when a coupon is
+// ineligible ONLY because of the current payment method. The frontend uses
+// this to show "Switch to Prepaid and save ₹X" without doing any local math.
+// Always server-calculated from the same coupon engine — never a client guess.
+export type CouponAlternativeSaving = {
+  // The payment method that WOULD make this coupon eligible.
+  eligiblePaymentMethod: "payu" | "cod";
+  // Server-calculated discount the customer would receive by switching.
+  discountAmountPaise: number;
+  // The coupon code to show in the CTA (same as the applied code, for display).
+  code: string;
 };
 
 export type CouponEvaluationSuccess = {
@@ -56,7 +75,14 @@ export type CouponEvaluationFailureReason =
   | "usage_limit_reached"
   | "per_customer_limit_reached"
   | "first_order_only_not_first_order"
-  | "guest_not_allowed_for_restricted_coupon";
+  | "guest_not_allowed_for_restricted_coupon"
+  // Added for payment-method eligibility (migration 082). This reason is
+  // returned instead of a generic failure so the checkout frontend can
+  // display the "Switch to Prepaid and save ₹X" offer. Only set when:
+  //   1. All other eligibility checks pass, AND
+  //   2. The coupon's payment_method_eligibility does not match the current
+  //      payment method supplied in the evaluation input.
+  | "payment_method_ineligible";
 
 export type CouponEvaluationFailure = {
   ok: false;
@@ -64,6 +90,10 @@ export type CouponEvaluationFailure = {
   // Safe to show a customer as-is — never includes internal IDs or another
   // customer's data.
   message: string;
+  // Only present when reason === "payment_method_ineligible". Contains the
+  // server-calculated saving available by switching to the eligible method —
+  // so the frontend NEVER does its own coupon math.
+  alternativeSaving?: CouponAlternativeSaving;
 };
 
 export type CouponEvaluationResult = CouponEvaluationSuccess | CouponEvaluationFailure;
@@ -82,4 +112,8 @@ export type CouponReservationInput = {
   discountValueSnapshot: number;
   eligibleMerchandisePaise: number;
   discountAmountPaise: number;
+  // The payment method used for this order — validated again inside the
+  // reservation lock so a stale frontend preview can never force a discount
+  // that the current payment method would not allow.
+  paymentMethod?: "payu" | "cod";
 };

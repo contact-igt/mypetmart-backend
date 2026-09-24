@@ -685,6 +685,42 @@ describe("Stage 13 — Products Backend Integration Tests", () => {
     expect(detailRes.body.data.name).toBe("Storefront Kibble");
   });
 
+  it("includes all-pet products in both dog and cat storefront filters", async () => {
+    const universalCategory = await sequelize.transaction(async (t) => {
+      const id = await IdSequenceService.allocateNextId("categories", t);
+      return Category.create(
+        { id, name: "Grooming", slug: "grooming", pet_type: "all", active: true, display_order: 2 },
+        { transaction: t }
+      );
+    });
+    const createRes = await request(app)
+      .post("/api/v1/admin/products")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        categoryId: universalCategory.id,
+        name: "Pet Grooming Brush",
+        sku: "UNIVERSAL-BRUSH-001",
+        description: "A brush for dogs and cats.",
+        petType: "all",
+        price: "499.00"
+      });
+    expect(createRes.status).toBe(201);
+    await request(app)
+      .patch(`/api/v1/admin/products/${createRes.body.data.id}/status`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ status: "active" });
+
+    for (const petType of ["dog", "cat"]) {
+      const res = await request(app).get(`/api/v1/storefront/products?petType=${petType}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.items.map((item: { id: number }) => item.id)).toContain(createRes.body.data.id);
+
+      const categoriesRes = await request(app).get(`/api/v1/storefront/categories?petType=${petType}`);
+      expect(categoriesRes.status).toBe(200);
+      expect(categoriesRes.body.data.map((item: { id: number }) => item.id)).toContain(universalCategory.id);
+    }
+  });
+
   it("returns only active + featured products for ?featured=true, and leaves Shop's unscoped listing unchanged", async () => {
     const create = async (name: string, sku: string, featured: boolean) => {
       const res = await request(app)

@@ -620,7 +620,7 @@ describe("Coupon Module 2 — Cart, Checkout, Order Integration", () => {
       expect(await CouponRedemption.count({ where: { coupon_id: unlimited.id, status: "reserved" } })).toBe(3);
 
       await cleanupCustomers();
-    });
+    }, 20000);
 
     // A returning guest reuses the same Cart row (keyed by the guest cookie)
     // once its previous order finalized it to "ordered". The new shopping

@@ -465,6 +465,21 @@ async function assertAdminFulfilmentPaymentSafe(order: Order, nextStatus: OrderS
 // only ever exists on an already-confirmed Order (see confirmCodOrder).
 const RECONCILABLE_ONLINE_PROVIDERS = ["payu", "breeze"] as const;
 
+// Admin cancellation of an unpaid Order returns its reserved coupon use to the
+// pool, like self-service cancellation does. While an online attempt is still
+// unresolved money may have moved, so the reservation is kept instead.
+// Paid/COD Orders hold a "consumed" redemption, which release never touches.
+async function releaseCouponForAdminCancellation(order: Order, transaction: Transaction): Promise<void> {
+  if (order.payment_status === "paid") return;
+  const pendingOnline = await Payment.findAll({
+    where: { order_id: order.id, status: "pending", provider: [...RECONCILABLE_ONLINE_PROVIDERS] },
+    transaction
+  });
+  const unresolved = pendingOnline.some((payment) => payment.provider === "breeze" || payment.provider_order_id !== null);
+  if (unresolved) return;
+  await CouponPricingService.releaseCouponReservation(order.id, transaction);
+}
+
 /**
  * Shared core of customer + guest pending-Order self-service cancellation.
  * `order` has already been resolved to the caller (session ownership, or a
@@ -789,7 +804,11 @@ export const OrderService = {
         couponEvaluation = await CouponPricingService.assertCouponApplicable({
           code: effectiveCouponCode,
           lines: couponPricingLines,
-          identity: { userId: identity.type === "customer" ? identity.userId : null }
+          identity: { userId: identity.type === "customer" ? identity.userId : null },
+          // Passing paymentMethod ensures the engine rejects a coupon that is
+          // only eligible for a different payment method, even if the checkout
+          // preview was already calculated. This is the authoritative gate.
+          ...(input.paymentMethod ? { paymentMethod: input.paymentMethod } : {})
         });
       }
 
@@ -900,7 +919,10 @@ export const OrderService = {
             discountTypeSnapshot: couponEvaluation.discountTypeSnapshot,
             discountValueSnapshot: couponEvaluation.discountValueSnapshot,
             eligibleMerchandisePaise: couponEvaluation.eligibleMerchandisePaise,
-            discountAmountPaise: couponEvaluation.discountAmountPaise
+            discountAmountPaise: couponEvaluation.discountAmountPaise,
+            // Re-validate payment method eligibility inside the lock so a
+            // stale preview can never slip a wrong-method discount through.
+            ...(input.paymentMethod ? { paymentMethod: input.paymentMethod } : {})
           },
           t
         );
@@ -1339,6 +1361,7 @@ export const AdminOrderService = {
       order.status = nextStatus;
       if (nextStatus === "cancelled") {
         order.cancelled_at = new Date();
+        await releaseCouponForAdminCancellation(order, t);
       }
       // fulfilment_status/shipment are still never touched here — those
       // remain independent state machines (V1 locked rule). payment_status
@@ -1475,6 +1498,7 @@ export const AdminOrderService = {
         order.status = nextStatus;
         if (nextStatus === "cancelled") {
           order.cancelled_at = new Date();
+          await releaseCouponForAdminCancellation(order, t);
         }
 
         if (isPaidCancellation) {

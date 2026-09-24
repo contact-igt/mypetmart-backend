@@ -61,6 +61,7 @@ async function serializeCoupon(coupon: Coupon) {
     maxDiscountPaise: coupon.max_discount_paise, minEligibleAmountPaise: coupon.min_eligible_amount_paise,
     startsAt: coupon.starts_at?.toISOString() ?? null, endsAt: coupon.ends_at?.toISOString() ?? null,
     usageLimit: coupon.usage_limit, perCustomerLimit: coupon.per_customer_limit, firstOrderOnly: coupon.first_order_only,
+    paymentMethodEligibility: coupon.payment_method_eligibility ?? "both",
     status: coupon.status, usedCount: activeCount, remainingUses: coupon.usage_limit === null ? null : Math.max(0, coupon.usage_limit - activeCount),
     eligibleProductIds: productIds, eligibleCategoryIds: categoryIds,
     eligibleProducts: products.map(({ id, name, sku }) => ({ id, name, sku })),
@@ -94,7 +95,7 @@ export class AdminCouponService {
       const id = await sequelize.transaction(async (transaction) => {
         await assertRestrictions(input.eligibleProductIds, input.eligibleCategoryIds, transaction);
         const couponId = await IdSequenceService.allocateNextId(DATABASE_TABLE_NAMES.coupons, transaction);
-        await Coupon.create({ id: couponId, code: normalizeCouponCode(input.code), name: input.name, discount_type: input.discountType, discount_value: input.discountValue, max_discount_paise: input.maxDiscountPaise, min_eligible_amount_paise: input.minEligibleAmountPaise, starts_at: input.startsAt, ends_at: input.endsAt, usage_limit: input.usageLimit, per_customer_limit: input.perCustomerLimit, first_order_only: input.firstOrderOnly, status: "draft" }, { transaction });
+        await Coupon.create({ id: couponId, code: normalizeCouponCode(input.code), name: input.name, discount_type: input.discountType, discount_value: input.discountValue, max_discount_paise: input.maxDiscountPaise, min_eligible_amount_paise: input.minEligibleAmountPaise, starts_at: input.startsAt, ends_at: input.endsAt, usage_limit: input.usageLimit, per_customer_limit: input.perCustomerLimit, first_order_only: input.firstOrderOnly, payment_method_eligibility: input.paymentMethodEligibility, status: "draft" }, { transaction });
         await replaceRestrictions(couponId, input.eligibleProductIds, input.eligibleCategoryIds, transaction);
         return couponId;
       });
@@ -113,11 +114,11 @@ export class AdminCouponService {
           CouponProduct.findAll({ where: { coupon_id: id }, transaction }), CouponCategory.findAll({ where: { coupon_id: id }, transaction }), CouponRedemption.count({ where: { coupon_id: id }, transaction })
         ]);
         if (historyCount > 0) {
-          const changed = normalizeCouponCode(input.code) !== coupon.code || input.discountType !== coupon.discount_type || input.discountValue !== coupon.discount_value || input.maxDiscountPaise !== coupon.max_discount_paise || input.minEligibleAmountPaise !== coupon.min_eligible_amount_paise || !sameDate(input.startsAt, coupon.starts_at) || !sameDate(input.endsAt, coupon.ends_at) || input.usageLimit !== coupon.usage_limit || input.perCustomerLimit !== coupon.per_customer_limit || input.firstOrderOnly !== coupon.first_order_only || !sameIds(input.eligibleProductIds, productLinks.map((x) => x.product_id)) || !sameIds(input.eligibleCategoryIds, categoryLinks.map((x) => x.category_id));
+          const changed = normalizeCouponCode(input.code) !== coupon.code || input.discountType !== coupon.discount_type || input.discountValue !== coupon.discount_value || input.maxDiscountPaise !== coupon.max_discount_paise || input.minEligibleAmountPaise !== coupon.min_eligible_amount_paise || !sameDate(input.startsAt, coupon.starts_at) || !sameDate(input.endsAt, coupon.ends_at) || input.usageLimit !== coupon.usage_limit || input.perCustomerLimit !== coupon.per_customer_limit || input.firstOrderOnly !== coupon.first_order_only || input.paymentMethodEligibility !== (coupon.payment_method_eligibility ?? "both") || !sameIds(input.eligibleProductIds, productLinks.map((x) => x.product_id)) || !sameIds(input.eligibleCategoryIds, categoryLinks.map((x) => x.category_id));
           if (changed) throw new CouponError("COUPON_TERMS_IMMUTABLE", "Coupon terms cannot be changed after the coupon has redemption history.", 409);
         }
         if (historyCount === 0) await assertRestrictions(input.eligibleProductIds, input.eligibleCategoryIds, transaction);
-        await coupon.update({ code: normalizeCouponCode(input.code), name: input.name, discount_type: input.discountType, discount_value: input.discountValue, max_discount_paise: input.maxDiscountPaise, min_eligible_amount_paise: input.minEligibleAmountPaise, starts_at: input.startsAt, ends_at: input.endsAt, usage_limit: input.usageLimit, per_customer_limit: input.perCustomerLimit, first_order_only: input.firstOrderOnly }, { transaction });
+        await coupon.update({ code: normalizeCouponCode(input.code), name: input.name, discount_type: input.discountType, discount_value: input.discountValue, max_discount_paise: input.maxDiscountPaise, min_eligible_amount_paise: input.minEligibleAmountPaise, starts_at: input.startsAt, ends_at: input.endsAt, usage_limit: input.usageLimit, per_customer_limit: input.perCustomerLimit, first_order_only: input.firstOrderOnly, payment_method_eligibility: input.paymentMethodEligibility }, { transaction });
         if (historyCount === 0) await replaceRestrictions(id, input.eligibleProductIds, input.eligibleCategoryIds, transaction);
       });
       return this.get(id);

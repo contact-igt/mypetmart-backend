@@ -1,6 +1,6 @@
 import { DataTypes, Model, type CreationOptional, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
-import { COUPON_DISCOUNT_TYPE_VALUES, COUPON_STATUS_VALUES, DATABASE_TABLE_NAMES, type CouponDiscountType, type CouponStatus } from "../../../constants/database.constants.js";
+import { COUPON_DISCOUNT_TYPE_VALUES, COUPON_PAYMENT_METHOD_ELIGIBILITY_VALUES, COUPON_STATUS_VALUES, DATABASE_TABLE_NAMES, type CouponDiscountType, type CouponPaymentMethodEligibility, type CouponStatus } from "../../../constants/database.constants.js";
 import { isModelInitialized, numericPrimaryKeyAttribute, timestampModelOptions } from "../table-helpers.js";
 import type { CouponCategory } from "../CouponCategoryTable/index.js";
 import type { CouponProduct } from "../CouponProductTable/index.js";
@@ -24,6 +24,10 @@ export class Coupon extends Model<InferAttributes<Coupon>, InferCreationAttribut
   declare usage_limit: number | null;
   declare per_customer_limit: number | null;
   declare first_order_only: CreationOptional<boolean>;
+  // Determines which payment method(s) this coupon is valid for.
+  // Defaults to "both" for backward compatibility — existing coupons work
+  // with both PayU and COD until explicitly restricted.
+  declare payment_method_eligibility: CreationOptional<CouponPaymentMethodEligibility>;
   declare status: CreationOptional<CouponStatus>;
   declare created_at: CreationOptional<Date>;
   declare updated_at: CreationOptional<Date>;
@@ -52,6 +56,7 @@ export function initializeCouponTable(sequelize: Sequelize): typeof Coupon {
       usage_limit: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true, validate: { min: 1 } },
       per_customer_limit: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true, validate: { min: 1 } },
       first_order_only: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      payment_method_eligibility: { type: DataTypes.ENUM(...COUPON_PAYMENT_METHOD_ELIGIBILITY_VALUES), allowNull: false, defaultValue: "both" },
       status: { type: DataTypes.ENUM(...COUPON_STATUS_VALUES), allowNull: false, defaultValue: "draft" },
       created_at: DataTypes.DATE,
       updated_at: DataTypes.DATE
