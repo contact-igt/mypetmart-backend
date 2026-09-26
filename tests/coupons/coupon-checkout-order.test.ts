@@ -622,6 +622,26 @@ describe("Coupon Module 2 — Cart, Checkout, Order Integration", () => {
       await cleanupCustomers();
     }, 20000);
 
+    it("an authenticated customer's next cart after an ordered cart starts with no coupon; the order keeps its snapshot", async () => {
+      const coupon = await createCoupon();
+      const first = await createSimpleProduct({ price: "500.00" });
+      const next = await createSimpleProduct({ price: "300.00" });
+      await request(app).post(`${CART_URL}/items`).set("Authorization", `Bearer ${customerToken}`).send({ productId: first.id, quantity: 1 });
+      const applied = await request(app).post(`${CART_URL}/coupon`).set("Authorization", `Bearer ${customerToken}`).send({ code: coupon.code });
+      expect(applied.body.data.coupon?.code).toBe(coupon.code);
+      const address = await request(app).post(ADDRESS_URL).set("Authorization", `Bearer ${customerToken}`).send(validAddressPayload());
+      const order = await request(app).post(ORDERS_URL).set("Authorization", `Bearer ${customerToken}`).send({ savedAddressId: address.body.data.id });
+      expect(order.status).toBe(201);
+      // Payment finalization flips the order's cart to "ordered".
+      await Cart.update({ status: "ordered" }, { where: { id: applied.body.data.id } });
+
+      const nextCart = await request(app).post(`${CART_URL}/items`).set("Authorization", `Bearer ${customerToken}`).send({ productId: next.id, quantity: 1 });
+      expect(nextCart.status).toBe(201);
+      expect(nextCart.body.data.coupon).toBeNull();
+      expect((await request(app).get(CART_URL).set("Authorization", `Bearer ${customerToken}`)).body.data.coupon).toBeNull();
+      expect((await Order.findByPk(order.body.data.id))!.coupon_code_snapshot).toBe(coupon.code);
+    });
+
     // A returning guest reuses the same Cart row (keyed by the guest cookie)
     // once its previous order finalized it to "ordered". The new shopping
     // session must start without the previous order's coupon.

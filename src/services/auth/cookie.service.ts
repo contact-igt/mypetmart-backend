@@ -22,10 +22,18 @@ export const CookieService = {
     const path = sessionType === "admin" ? "/api/v1/admin/auth" : "/api/v1/auth";
     const maxAge = parseDurationToMs(authConfig.refreshTokenExpiresIn);
 
+    // Production cookies are cross-site (API and storefront/admin on different
+    // sites), so they are Partitioned (CHIPS) to survive third-party-cookie
+    // blocking. A browser keeps any older unpartitioned copy separately; clear
+    // it so a rotated-out refresh token can never shadow the new one.
+    if (isProduction) {
+      res.clearCookie(cookieName, { httpOnly: true, secure: true, sameSite: "none", path });
+    }
     res.cookie(cookieName, token, {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? "none" : "lax",
+      partitioned: isProduction,
       path,
       maxAge
     });
@@ -40,6 +48,7 @@ export const CookieService = {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? "none" : "lax",
+      partitioned: isProduction,
       path
     });
   },
@@ -54,6 +63,7 @@ export const CookieService = {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? "none" : "lax",
+      partitioned: isProduction,
       path,
       maxAge
     });
@@ -68,6 +78,7 @@ export const CookieService = {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? "none" : "lax",
+      partitioned: isProduction,
       path
     });
   },
@@ -82,6 +93,7 @@ export const CookieService = {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? "none" : "lax",
+      partitioned: isProduction,
       path,
       maxAge
     });
@@ -96,6 +108,7 @@ export const CookieService = {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? "none" : "lax",
+      partitioned: isProduction,
       path
     });
   }
