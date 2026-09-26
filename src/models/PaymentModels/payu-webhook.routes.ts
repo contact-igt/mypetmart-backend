@@ -13,5 +13,5 @@ export const payuWebhookRouter = Router();
 // separate top-level namespace from /storefront/payments, since this route
 // is never called by the storefront browser.
 payuWebhookRouter.post("/webhook", webhookRateLimiter, (req, res, next) => {
-  void handlePayuWebhook(req, res, next);
+  handlePayuWebhook(req, res, next).catch(next);
 });

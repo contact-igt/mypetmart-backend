@@ -9,5 +9,5 @@ export const breezeWebhookRouter = Router();
 // controller using Breeze webhook configuration, not customer/admin auth.
 // Mounted at /api/v1/payments/breeze.
 breezeWebhookRouter.post("/webhook", webhookRateLimiter, (req, res, next) => {
-  void handleBreezeWebhook(req, res, next);
+  handleBreezeWebhook(req, res, next).catch(next);
 });

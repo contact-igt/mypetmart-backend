@@ -11,5 +11,5 @@ export const payuRefundWebhookRouter = Router();
 // URL payment.config.ts's refundWebhookUrl hands to PayU as var5 on
 // cancel_refund_transaction.
 payuRefundWebhookRouter.post("/refund-webhook", webhookRateLimiter, (req, res, next) => {
-  void handlePayuRefundWebhook(req, res, next);
+  handlePayuRefundWebhook(req, res, next).catch(next);
 });

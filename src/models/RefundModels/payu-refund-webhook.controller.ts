@@ -24,7 +24,8 @@ type RawPayuRefundWebhookBody = {
  * non-2xx.
  */
 export async function handlePayuRefundWebhook(req: Request, res: Response, _next: NextFunction): Promise<void> {
-  const body = req.body as RawPayuRefundWebhookBody;
+  // req.body is undefined under Express 5 when no parser matched.
+  const body = (req.body ?? {}) as RawPayuRefundWebhookBody;
 
   try {
     const outcome = await RefundService.handleRefundWebhook(body.token);

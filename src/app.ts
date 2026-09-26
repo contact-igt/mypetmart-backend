@@ -15,6 +15,12 @@ import { httpLogger } from "./utils/logger.js";
 export const app = express();
 
 app.disable("x-powered-by");
+// Production runs behind exactly one reverse proxy (Railway's edge), which sets
+// X-Forwarded-For. Trusting that single hop gives req.ip the real client
+// address, so rate limits are per visitor rather than shared by everyone.
+if (serverConfig.environment === "production") {
+  app.set("trust proxy", 1);
+}
 
 app.use(helmet());
 app.use(compression());
