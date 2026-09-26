@@ -356,6 +356,57 @@ describe("Coupon Module 3 — Payment and Redemption Lifecycle", () => {
   });
 
   // -------------------------------------------------------------------
+  // Payment-method eligibility enforced at payment time
+  // -------------------------------------------------------------------
+  // The Order does not record which payment method it was priced for, and
+  // createOrder only checks eligibility when the client sends paymentMethod
+  // (legacy clients omit it; a guest's pending Order is also reused as-is).
+  // The payment step is therefore the authoritative gate: a restricted
+  // coupon's discount must never be paid through the other method.
+  describe("Payment-method eligibility is enforced when paying", () => {
+    it("a PayU-only coupon Order cannot be confirmed as COD; it stays pending and payable via PayU", async () => {
+      vi.spyOn(IThinkClient, "checkServiceability").mockResolvedValue(["test-courier"]);
+      const coupon = await createCoupon({ payment_method_eligibility: "payu" });
+      const { orderId, total } = await placeOrderWithCoupon(coupon);
+      const productId = (await OrderItem.findOne({ where: { order_id: orderId } }))!.product_id!;
+      const stockBefore = (await Product.findByPk(productId))!.stock;
+
+      const cod = await request(app).post("/api/v1/storefront/payments/cod").set("Authorization", `Bearer ${customerToken}`).send({ orderId });
+      expect(cod.status).toBe(422);
+      expect(cod.body.error.code).toBe("COUPON_PAYMENT_METHOD_MISMATCH");
+      expect(await Payment.count({ where: { order_id: orderId } })).toBe(0);
+      expect((await CouponRedemption.findOne({ where: { order_id: orderId } }))!.status).toBe("reserved");
+      const order = await Order.findByPk(orderId);
+      expect(order!.status).toBe("pending");
+      expect(order!.total).toBe(total);
+      expect((await Product.findByPk(productId))!.stock).toBe(stockBefore);
+
+      const payu = await request(app).post(INITIATE_URL).set("Authorization", `Bearer ${customerToken}`).send({ orderId });
+      expect(payu.status).toBe(200);
+      expect(payu.body.data.fields.amount).toBe(total);
+    });
+
+    it("a COD-only coupon Order cannot start a PayU or Breeze payment; COD confirmation still works", async () => {
+      vi.spyOn(IThinkClient, "checkServiceability").mockResolvedValue(["test-courier"]);
+      const coupon = await createCoupon({ payment_method_eligibility: "cod" });
+      const { orderId } = await placeOrderWithCoupon(coupon);
+
+      const payu = await request(app).post(INITIATE_URL).set("Authorization", `Bearer ${customerToken}`).send({ orderId });
+      expect(payu.status).toBe(422);
+      expect(payu.body.error.code).toBe("COUPON_PAYMENT_METHOD_MISMATCH");
+      const breeze = await request(app).post("/api/v1/storefront/payments/breeze/initiate").set("Authorization", `Bearer ${customerToken}`).send({ orderId });
+      expect(breeze.status).toBe(422);
+      expect(breeze.body.error.code).toBe("COUPON_PAYMENT_METHOD_MISMATCH");
+      expect(await Payment.count({ where: { order_id: orderId } })).toBe(0);
+      expect((await CouponRedemption.findOne({ where: { order_id: orderId } }))!.status).toBe("reserved");
+
+      const cod = await request(app).post("/api/v1/storefront/payments/cod").set("Authorization", `Bearer ${customerToken}`).send({ orderId });
+      expect(cod.status).toBe(200);
+      expect((await CouponRedemption.findOne({ where: { order_id: orderId } }))!.status).toBe("consumed");
+    });
+  });
+
+  // -------------------------------------------------------------------
   // Failed payment + retry
   // -------------------------------------------------------------------
   describe("Failed payment followed by retry", () => {

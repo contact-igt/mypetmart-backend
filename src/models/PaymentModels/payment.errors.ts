@@ -74,6 +74,16 @@ export class PaymentOrderNotPayableError extends PaymentError {
   }
 }
 
+// The Order's coupon discount is restricted to one payment method and the
+// caller is trying to pay through the other one.
+export class CouponPaymentMethodMismatchError extends PaymentError {
+  public constructor(orderId: number, eligiblePaymentMethod: "payu" | "cod") {
+    const label = eligiblePaymentMethod === "payu" ? "Prepaid (Pay Online)" : "Cash on Delivery";
+    super("COUPON_PAYMENT_METHOD_MISMATCH", `This order's coupon is valid only for ${label}.`, 422, { orderId, eligiblePaymentMethod });
+    this.name = "CouponPaymentMethodMismatchError";
+  }
+}
+
 export class PaymentProviderNotConfiguredError extends PaymentError {
   public constructor() {
     super("PAYMENT_PROVIDER_NOT_CONFIGURED", "The payment provider is not configured.", 503);

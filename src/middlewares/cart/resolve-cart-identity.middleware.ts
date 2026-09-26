@@ -20,10 +20,14 @@ function mintGuestCookie(res: Response): string {
   const rawToken = crypto.randomBytes(32).toString("hex");
   const isProduction = environmentConfig.NODE_ENV === "production";
 
+  // In production the API is on a different site from the storefront, so this
+  // is a third-party cookie. Partitioned (CHIPS) keeps it working in browsers
+  // that block third-party cookies (Chrome Incognito, Safari, Brave).
   res.cookie(cartConfig.guestCookieName, rawToken, {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? "none" : "lax",
+    partitioned: isProduction,
     path: CART_GUEST_COOKIE_PATH,
     maxAge: CART_GUEST_COOKIE_MAX_AGE_MS
   });
@@ -50,6 +54,7 @@ export function clearGuestCartCookie(res: Response): void {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? "none" : "lax",
+    partitioned: isProduction,
     path: CART_GUEST_COOKIE_PATH
   });
 }

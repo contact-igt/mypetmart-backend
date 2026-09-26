@@ -18,7 +18,9 @@ import { isValidOrderStatusTransition } from "../OrderModels/order.constants.js"
 import { OrderNotFoundError } from "../OrderModels/order.errors.js";
 import { CheckoutCodUnavailableError } from "../CheckoutModels/checkout.errors.js";
 import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
+import { Coupon } from "../../database/tables/index.js";
 import {
+  CouponPaymentMethodMismatchError,
   OrderAlreadyPaidError,
   PaymentAttemptAlreadyActiveError,
   PaymentCustomerOrderIdRequiredError,
@@ -386,6 +388,26 @@ export const PaymentService = {
   },
 
   /**
+   * The authoritative payment-method gate for a coupon discount. The Order
+   * does not record which method it was priced for, and createOrder only
+   * checks eligibility when the client supplies paymentMethod (legacy clients
+   * omit it; a guest's pending Order is reused as-is when they place it
+   * again), so every payment entry point re-checks here. Reading the Coupon's
+   * current eligibility is safe: any Order with a coupon holds a redemption,
+   * and admin-coupon.service freezes payment_method_eligibility once a coupon
+   * has redemption history. "payu" means prepaid online, so Breeze counts as
+   * "payu" too.
+   */
+  async assertCouponAllowsPaymentMethod(order: Order, method: "payu" | "cod"): Promise<void> {
+    if (order.coupon_id === null) return;
+    const coupon = await Coupon.findByPk(order.coupon_id, { attributes: ["id", "payment_method_eligibility"] });
+    const eligibility = coupon?.payment_method_eligibility ?? "both";
+    if (eligibility !== "both" && eligibility !== method) {
+      throw new CouponPaymentMethodMismatchError(order.id, eligibility);
+    }
+  },
+
+  /**
    * Builds the safe PayU Hosted Checkout browser-handoff payload for an
    * already-resolved Payment Attempt. Amount/currency/customer fields all
    * originate from the persisted Order/Payment snapshot — never from the
@@ -460,6 +482,7 @@ export const PaymentService = {
     const order = await this.resolveAuthorizedOrder(caller, input);
     const itemCount = await OrderItem.count({ where: { order_id: order.id } });
     this.assertOrderPayable(order, itemCount);
+    await this.assertCouponAllowsPaymentMethod(order, "payu");
 
     // Reconcile any existing pending attempt with PayU BEFORE deciding
     // whether to reuse its txnid — otherwise a payment that actually
@@ -514,6 +537,7 @@ export const PaymentService = {
     const order = await this.resolveAuthorizedOrder(caller, input);
     const itemCount = await OrderItem.count({ where: { order_id: order.id } });
     this.assertOrderPayable(order, itemCount);
+    await this.assertCouponAllowsPaymentMethod(order, "payu");
 
     // Block switching online providers mid-Order. A still-pending PayU attempt
     // means PayU checkout was already started for this Order — reconcile it
@@ -630,6 +654,7 @@ export const PaymentService = {
     const order = await this.resolveAuthorizedOrder(caller, input);
     const itemCount = await OrderItem.count({ where: { order_id: order.id } });
     this.assertOrderPayable(order, itemCount);
+    await this.assertCouponAllowsPaymentMethod(order, "cod");
 
     // This is a lookup against the immutable Order shipping snapshot and is
     // intentionally outside the transaction below. A replay of an existing
