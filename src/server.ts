@@ -30,7 +30,9 @@ function closeHttpServer(): Promise<void> {
   });
 }
 
-async function shutdown(signal: NodeJS.Signals): Promise<void> {
+// exitCode 1 after a fatal error: a clean 0 tells the host (Railway restarts
+// only on failure) that the stop was intentional, which left production down.
+async function shutdown(signal: NodeJS.Signals, exitCode: 0 | 1 = 0): Promise<void> {
   if (shutdownInProgress) {
     logger.warn({ signal }, "Shutdown already in progress");
     return;
@@ -59,7 +61,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     logger.info({ signal }, "Database connection closed");
 
     clearTimeout(safetyTimeout);
-    process.exit(0);
+    process.exit(exitCode);
   } catch (error) {
     clearTimeout(safetyTimeout);
     logger.error({ err: error, signal }, "Graceful shutdown failed");
@@ -114,12 +116,12 @@ process.on("SIGTERM", (signal) => {
 
 process.on("unhandledRejection", (reason) => {
   logger.fatal({ err: reason }, "Unhandled promise rejection");
-  void shutdown("SIGTERM");
+  void shutdown("SIGTERM", 1);
 });
 
 process.on("uncaughtException", (error) => {
   logger.fatal({ err: error }, "Uncaught exception");
-  void shutdown("SIGTERM");
+  void shutdown("SIGTERM", 1);
 });
 
 void bootstrap();

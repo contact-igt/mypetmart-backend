@@ -29,7 +29,8 @@ import type { BreezeWebhookPayload } from "./breeze.types.js";
  *   3. Whether Breeze retries on non-2xx, and the retry ceiling.
  */
 export async function handleBreezeWebhook(req: Request, res: Response, _next: NextFunction): Promise<void> {
-  const body = req.body as BreezeWebhookPayload;
+  // req.body is undefined under Express 5 when no parser matched.
+  const body = (req.body ?? {}) as BreezeWebhookPayload;
 
   if (!paymentConfig.breezeWebhookSecret) {
     logger.error("breeze webhook: provider not configured (BREEZE_WEBHOOK_SECRET unset)");

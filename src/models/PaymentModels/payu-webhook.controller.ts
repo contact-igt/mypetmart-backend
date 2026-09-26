@@ -20,7 +20,10 @@ const REQUIRED_FIELDS: (keyof RawPayuWebhookBody)[] = ["status", "txnid", "amoun
  * returns a non-2xx so PayU's retry is actually useful.
  */
 export async function handlePayuWebhook(req: Request, res: Response, _next: NextFunction): Promise<void> {
-  const body = req.body as RawPayuWebhookBody;
+  // Express 5 leaves req.body undefined when no parser matched (empty body or
+  // an unexpected content type). Treat that as an empty payload so it is acked
+  // as "missing fields" instead of throwing on this public endpoint.
+  const body = (req.body ?? {}) as RawPayuWebhookBody;
 
   const missing = REQUIRED_FIELDS.filter((field) => !body[field]);
   if (missing.length > 0) {
