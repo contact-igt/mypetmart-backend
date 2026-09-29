@@ -85,6 +85,9 @@ export type CouponDiscountType = (typeof COUPON_DISCOUNT_TYPE_VALUES)[number];
 export const COUPON_PAYMENT_METHOD_ELIGIBILITY_VALUES = ["both", "payu", "cod"] as const;
 export type CouponPaymentMethodEligibility = (typeof COUPON_PAYMENT_METHOD_ELIGIBILITY_VALUES)[number];
 
+export const PRODUCT_PAYMENT_METHOD_ELIGIBILITY_VALUES = ["both", "payu", "cod"] as const;
+export type ProductPaymentMethodEligibility = (typeof PRODUCT_PAYMENT_METHOD_ELIGIBILITY_VALUES)[number];
+
 // A redemption row exists the moment an order reserves a coupon (created in
 // the same transaction as the order, in Module 2 — not yet implemented here)
 // and is never deleted afterward, so usage limits and audit history stay
