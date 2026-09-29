@@ -449,6 +449,7 @@ export function formatStorefrontListItemDTO(p: Product, rating?: ReviewSummaryJS
     stock: p.stock,
     hasVariants: p.has_variants,
     featured: p.featured,
+    paymentMethodEligibility: p.payment_method_eligibility ?? "both",
     inStock: p.stock > 0,
     category: {
       id: p.category!.id,
@@ -733,6 +734,7 @@ export class ProductService {
       stock: product.stock,
       hasVariants: product.has_variants,
       featured: product.featured,
+      paymentMethodEligibility: product.payment_method_eligibility ?? "both",
       inStock: product.stock > 0,
       tags: normalizeProductTags(product.tags),
       metaTitle: product.meta_title,
@@ -837,6 +839,7 @@ export class ProductService {
         stock: p.stock,
         hasVariants: p.has_variants,
         featured: p.featured,
+        paymentMethodEligibility: p.payment_method_eligibility ?? "both",
         displayOrder: p.display_order,
         weightGrams: p.weight_grams,
         lengthCm: p.length_cm ? formatMoney(p.length_cm) : null,
@@ -966,6 +969,7 @@ export class ProductService {
       stock: product.stock,
       hasVariants: product.has_variants,
       featured: product.featured,
+      paymentMethodEligibility: product.payment_method_eligibility ?? "both",
       displayOrder: product.display_order,
       weightGrams: product.weight_grams,
       lengthCm: product.length_cm ? formatMoney(product.length_cm) : null,
@@ -1055,6 +1059,7 @@ export class ProductService {
           stock: !hasVariants && input.stock ? input.stock : 0,
           has_variants: hasVariants,
           featured: Boolean(input.featured),
+          payment_method_eligibility: input.paymentMethodEligibility ?? "both",
           display_order: await ProductService.nextWebsitePosition(t),
           tags: input.tags || [],
           meta_title: input.metaTitle || null,
@@ -1276,6 +1281,7 @@ export class ProductService {
       if (input.compareAtPrice !== undefined) updates.compare_at_price = input.compareAtPrice;
       if (input.stock !== undefined) updates.stock = input.stock;
       if (input.featured !== undefined) updates.featured = input.featured;
+      if (input.paymentMethodEligibility !== undefined) updates.payment_method_eligibility = input.paymentMethodEligibility;
       if (input.tags !== undefined) updates.tags = input.tags;
       if (input.metaTitle !== undefined) updates.meta_title = input.metaTitle;
       if (input.metaDescription !== undefined) updates.meta_description = input.metaDescription;

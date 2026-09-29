@@ -147,10 +147,16 @@ export const RefundService = {
       // discount is prorated to just the units being returned, so refunding
       // fewer than all units of a line never over-refunds the discounted
       // portion still retained on the unreturned units.
+      // The Pay Online discount allocation (migration 084) is prorated the
+      // same way, from its own persisted snapshot — never today's setting.
       const grossPaise = parseMoneyToPaise(orderItem.unit_price) * returnRequest.quantity;
       const discountSharePaise =
         orderItem.discount_allocated_paise > 0 ? Math.floor((orderItem.discount_allocated_paise * returnRequest.quantity) / orderItem.quantity) : 0;
-      const amountPaise = grossPaise - discountSharePaise;
+      const onlineDiscountSharePaise =
+        orderItem.online_payment_discount_allocated_paise > 0
+          ? Math.floor((orderItem.online_payment_discount_allocated_paise * returnRequest.quantity) / orderItem.quantity)
+          : 0;
+      const amountPaise = grossPaise - discountSharePaise - onlineDiscountSharePaise;
       const amount = formatPaiseAsMoney(amountPaise);
       const alreadyRefundedPaise = await loadRefundedTotalPaise(payment.id);
       const remainingPaise = parseMoneyToPaise(payment.amount) - alreadyRefundedPaise;

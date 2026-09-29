@@ -19,8 +19,11 @@ import { OrderNotFoundError } from "../OrderModels/order.errors.js";
 import { CheckoutCodUnavailableError } from "../CheckoutModels/checkout.errors.js";
 import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
 import { Coupon } from "../../database/tables/index.js";
+import { methodsAllowedBy, unavailableMethodMessage } from "../ProductModels/product-payment-methods.js";
 import {
   CouponPaymentMethodMismatchError,
+  OnlinePaymentDiscountMethodMismatchError,
+  ProductPaymentMethodMismatchError,
   OrderAlreadyPaidError,
   PaymentAttemptAlreadyActiveError,
   PaymentCustomerOrderIdRequiredError,
@@ -398,6 +401,35 @@ export const PaymentService = {
    * has redemption history. "payu" means prepaid online, so Breeze counts as
    * "payu" too.
    */
+  /**
+   * Product payment-method availability, checked against each OrderItem's
+   * order-time snapshot (migration 083) — never the live Product, so an admin
+   * editing a Product later cannot change what an existing pending Order may
+   * be paid with. Covers legacy clients, reused guest pending Orders and
+   * manipulated requests alike. Runs before any Payment row, stock change or
+   * coupon consumption.
+   */
+  async assertOrderItemsAllowPaymentMethod(order: Order, method: "payu" | "cod"): Promise<void> {
+    const items = await OrderItem.findAll({ where: { order_id: order.id }, attributes: ["id", "product_payment_method_eligibility_snapshot"] });
+    const blocked = items.some((item) => !methodsAllowedBy(item.product_payment_method_eligibility_snapshot ?? "both").includes(method));
+    if (blocked) {
+      throw new ProductPaymentMethodMismatchError(order.id, method, unavailableMethodMessage(method));
+    }
+  },
+
+  /**
+   * Payment-time gates: product availability, then coupon eligibility, then
+   * the Pay Online discount snapshot (an Order priced with it is prepaid-only;
+   * the discount is never recalculated here — Payment.amount stays Order.total).
+   */
+  async assertOrderAllowsPaymentMethod(order: Order, method: "payu" | "cod"): Promise<void> {
+    await this.assertOrderItemsAllowPaymentMethod(order, method);
+    await this.assertCouponAllowsPaymentMethod(order, method);
+    if (method === "cod" && order.online_payment_discount_amount_paise > 0) {
+      throw new OnlinePaymentDiscountMethodMismatchError(order.id);
+    }
+  },
+
   async assertCouponAllowsPaymentMethod(order: Order, method: "payu" | "cod"): Promise<void> {
     if (order.coupon_id === null) return;
     const coupon = await Coupon.findByPk(order.coupon_id, { attributes: ["id", "payment_method_eligibility"] });
@@ -482,7 +514,7 @@ export const PaymentService = {
     const order = await this.resolveAuthorizedOrder(caller, input);
     const itemCount = await OrderItem.count({ where: { order_id: order.id } });
     this.assertOrderPayable(order, itemCount);
-    await this.assertCouponAllowsPaymentMethod(order, "payu");
+    await this.assertOrderAllowsPaymentMethod(order, "payu");
 
     // Reconcile any existing pending attempt with PayU BEFORE deciding
     // whether to reuse its txnid — otherwise a payment that actually
@@ -537,7 +569,7 @@ export const PaymentService = {
     const order = await this.resolveAuthorizedOrder(caller, input);
     const itemCount = await OrderItem.count({ where: { order_id: order.id } });
     this.assertOrderPayable(order, itemCount);
-    await this.assertCouponAllowsPaymentMethod(order, "payu");
+    await this.assertOrderAllowsPaymentMethod(order, "payu");
 
     // Block switching online providers mid-Order. A still-pending PayU attempt
     // means PayU checkout was already started for this Order — reconcile it
@@ -654,7 +686,7 @@ export const PaymentService = {
     const order = await this.resolveAuthorizedOrder(caller, input);
     const itemCount = await OrderItem.count({ where: { order_id: order.id } });
     this.assertOrderPayable(order, itemCount);
-    await this.assertCouponAllowsPaymentMethod(order, "cod");
+    await this.assertOrderAllowsPaymentMethod(order, "cod");
 
     // This is a lookup against the immutable Order shipping snapshot and is
     // intentionally outside the transaction below. A replay of an existing

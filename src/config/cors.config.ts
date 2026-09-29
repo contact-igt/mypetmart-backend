@@ -11,7 +11,7 @@ const parsedAllowedOrigins = [
 
 export const corsConfig = Object.freeze({
   allowedOrigins: Object.freeze(parsedAllowedOrigins),
-  allowedMethods: Object.freeze(["GET", "POST", "PATCH", "DELETE", "OPTIONS"]),
+  allowedMethods: Object.freeze(["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]),
   allowedHeaders: Object.freeze(["Content-Type", "Authorization", "X-Request-Id"]),
   credentials: true
 });

@@ -53,6 +53,12 @@ export class Order extends Model<InferAttributes<Order>, InferCreationAttributes
   declare coupon_discount_value_snapshot: number | null;
   declare coupon_eligible_merchandise_paise: number | null;
   declare coupon_discount_amount_paise: CreationOptional<number>;
+  // Global Pay Online Discount snapshot (migration 084) — written once at
+  // Order creation, never re-derived from the live setting. Type/value are
+  // NULL and amount 0 when no online discount applied (COD, disabled, legacy).
+  declare online_payment_discount_type_snapshot: CreationOptional<CouponDiscountType | null>;
+  declare online_payment_discount_value_snapshot: CreationOptional<number | null>;
+  declare online_payment_discount_amount_paise: CreationOptional<number>;
   declare currency: CreationOptional<string>;
   declare ship_recipient_name: string;
   declare ship_phone: string;
@@ -116,6 +122,9 @@ export function initializeOrderTable(sequelize: Sequelize): typeof Order {
       coupon_discount_value_snapshot: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
       coupon_eligible_merchandise_paise: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
       coupon_discount_amount_paise: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },
+      online_payment_discount_type_snapshot: { type: DataTypes.ENUM(...COUPON_DISCOUNT_TYPE_VALUES), allowNull: true },
+      online_payment_discount_value_snapshot: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+      online_payment_discount_amount_paise: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },
       currency: { type: DataTypes.STRING(3), allowNull: false, defaultValue: DEFAULT_CURRENCY_CODE, validate: { len: [3, 3] } },
       ship_recipient_name: { type: DataTypes.STRING(160), allowNull: false, validate: { notEmpty: true, len: [1, 160] } },
       ship_phone: { type: DataTypes.STRING(32), allowNull: false, validate: { notEmpty: true, len: [1, 32] } },

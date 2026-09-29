@@ -1,6 +1,6 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
-import { DATABASE_TABLE_NAMES, MONEY_PRECISION, MONEY_SCALE } from "../../../constants/database.constants.js";
+import { DATABASE_TABLE_NAMES, MONEY_PRECISION, MONEY_SCALE, PRODUCT_PAYMENT_METHOD_ELIGIBILITY_VALUES, type ProductPaymentMethodEligibility } from "../../../constants/database.constants.js";
 import { isModelInitialized, isNonNegativeDecimal, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { Order } from "../OrderTable/index.js";
 import type { Product } from "../ProductTable/index.js";
@@ -25,6 +25,12 @@ export class OrderItem extends Model<InferAttributes<OrderItem>, InferCreationAt
   // see CouponPricingService.allocateDiscountAcrossLines. Always 0 for an
   // Order with no coupon, or for a coupon-ineligible line.
   declare discount_allocated_paise: CreationOptional<number>;
+  // This line's share of the parent Order's online_payment_discount_amount_paise
+  // (Global Pay Online Discount, migration 084) — separate from the coupon
+  // allocation above. Always 0 for a COD Order or when no online discount applied.
+  declare online_payment_discount_allocated_paise: CreationOptional<number>;
+  // The Product's payment-method eligibility frozen at Order creation (migration 083).
+  declare product_payment_method_eligibility_snapshot: CreationOptional<ProductPaymentMethodEligibility>;
   declare created_at: CreationOptional<Date>;
   declare updated_at: CreationOptional<Date>;
 
@@ -63,6 +69,8 @@ export function initializeOrderItemTable(sequelize: Sequelize): typeof OrderItem
       unit_price: { type: DataTypes.DECIMAL(MONEY_PRECISION, MONEY_SCALE), allowNull: false, validate: { isNonNegative: nonNegativeMoneyValidator("Unit price") } },
       line_total: { type: DataTypes.DECIMAL(MONEY_PRECISION, MONEY_SCALE), allowNull: false, validate: { isNonNegative: nonNegativeMoneyValidator("Line total") } },
       discount_allocated_paise: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },
+      online_payment_discount_allocated_paise: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },
+      product_payment_method_eligibility_snapshot: { type: DataTypes.ENUM(...PRODUCT_PAYMENT_METHOD_ELIGIBILITY_VALUES), allowNull: false, defaultValue: "both" },
       created_at: DataTypes.DATE,
       updated_at: DataTypes.DATE
     },

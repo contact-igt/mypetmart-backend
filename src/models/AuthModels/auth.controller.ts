@@ -310,8 +310,12 @@ export const AuthController = {
     try {
       const cookieName = authConfig.customerRefreshCookieName;
       const oldRefreshToken = req.cookies[cookieName];
+      // No cookie = guest visitor. The storefront probes this endpoint on every
+      // page load, so answer "no session" without a 401. A present-but-invalid
+      // cookie still fails below with 401.
       if (!oldRefreshToken) {
-        throw new SessionInvalidError();
+        sendSuccess(res, 200, { accessToken: null });
+        return;
       }
 
       const userAgent = req.headers["user-agent"] || null;

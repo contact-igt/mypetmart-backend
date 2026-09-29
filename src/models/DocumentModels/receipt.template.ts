@@ -57,6 +57,11 @@ function couponRow(receipt: CustomerReceiptJSON): string {
   return `<div class="totals-row"><span>Coupon (${escapeHtml(receipt.totals.couponCode)})</span><span>-&#8377;${escapeHtml(receipt.totals.discountAmount)}</span></div>`;
 }
 
+function onlinePaymentDiscountRow(receipt: CustomerReceiptJSON): string {
+  if (receipt.totals.onlinePaymentDiscountAmount === "0.00") return "";
+  return `<div class="totals-row"><span>Pay Online Discount</span><span>-&#8377;${escapeHtml(receipt.totals.onlinePaymentDiscountAmount)}</span></div>`;
+}
+
 /**
  * Pure HTML-building function — no I/O, no DB access. Inline CSS only
  * (no external stylesheet) so pdf-renderer.ts's headless render never
@@ -171,6 +176,7 @@ export function buildReceiptHtml(receipt: CustomerReceiptJSON, storeProfile: Sto
         <div class="totals">
           <div class="totals-row"><span>Original merchandise subtotal</span><span>&#8377;${escapeHtml(receipt.totals.subtotal)}</span></div>
           ${couponRow(receipt)}
+          ${onlinePaymentDiscountRow(receipt)}
           <div class="totals-row"><span>Shipping</span><span>&#8377;${escapeHtml(receipt.totals.shippingFee)}</span></div>
           ${refundRow(receipt)}
           <div class="totals-row grand"><span>Final paid total</span><span>&#8377;${escapeHtml(receipt.totals.total)}</span></div>

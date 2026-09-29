@@ -81,6 +81,9 @@ export const AdminAuthController = {
       CookieService.setRefreshCookie(res, newRefreshToken, "admin");
       sendSuccess(res, 200, { accessToken });
     } catch (error) {
+      // Keep browser state recoverable: a revoked, rotated-out, or otherwise
+      // invalid refresh cookie must not remain after a failed restore.
+      CookieService.clearRefreshCookie(res, "admin");
       next(error);
     }
   },

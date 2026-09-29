@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PET_TYPE_VALUES, PRODUCT_CONTENT_LAYOUT_VALUES, PRODUCT_MEDIA_ROLE_VALUES, PRODUCT_STATUS_VALUES } from "../../constants/database.constants.js";
+import { PET_TYPE_VALUES, PRODUCT_CONTENT_LAYOUT_VALUES, PRODUCT_MEDIA_ROLE_VALUES, PRODUCT_PAYMENT_METHOD_ELIGIBILITY_VALUES, PRODUCT_STATUS_VALUES } from "../../constants/database.constants.js";
 import { formatMoney, isCompareAtPriceValid } from "../../utils/product-money.js";
 import { SKU_REGEX } from "./catalog-sku.service.js";
 import {
@@ -359,6 +359,7 @@ export const createProductSchema = z
     stock: z.number().int().min(0, "Stock cannot be negative").optional().default(0),
     hasVariants: z.boolean().optional().default(false),
     featured: z.boolean().optional().default(false),
+    paymentMethodEligibility: z.enum(PRODUCT_PAYMENT_METHOD_ELIGIBILITY_VALUES).optional().default("both"),
     displayOrder: z.never({ message: "New products are added to the end of website order" }).optional(),
     tags: z.array(z.string().trim().min(1).max(50)).max(20).optional().default([]),
     metaTitle: z.string().trim().max(190).nullable().optional(),
@@ -409,6 +410,7 @@ export const updateProductSchema = z.object({
   stock: z.number().int().min(0, "Stock cannot be negative").optional(),
   hasVariants: z.never({ message: "hasVariants is immutable after product creation" }).optional(),
   featured: z.boolean().optional(),
+  paymentMethodEligibility: z.enum(PRODUCT_PAYMENT_METHOD_ELIGIBILITY_VALUES).optional(),
   displayOrder: z.never({ message: "Use the website order move controls to reorder products" }).optional(),
   tags: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
   metaTitle: z.string().trim().max(190).nullable().optional(),

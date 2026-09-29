@@ -82,11 +82,13 @@ export type CouponDiscountType = (typeof COUPON_DISCOUNT_TYPE_VALUES)[number];
 // "cod"   — eligible for Cash on Delivery only.
 // Added as migration 082 (additive ALTER TABLE only; existing rows default
 // to "both" via the column DEFAULT, preserving all prior coupon behavior).
-export const COUPON_PAYMENT_METHOD_ELIGIBILITY_VALUES = ["both", "payu", "cod"] as const;
-export type CouponPaymentMethodEligibility = (typeof COUPON_PAYMENT_METHOD_ELIGIBILITY_VALUES)[number];
-
+// Which payment methods a Product may be bought with. "payu" means prepaid
+// online (Breeze counts as prepaid too); "cod" means Cash on Delivery only.
 export const PRODUCT_PAYMENT_METHOD_ELIGIBILITY_VALUES = ["both", "payu", "cod"] as const;
 export type ProductPaymentMethodEligibility = (typeof PRODUCT_PAYMENT_METHOD_ELIGIBILITY_VALUES)[number];
+
+export const COUPON_PAYMENT_METHOD_ELIGIBILITY_VALUES = ["both", "payu", "cod"] as const;
+export type CouponPaymentMethodEligibility = (typeof COUPON_PAYMENT_METHOD_ELIGIBILITY_VALUES)[number];
 
 // A redemption row exists the moment an order reserves a coupon (created in
 // the same transaction as the order, in Module 2 — not yet implemented here)

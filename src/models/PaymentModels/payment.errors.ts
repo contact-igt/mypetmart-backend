@@ -84,6 +84,25 @@ export class CouponPaymentMethodMismatchError extends PaymentError {
   }
 }
 
+// The Order was priced with the Global Pay Online Discount, so its persisted
+// total is only valid for online payment. COD would collect a discounted
+// amount the store only grants for prepaid orders.
+export class OnlinePaymentDiscountMethodMismatchError extends PaymentError {
+  public constructor(orderId: number) {
+    super("ONLINE_PAYMENT_DISCOUNT_METHOD_MISMATCH", "This order includes a Pay Online discount and can only be paid online.", 422, { orderId });
+    this.name = "OnlinePaymentDiscountMethodMismatchError";
+  }
+}
+
+// One or more of the Order's items (by their order-time eligibility snapshot)
+// cannot be paid with the requested method.
+export class ProductPaymentMethodMismatchError extends PaymentError {
+  public constructor(orderId: number, requested: "payu" | "cod", message: string) {
+    super("PRODUCT_PAYMENT_METHOD_MISMATCH", message, 422, { orderId, requested });
+    this.name = "ProductPaymentMethodMismatchError";
+  }
+}
+
 export class PaymentProviderNotConfiguredError extends PaymentError {
   public constructor() {
     super("PAYMENT_PROVIDER_NOT_CONFIGURED", "The payment provider is not configured.", 503);

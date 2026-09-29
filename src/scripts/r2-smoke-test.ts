@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { environmentConfig } from "../config/environment.config.js";
 import { R2ObjectStorageProvider } from "../services/object-storage/r2-object-storage.provider.js";
+import { primaryOrigin } from "../utils/origins.js";
 
 const ONE_PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=",
@@ -10,13 +11,16 @@ const ONE_PIXEL_PNG = Buffer.from(
 
 async function main(): Promise<void> {
   const provider = new R2ObjectStorageProvider();
+  // ADMIN_ORIGIN may be a comma-separated CORS list; a browser Origin header is
+  // always exactly one origin, so probe with the primary (first) one.
+  const adminOrigin = primaryOrigin(environmentConfig.ADMIN_ORIGIN);
   const key = `diagnostics/r2-smoke/${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID()}.png`;
   try {
     const { uploadUrl } = await provider.createPresignedPut({ key, contentType: "image/png", expiresInSeconds: 60 });
     const preflightResponse = await fetch(uploadUrl, {
       method: "OPTIONS",
       headers: {
-        Origin: environmentConfig.ADMIN_ORIGIN,
+        Origin: adminOrigin,
         "Access-Control-Request-Method": "PUT",
         "Access-Control-Request-Headers": "content-type"
       }
@@ -24,7 +28,7 @@ async function main(): Promise<void> {
     const allowedOrigin = preflightResponse.headers.get("access-control-allow-origin");
     const allowedMethods = preflightResponse.headers.get("access-control-allow-methods")?.toUpperCase() ?? "";
     const allowedHeaders = preflightResponse.headers.get("access-control-allow-headers")?.toLowerCase() ?? "";
-    if (!preflightResponse.ok || (allowedOrigin !== environmentConfig.ADMIN_ORIGIN && allowedOrigin !== "*")) {
+    if (!preflightResponse.ok || (allowedOrigin !== adminOrigin &&allowedOrigin !== "*")) {
       throw new Error("R2 bucket CORS does not allow the configured Admin origin.");
     }
     if (!allowedMethods.split(",").map((method) => method.trim()).includes("PUT")) {
