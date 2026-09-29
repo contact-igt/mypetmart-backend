@@ -22,10 +22,14 @@ import * as templates from "../email/commerce-email.templates.js";
 import * as adminTemplates from "../email/admin-email.templates.js";
 
 // Operator-safe buyer label for an admin email — the customer's own name, or
-// "Guest" for a guest Order. Never derived from, and never exposing, an email
-// or any auth material.
+// for a guest Order the shipping recipient name from the Order's own snapshot,
+// marked "(Guest)" ("Guest" alone if that is somehow blank). Never derived
+// from, and never exposing, an email or any auth material.
 async function buyerLabel(order: OrderModel): Promise<string> {
-  if (order.user_id === null) return "Guest";
+  if (order.user_id === null) {
+    const recipient = order.ship_recipient_name?.trim();
+    return recipient ? `${recipient} (Guest)` : "Guest";
+  }
   const user = await User.findByPk(order.user_id);
   return user?.name?.trim() || "Customer";
 }

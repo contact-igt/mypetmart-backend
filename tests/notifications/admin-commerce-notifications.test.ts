@@ -284,6 +284,19 @@ describe("Admin commerce email notifications", () => {
     expect(await NotificationLog.count({ where: { event_type: "ADMIN_PAYMENT_RECEIVED", entity_id: order.id } })).toBe(0);
   });
 
+  it("labels a guest buyer by the Order's recipient name marked (Guest)", async () => {
+    const { order } = await seedOrder({ userId: null, status: "pending", paymentStatus: "pending" });
+    spyRecipients();
+    const send = spySend();
+
+    await CommerceNotifications.orderPlaced(order.id, "abcd".repeat(16));
+
+    const [email] = adminCalls(send);
+    expect(email).toBeDefined();
+    expect(email!.text).toContain("Ops Recipient (Guest)");
+    expect(email!.html).toContain("Ops Recipient (Guest)");
+  });
+
   // --- Security (§46) --------------------------------------------
   it("25/26. admin emails never contain the guest recovery token, PayU secrets, or raw payloads", async () => {
     const { order } = await seedOrder({ userId: null, status: "pending", paymentStatus: "pending" });
