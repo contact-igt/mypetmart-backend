@@ -1098,6 +1098,7 @@ function toAdminOrderListItemJSON(order: Order, itemCount: number): AdminOrderLi
     ...toOrderListItemJSON(order, itemCount),
     // null for a guest Order (user_id is NULL) — never a fabricated customer row.
     customer: order.user ? toAdminCustomerJSON(order.user) : null,
+    recipientName: order.ship_recipient_name,
     shipState: order.ship_state,
     shipCity: order.ship_city
   };

@@ -177,6 +177,8 @@ export type AdminOrderCustomerJSON = {
 export type AdminOrderListItemJSON = OrderListItemJSON & {
   // null for a guest Order — no fabricated placeholder customer row.
   customer: AdminOrderCustomerJSON | null;
+  // Always the immutable shipping snapshot; used to identify guest orders.
+  recipientName: string;
   shipState: string;
   shipCity: string;
 };
