@@ -1,6 +1,6 @@
 import { DataTypes, Model, type CreationOptional, type ForeignKey, type InferAttributes, type InferCreationAttributes, type NonAttribute, type Sequelize } from "sequelize";
 
-import { DATABASE_TABLE_NAMES, MONEY_PRECISION, MONEY_SCALE, PET_TYPE_VALUES, PRODUCT_STATUS_VALUES, type PetType, type ProductStatus } from "../../../constants/database.constants.js";
+import { DATABASE_TABLE_NAMES, MONEY_PRECISION, MONEY_SCALE, PET_TYPE_VALUES, PRODUCT_PAYMENT_METHOD_ELIGIBILITY_VALUES, PRODUCT_STATUS_VALUES, type PetType, type ProductPaymentMethodEligibility, type ProductStatus } from "../../../constants/database.constants.js";
 import { assertNullableCompareAtPrice, isModelInitialized, timestampModelOptions, numericPrimaryKeyAttribute } from "../table-helpers.js";
 import type { CartItem } from "../CartItemTable/index.js";
 import type { Category } from "../CategoryTable/index.js";
@@ -29,6 +29,7 @@ export class Product extends Model<InferAttributes<Product>, InferCreationAttrib
   declare stock: CreationOptional<number>;
   declare has_variants: CreationOptional<boolean>;
   declare featured: CreationOptional<boolean>;
+  declare payment_method_eligibility: CreationOptional<ProductPaymentMethodEligibility>;
   declare display_order: CreationOptional<number>;
   declare tags: unknown[] | null;
   declare meta_title: string | null;
@@ -89,6 +90,7 @@ export function initializeProductTable(sequelize: Sequelize): typeof Product {
       stock: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0 } },
       has_variants: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       featured: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      payment_method_eligibility: { type: DataTypes.ENUM(...PRODUCT_PAYMENT_METHOD_ELIGIBILITY_VALUES), allowNull: false, defaultValue: "both" },
       display_order: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1000, validate: { min: 0, max: 2147483647 } },
       tags: { type: DataTypes.JSON, allowNull: true },
       meta_title: { type: DataTypes.STRING(190), allowNull: true, validate: { len: [0, 190] } },
