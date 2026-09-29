@@ -67,7 +67,7 @@ function rowsText(rows: Row[]): string {
 export type AdminOrderContext = {
   orderId: number;
   orderNumber: string;
-  buyerLabel: string; // "Priya S." for a customer, "Guest" for a guest — never an email-derived identity
+  buyerLabel: string; // "Priya S." for a customer, "Priya S. (Guest)" for a guest — never an email-derived identity
   contactEmail: string;
   shipRecipient: string;
   shipCity: string;
