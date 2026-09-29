@@ -47,7 +47,10 @@ export type ReceiptRefundSummaryJSON = {
 export type ReceiptTotalsJSON = {
   subtotal: string;
   couponCode: string | null;
+  // Coupon discount only.
   discountAmount: string;
+  // Pay Online discount, shown on its own line ("0.00" when none).
+  onlinePaymentDiscountAmount: string;
   shippingFee: string;
   total: string;
 };

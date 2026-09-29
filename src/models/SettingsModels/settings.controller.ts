@@ -2,7 +2,24 @@ import type { NextFunction, Request, Response } from "express";
 
 import { sendSuccess } from "../../utils/api-response.js";
 import { SettingsService } from "./settings.service.js";
-import { storeProfileSchema } from "./settings.validation.js";
+import { payOnlineDiscountSchema, storeProfileSchema } from "./settings.validation.js";
+
+export async function handleAdminGetPayOnlineDiscount(_req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    sendSuccess(res, 200, await SettingsService.getPayOnlineDiscountSettings());
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleAdminUpdatePayOnlineDiscount(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const validated = payOnlineDiscountSchema.parse(req.body);
+    sendSuccess(res, 200, await SettingsService.updatePayOnlineDiscountSettings(validated));
+  } catch (error) {
+    next(error);
+  }
+}
 
 export async function handleAdminGetStoreProfile(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try {

@@ -1,4 +1,5 @@
 import type { CartItemJSON } from "../CartModels/cart.types.js";
+import type { PaymentMethodConflict } from "../ProductModels/product-payment-methods.js";
 
 export const CHECKOUT_PAYMENT_METHOD_VALUES = ["payu", "cod"] as const;
 export type CheckoutPaymentMethod = (typeof CHECKOUT_PAYMENT_METHOD_VALUES)[number];
@@ -66,9 +67,37 @@ export type CheckoutTotals = {
   eligibleMerchandiseSubtotal: string;
   shippingAmount: string | null;
   totalBeforeDiscount: string;
+  // Coupon discount only — unchanged meaning. Never includes the Pay Online discount.
   discountAmount: string;
+  // Global Pay Online Discount for this preview's payment method ("0.00" for
+  // COD, no method, or when disabled). Separate from discountAmount.
+  onlinePaymentDiscountAmount: string;
+  // merchandiseSubtotal - discountAmount - onlinePaymentDiscountAmount + shippingAmount
   payableTotal: string | null;
 };
+
+// Applied Global Pay Online Discount for this preview (null when none applied).
+// discountValue is the admin-facing unit: percent for "percentage", rupees for "fixed".
+export type CheckoutOnlinePaymentDiscountJSON = {
+  discountType: "percentage" | "fixed";
+  discountValue: string;
+  discountAmount: string;
+} | null;
+
+// A server-computed offer to switch payment method. savingAmount is ALWAYS
+// currentPayableTotal - payableTotal from two complete authoritative pricings
+// (coupon re-evaluated for the other method + Pay Online discount), and the
+// offer is only present when that saving is positive and the other method is
+// allowed for the cart. The storefront displays these values verbatim.
+export type CheckoutPaymentMethodOfferJSON = {
+  paymentMethod: CheckoutPaymentMethod;
+  savingAmount: string;
+  currentPayableTotal: string;
+  payableTotal: string;
+  couponCode: string | null;
+  couponDiscountAmount: string;
+  onlinePaymentDiscountAmount: string;
+} | null;
 
 // Server-calculated saving when a coupon is ineligible only because of the
 // current payment method. The frontend uses this for the "Switch to Prepaid
@@ -110,7 +139,21 @@ export type CheckoutPreviewJSON = {
   };
   totals: CheckoutTotals;
   coupon: CheckoutCouponJSON;
+  onlinePaymentDiscount: CheckoutOnlinePaymentDiscountJSON;
+  // COD selected: what switching to Pay Online would save (null otherwise).
+  onlinePaymentOffer: CheckoutPaymentMethodOfferJSON;
+  // Pay Online selected: what switching to COD would save (null otherwise).
+  cashOnDeliveryOffer: CheckoutPaymentMethodOfferJSON;
   paymentMethod: CheckoutPaymentMethod | null;
+  // Authoritative product-level payment availability for the live Cart:
+  // the intersection over every item's Product.payment_method_eligibility.
+  // The storefront enables payment options from this, never from cached
+  // product data. Empty when the Cart has no common method (see conflict).
+  allowedPaymentMethods: CheckoutPaymentMethod[];
+  paymentMethodConflict: PaymentMethodConflict | null;
+  // Customer-facing reason when the requested paymentMethod is not allowed
+  // by the Cart's products; null otherwise.
+  paymentMethodMessage: string | null;
   serviceability: CheckoutServiceabilityJSON;
   readiness: CheckoutReadiness;
 };

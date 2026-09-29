@@ -1,4 +1,4 @@
-import type { MediaAssetType, PetType, ProductContentLayout, ProductMediaRole, ProductStatus } from "../../constants/database.constants.js";
+import type { MediaAssetType, PetType, ProductContentLayout, ProductMediaRole, ProductPaymentMethodEligibility, ProductStatus } from "../../constants/database.constants.js";
 
 export type StorefrontCategorySummaryJSON = {
   id: number;
@@ -139,6 +139,7 @@ export type StorefrontProductListItemJSON = {
   stock: number;
   hasVariants: boolean;
   featured: boolean;
+  paymentMethodEligibility: ProductPaymentMethodEligibility;
   inStock: boolean;
   category: StorefrontCategorySummaryJSON;
   primaryImage: ProductImageJSON | null;
@@ -183,6 +184,7 @@ export type AdminProductListItemJSON = {
   stock: number;
   hasVariants: boolean;
   featured: boolean;
+  paymentMethodEligibility: ProductPaymentMethodEligibility;
   displayOrder: number;
   weightGrams: number | null;
   lengthCm: string | null;
@@ -299,6 +301,7 @@ export type CreateProductInput = {
   stock?: number;
   hasVariants?: boolean;
   featured?: boolean;
+  paymentMethodEligibility?: ProductPaymentMethodEligibility;
   tags?: string[];
   metaTitle?: string | null;
   metaDescription?: string | null;
@@ -328,6 +331,7 @@ export type UpdateProductInput = {
   compareAtPrice?: string | null;
   stock?: number;
   featured?: boolean;
+  paymentMethodEligibility?: ProductPaymentMethodEligibility;
   tags?: string[];
   metaTitle?: string | null;
   metaDescription?: string | null;

@@ -12,6 +12,7 @@
 // webhook payload, card data, or a stack trace.
 
 import { environmentConfig } from "../../config/environment.config.js";
+import { primaryOrigin } from "../../utils/origins.js";
 
 export type EmailTemplate = { subject: string; text: string; html: string };
 
@@ -24,9 +25,10 @@ function money(amount: string, currency: string): string {
 }
 
 // Deep link into the Admin panel for an Order. ADMIN_ORIGIN is a required env
-// var (the admin frontend base URL) — never a hardcoded localhost.
+// var (the admin frontend base URL, possibly a comma-separated CORS list — the
+// first entry is the link target) — never a hardcoded localhost.
 function adminOrderUrl(orderId: number): string {
-  return `${environmentConfig.ADMIN_ORIGIN.replace(/\/$/, "")}/admin/orders/${orderId}`;
+  return `${primaryOrigin(environmentConfig.ADMIN_ORIGIN)}/admin/orders/${orderId}`;
 }
 
 function shell(title: string, bodyHtml: string, ctaUrl?: string): string {

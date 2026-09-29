@@ -6,11 +6,16 @@ import type { CartIdentity, CartItemJSON, CartJSON } from "../CartModels/cart.ty
 import { CouponPricingService } from "../CouponModels/coupon.service.js";
 import { normalizeCouponCode } from "../CouponModels/coupon.validation.js";
 import type { CouponPricingLine } from "../CouponModels/coupon.types.js";
+import { loadProductPaymentMethodLines, resolveCartPaymentMethods, unavailableMethodMessage } from "../ProductModels/product-payment-methods.js";
+import { SettingsService } from "../SettingsModels/settings.service.js";
 import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
+import { calculateGlobalOnlinePaymentDiscount, type OnlinePaymentDiscountConfig } from "./online-payment-discount.js";
 import { CheckoutAddressNotFoundError, CheckoutAddressRequiredError, CheckoutCartEmptyError, CheckoutEmailRequiredError } from "./checkout.errors.js";
 import type {
   CheckoutAddressCandidate,
   CheckoutCouponJSON,
+  CheckoutPaymentMethod,
+  CheckoutPaymentMethodOfferJSON,
   CheckoutPreviewInput,
   CheckoutPreviewJSON,
   CheckoutReadiness,
@@ -84,6 +89,60 @@ async function evaluateCheckoutCoupon(
     eligibleMerchandisePaise: 0,
     discountAmountPaise: 0
   };
+}
+
+type CheckoutPricing = {
+  evaluated: Awaited<ReturnType<typeof evaluateCheckoutCoupon>>;
+  onlinePaymentDiscountPaise: number;
+  payableTotalPaise: number;
+};
+
+/**
+ * Complete authoritative pricing of the live Cart for one payment method:
+ * subtotal → coupon (existing engine, unchanged) → Global Pay Online Discount
+ * on what remains → + shipping. Used for the selected method and, for the
+ * switch offers, for the other method — so a saving is always the difference
+ * of two complete totals, never a single discount looked at in isolation.
+ */
+async function priceCart(
+  cart: CartJSON,
+  couponCodeOverride: string | undefined,
+  identityUserId: number | null,
+  paymentMethod: CheckoutPaymentMethod | undefined,
+  configuration: OnlinePaymentDiscountConfig,
+  shippingAmountPaise: number
+): Promise<CheckoutPricing> {
+  const evaluated = await evaluateCheckoutCoupon(cart, couponCodeOverride, identityUserId, paymentMethod);
+  const merchandiseSubtotalPaise = parseMoneyToPaise(cart.subtotal);
+  const { discountAmountPaise: onlinePaymentDiscountPaise } = calculateGlobalOnlinePaymentDiscount({
+    eligibleMerchandisePaise: merchandiseSubtotalPaise - evaluated.discountAmountPaise,
+    paymentMethod,
+    configuration
+  });
+  return {
+    evaluated,
+    onlinePaymentDiscountPaise,
+    payableTotalPaise: merchandiseSubtotalPaise - evaluated.discountAmountPaise - onlinePaymentDiscountPaise + shippingAmountPaise
+  };
+}
+
+function toPaymentMethodOffer(paymentMethod: CheckoutPaymentMethod, current: CheckoutPricing, alternative: CheckoutPricing): CheckoutPaymentMethodOfferJSON {
+  const savingPaise = current.payableTotalPaise - alternative.payableTotalPaise;
+  if (savingPaise <= 0) return null;
+  return {
+    paymentMethod,
+    savingAmount: formatPaiseAsMoney(savingPaise),
+    currentPayableTotal: formatPaiseAsMoney(current.payableTotalPaise),
+    payableTotal: formatPaiseAsMoney(alternative.payableTotalPaise),
+    couponCode: alternative.evaluated.coupon?.eligible ? alternative.evaluated.coupon.code : null,
+    couponDiscountAmount: formatPaiseAsMoney(alternative.evaluated.discountAmountPaise),
+    onlinePaymentDiscountAmount: formatPaiseAsMoney(alternative.onlinePaymentDiscountPaise)
+  };
+}
+
+// Admin-facing unit for display: percent for percentage, rupees for fixed.
+function formatOnlineDiscountValue(configuration: OnlinePaymentDiscountConfig): string {
+  return formatPaiseAsMoney(configuration.discountValue);
 }
 
 function fromSavedAddress(address: Address): CheckoutAddressCandidate {
@@ -165,29 +224,57 @@ export const CheckoutService = {
 
     // Cart may show an unavailable line; Checkout must block progressing on it.
     const cartReady = cart.items.every((item) => item.available);
-    const serviceability = input.paymentMethod
+
+    // Product-level payment availability from the persisted Product rows —
+    // separate from coupon eligibility (which only affects the discount) and
+    // from serviceability (which the requested method must also pass).
+    const paymentMethods = resolveCartPaymentMethods(await loadProductPaymentMethodLines(cart.items.map((item) => item.productId)));
+    const methodAllowedByProducts = !input.paymentMethod || paymentMethods.allowedPaymentMethods.includes(input.paymentMethod);
+
+    const serviceability = input.paymentMethod && methodAllowedByProducts
       ? await ServiceabilityService.checkForCheckout(identity, shippingAddress.postalCode, input.paymentMethod)
       : null;
     const serviceable = serviceability?.serviceable === true;
+    const paymentAllowed = methodAllowedByProducts && paymentMethods.conflict === null;
 
     const readiness: CheckoutReadiness = {
       cartReady,
       addressReady: true,
       shippingReady: serviceable,
-      paymentReady: serviceable,
-      orderReady: serviceable,
+      paymentReady: serviceable && paymentAllowed,
+      orderReady: serviceable && paymentAllowed,
       serviceable
     };
 
     const identityUserId = identity.type === "customer" ? identity.userId : null;
+    const shippingAmountPaise = parseMoneyToPaise(V1_FREE_SHIPPING_FEE);
+    const onlineDiscountConfig = await SettingsService.getPayOnlineDiscountConfig();
     // Pass the selected payment method so payment-method-restricted coupons
     // are correctly rejected and an alternativeSaving is returned.
-    const { coupon, eligibleMerchandisePaise, discountAmountPaise } = await evaluateCheckoutCoupon(cart, input.couponCode, identityUserId, input.paymentMethod);
+    const pricing = await priceCart(cart, input.couponCode, identityUserId, input.paymentMethod, onlineDiscountConfig, shippingAmountPaise);
+    const { evaluated } = pricing;
+    const { eligibleMerchandisePaise, discountAmountPaise } = evaluated;
 
-    const shippingAmountPaise = parseMoneyToPaise(V1_FREE_SHIPPING_FEE);
+    // Single switch offer per direction, from complete totals for both
+    // methods. Only offered when the other method is actually allowed for
+    // this cart's products (never "Pay Online & Save" on a COD-only cart).
+    const canSwitch = (method: CheckoutPaymentMethod) =>
+      input.paymentMethod !== undefined && input.paymentMethod !== method && paymentMethods.conflict === null && paymentMethods.allowedPaymentMethods.includes(method);
+    const onlinePaymentOffer = canSwitch("payu")
+      ? toPaymentMethodOffer("payu", pricing, await priceCart(cart, input.couponCode, identityUserId, "payu", onlineDiscountConfig, shippingAmountPaise))
+      : null;
+    const cashOnDeliveryOffer = canSwitch("cod")
+      ? toPaymentMethodOffer("cod", pricing, await priceCart(cart, input.couponCode, identityUserId, "cod", onlineDiscountConfig, shippingAmountPaise))
+      : null;
+    // Never advertise a coupon saving through a method the cart's products
+    // cannot be paid with (e.g. "Pay Online & Save" for a COD-only product).
+    const coupon: CheckoutCouponJSON =
+      evaluated.coupon?.alternativeSaving && !paymentMethods.allowedPaymentMethods.includes(evaluated.coupon.alternativeSaving.eligiblePaymentMethod)
+        ? { code: evaluated.coupon.code, eligible: evaluated.coupon.eligible, message: evaluated.coupon.message }
+        : evaluated.coupon;
+
     const merchandiseSubtotalPaise = parseMoneyToPaise(cart.subtotal);
     const totalBeforeDiscountPaise = merchandiseSubtotalPaise + shippingAmountPaise;
-    const payableTotalPaise = totalBeforeDiscountPaise - discountAmountPaise;
 
     const totals: CheckoutTotals = {
       merchandiseSubtotal: cart.subtotal,
@@ -195,7 +282,8 @@ export const CheckoutService = {
       shippingAmount: V1_FREE_SHIPPING_FEE,
       totalBeforeDiscount: formatPaiseAsMoney(totalBeforeDiscountPaise),
       discountAmount: formatPaiseAsMoney(discountAmountPaise),
-      payableTotal: formatPaiseAsMoney(payableTotalPaise)
+      onlinePaymentDiscountAmount: formatPaiseAsMoney(pricing.onlinePaymentDiscountPaise),
+      payableTotal: formatPaiseAsMoney(pricing.payableTotalPaise)
     };
 
     return {
@@ -210,7 +298,24 @@ export const CheckoutService = {
       shipping: { status: "pending", amount: V1_FREE_SHIPPING_FEE },
       totals,
       coupon,
+      onlinePaymentDiscount:
+        pricing.onlinePaymentDiscountPaise > 0
+          ? {
+              discountType: onlineDiscountConfig.discountType,
+              discountValue: formatOnlineDiscountValue(onlineDiscountConfig),
+              discountAmount: formatPaiseAsMoney(pricing.onlinePaymentDiscountPaise)
+            }
+          : null,
+      onlinePaymentOffer,
+      cashOnDeliveryOffer,
       paymentMethod: input.paymentMethod ?? null,
+      allowedPaymentMethods: paymentMethods.allowedPaymentMethods,
+      paymentMethodConflict: paymentMethods.conflict,
+      paymentMethodMessage: paymentMethods.conflict
+        ? paymentMethods.conflict.message
+        : input.paymentMethod && !methodAllowedByProducts
+          ? unavailableMethodMessage(input.paymentMethod)
+          : null,
       serviceability: serviceability ? { paymentMode: serviceability.paymentMode, serviceable: serviceability.serviceable } : null,
       readiness
     };

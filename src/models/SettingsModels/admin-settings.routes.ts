@@ -4,7 +4,9 @@ import { authenticate } from "../../middlewares/auth/authenticate.middleware.js"
 import { authorize } from "../../middlewares/auth/authorize.middleware.js";
 import {
   handleAdminGetIntegrationsStatus,
+  handleAdminGetPayOnlineDiscount,
   handleAdminGetStoreProfile,
+  handleAdminUpdatePayOnlineDiscount,
   handleAdminListAdminUsers,
   handleAdminUpdateStoreProfile
 } from "./settings.controller.js";
@@ -22,6 +24,15 @@ adminSettingsRouter.get("/store", (req, res, next) => {
 
 adminSettingsRouter.patch("/store", (req, res, next) => {
   void handleAdminUpdateStoreProfile(req, res, next);
+});
+
+// Global Pay Online Discount — pricing configuration, super_admin like coupons.
+adminSettingsRouter.get("/pay-online-discount", (req, res, next) => {
+  void handleAdminGetPayOnlineDiscount(req, res, next);
+});
+
+adminSettingsRouter.put("/pay-online-discount", (req, res, next) => {
+  void handleAdminUpdatePayOnlineDiscount(req, res, next);
 });
 
 adminSettingsRouter.get("/integrations", (req, res, next) => {

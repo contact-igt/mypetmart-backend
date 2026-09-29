@@ -47,4 +47,14 @@ describe("CORS allowlist", () => {
 
     expect(response.header["access-control-allow-origin"]).toBe(storefrontOrigin);
   });
+
+  it("allows PUT preflight for admin settings", async () => {
+    const response = await request(app)
+      .options("/api/v1/admin/settings/pay-online-discount")
+      .set("Origin", adminOrigin)
+      .set("Access-Control-Request-Method", "PUT")
+      .expect(204);
+
+    expect(response.header["access-control-allow-methods"]).toContain("PUT");
+  });
 });

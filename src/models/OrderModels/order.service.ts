@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 import { Op, QueryTypes, col, fn, type Transaction } from "sequelize";
 
-import { DATABASE_TABLE_NAMES, DEFAULT_COUNTRY_CODE, V1_FREE_SHIPPING_FEE, type OrderStatus, type UserRole } from "../../constants/database.constants.js";
+import { DATABASE_TABLE_NAMES, DEFAULT_COUNTRY_CODE, V1_FREE_SHIPPING_FEE, type OrderStatus, type ProductPaymentMethodEligibility, type UserRole } from "../../constants/database.constants.js";
 import { sequelize } from "../../database/index.js";
 import { TokenService } from "../../services/auth/token.service.js";
 import {
@@ -28,6 +28,8 @@ import { buildBusinessReference } from "../../utils/reference-generator.js";
 import { formatMoney, formatPaiseAsMoney, parseMoneyToPaise } from "../../utils/product-money.js";
 import type { CartIdentity } from "../CartModels/cart.types.js";
 import type { InlineAddressInput } from "../CheckoutModels/checkout.types.js";
+import { allocateOnlinePaymentDiscountAcrossLines, calculateGlobalOnlinePaymentDiscount } from "../CheckoutModels/online-payment-discount.js";
+import { SettingsService } from "../SettingsModels/settings.service.js";
 import { CouponPricingService } from "../CouponModels/coupon.service.js";
 import { normalizeCouponCode } from "../CouponModels/coupon.validation.js";
 import type { CouponPricingLine } from "../CouponModels/coupon.types.js";
@@ -46,6 +48,8 @@ import {
   OrderAlreadyPendingError,
   OrderCancelRequiresSuperAdminError,
   OrderCartEmptyError,
+  PaymentMethodConflictError,
+  ProductPaymentMethodNotAllowedError,
   OrderEmailRequiredError,
   OrderInsufficientStockError,
   OrderInvalidStatusTransitionError,
@@ -55,6 +59,7 @@ import {
   OrderShippingAddressNotEditableError,
   OrderVariantNotAvailableError
 } from "./order.errors.js";
+import { resolveCartPaymentMethods, unavailableMethodMessage } from "../ProductModels/product-payment-methods.js";
 import { OrderAlreadyPaidError, PaymentStatusUncertainError } from "../PaymentModels/payment.errors.js";
 import { CheckoutDestinationUnserviceableError } from "../CheckoutModels/checkout.errors.js";
 import type {
@@ -79,6 +84,7 @@ import type {
   GuestOrderDetailJSON,
   OrderCouponJSON,
   OrderDetailJSON,
+  OrderOnlinePaymentDiscountJSON,
   OrderItemJSON,
   OrderListItemJSON,
   OrderProductPreviewJSON,
@@ -259,7 +265,8 @@ function toOrderItemJSON(item: OrderItem): OrderItemJSON {
     quantity: item.quantity,
     unitPrice: formatMoney(item.unit_price),
     lineTotal: formatMoney(item.line_total),
-    discountAllocated: formatPaiseAsMoney(item.discount_allocated_paise)
+    discountAllocated: formatPaiseAsMoney(item.discount_allocated_paise),
+    onlinePaymentDiscountAllocated: formatPaiseAsMoney(item.online_payment_discount_allocated_paise)
   };
 }
 
@@ -339,6 +346,19 @@ function toOrderCouponJSON(order: Order): OrderCouponJSON | null {
   };
 }
 
+// null when no Pay Online discount applied. Snapshot values only — never the
+// live setting. discountValue is percent for "percentage", rupees for "fixed".
+function toOrderOnlinePaymentDiscountJSON(order: Order): OrderOnlinePaymentDiscountJSON | null {
+  if (order.online_payment_discount_amount_paise <= 0 || order.online_payment_discount_type_snapshot === null || order.online_payment_discount_value_snapshot === null) {
+    return null;
+  }
+  return {
+    discountType: order.online_payment_discount_type_snapshot,
+    discountValue: formatPaiseAsMoney(order.online_payment_discount_value_snapshot),
+    discountAmount: formatPaiseAsMoney(order.online_payment_discount_amount_paise)
+  };
+}
+
 function toOrderDetailJSON(order: Order, items: OrderItem[], shipment: ShipmentJSON | null = null, payments: Payment[] = [], refunds: Refund[] = []): OrderDetailJSON {
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
   return {
@@ -353,6 +373,7 @@ function toOrderDetailJSON(order: Order, items: OrderItem[], shipment: ShipmentJ
     refundSummary: summarizeRefunds(refunds),
     totalBeforeDiscount: formatPaiseAsMoney(parseMoneyToPaise(order.subtotal) + parseMoneyToPaise(order.shipping_fee)),
     coupon: toOrderCouponJSON(order),
+    onlinePaymentDiscount: toOrderOnlinePaymentDiscountJSON(order),
     ...(shipment ? { shipment } : {})
   };
 }
@@ -740,6 +761,7 @@ export const OrderService = {
         unitPrice: string;
         unitPricePaise: number;
         lineTotal: string;
+        paymentMethodEligibility: ProductPaymentMethodEligibility;
       };
 
       const lines: LineSnapshot[] = [];
@@ -764,8 +786,22 @@ export const OrderService = {
           quantity: item.quantity,
           unitPrice: formatMoney(unitPrice),
           unitPricePaise,
-          lineTotal: formatPaiseAsMoney(linePaise)
+          lineTotal: formatPaiseAsMoney(linePaise),
+          paymentMethodEligibility: product.payment_method_eligibility ?? "both"
         });
+      }
+
+      // Product payment-method availability, resolved from the Product rows
+      // just locked above — never from the browser. Rejected here, before any
+      // Order/OrderItem/CouponRedemption/Payment row is written.
+      const paymentMethods = resolveCartPaymentMethods(
+        lines.map((line) => ({ productId: line.productId, productName: line.productName, eligibility: line.paymentMethodEligibility }))
+      );
+      if (paymentMethods.conflict) {
+        throw new PaymentMethodConflictError(paymentMethods.conflict.message, paymentMethods.conflict.incompatibleItems);
+      }
+      if (input.paymentMethod && !paymentMethods.allowedPaymentMethods.includes(input.paymentMethod)) {
+        throw new ProductPaymentMethodNotAllowedError(input.paymentMethod, unavailableMethodMessage(input.paymentMethod), paymentMethods.allowedPaymentMethods);
       }
 
       // V1 locked business rules: free shipping is an explicit business rule
@@ -822,7 +858,23 @@ export const OrderService = {
           )
         : lines.map(() => 0);
 
-      const total = formatPaiseAsMoney(subtotalPaise + shippingFeePaise - discountAmountPaise);
+      // Global Pay Online Discount — recalculated here from the live setting,
+      // never taken from the preview or the browser. Applies after the coupon
+      // to the remaining merchandise, only for prepaid (PayU). COD and legacy
+      // clients that omit paymentMethod get 0. Separate from the coupon: no
+      // CouponRedemption, no change to coupon amounts or usage.
+      const onlineDiscountConfig = await SettingsService.getPayOnlineDiscountConfig(t);
+      const { discountAmountPaise: onlineDiscountPaise } = calculateGlobalOnlinePaymentDiscount({
+        eligibleMerchandisePaise: subtotalPaise - discountAmountPaise,
+        paymentMethod: input.paymentMethod,
+        configuration: onlineDiscountConfig
+      });
+      const lineOnlineDiscounts = allocateOnlinePaymentDiscountAcrossLines(
+        lines.map((line, index) => line.unitPricePaise * line.quantity - (lineDiscounts[index] ?? 0)),
+        onlineDiscountPaise
+      );
+
+      const total = formatPaiseAsMoney(subtotalPaise + shippingFeePaise - discountAmountPaise - onlineDiscountPaise);
 
       const orderId = await IdSequenceService.allocateNextId(DATABASE_TABLE_NAMES.orders, t);
       const orderNumberId = await IdSequenceService.allocateNextId("order_numbers", t);
@@ -856,6 +908,11 @@ export const OrderService = {
           coupon_discount_value_snapshot: couponEvaluation ? couponEvaluation.discountValueSnapshot : null,
           coupon_eligible_merchandise_paise: couponEvaluation ? couponEvaluation.eligibleMerchandisePaise : null,
           coupon_discount_amount_paise: discountAmountPaise,
+          // Immutable Pay Online Discount snapshot — later admin setting
+          // changes never touch this Order.
+          online_payment_discount_type_snapshot: onlineDiscountPaise > 0 ? onlineDiscountConfig.discountType : null,
+          online_payment_discount_value_snapshot: onlineDiscountPaise > 0 ? onlineDiscountConfig.discountValue : null,
+          online_payment_discount_amount_paise: onlineDiscountPaise,
           currency: "INR",
           contact_email: contactEmail,
           ship_recipient_name: shipping.recipientName,
@@ -893,7 +950,10 @@ export const OrderService = {
             quantity: line.quantity,
             unit_price: line.unitPrice,
             line_total: line.lineTotal,
-            discount_allocated_paise: lineDiscounts[index] ?? 0
+            discount_allocated_paise: lineDiscounts[index] ?? 0,
+            online_payment_discount_allocated_paise: lineOnlineDiscounts[index] ?? 0,
+            // Frozen here; payment entry points validate against this, not the live Product.
+            product_payment_method_eligibility_snapshot: line.paymentMethodEligibility
           },
           { transaction: t }
         );

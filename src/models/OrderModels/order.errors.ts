@@ -179,3 +179,19 @@ export class OrderNotCancellableError extends OrderError {
     this.name = "OrderNotCancellableError";
   }
 }
+
+// Product payment-method availability (migration 083). Raised during Order
+// creation, before any Order/OrderItem/CouponRedemption/Payment row exists.
+export class ProductPaymentMethodNotAllowedError extends OrderError {
+  public constructor(paymentMethod: "payu" | "cod", message: string, allowedPaymentMethods: readonly ("payu" | "cod")[]) {
+    super("PRODUCT_PAYMENT_METHOD_NOT_ALLOWED", message, 422, { paymentMethod, allowedPaymentMethods });
+    this.name = "ProductPaymentMethodNotAllowedError";
+  }
+}
+
+export class PaymentMethodConflictError extends OrderError {
+  public constructor(message: string, incompatibleItems: Array<{ productId: number; productName: string; paymentMethodEligibility: string }>) {
+    super("PAYMENT_METHOD_CONFLICT", message, 422, { incompatibleItems });
+    this.name = "PaymentMethodConflictError";
+  }
+}

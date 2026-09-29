@@ -192,6 +192,7 @@ function buildCartItemDTO(item: CartItem, product: Product, variant: ProductVari
     cartItemId: item.id,
     productId: product.id,
     categoryId: product.category_id,
+    paymentMethodEligibility: product.payment_method_eligibility ?? "both",
     variantId: variant ? variant.id : null,
     productName: product.name,
     productSlug: product.slug,

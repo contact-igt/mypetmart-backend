@@ -260,10 +260,12 @@ async function validateShippable(sourceType: ShipmentSourceType, order: Order, r
   if (sourceType === "order") {
     const lineSubtotalPaise = orderItems.reduce((sum, item) => sum + parseMoneyToPaise(item.line_total), 0);
     const allocatedDiscountPaise = orderItems.reduce((sum, item) => sum + item.discount_allocated_paise, 0);
-    const expectedTotalPaise = lineSubtotalPaise - allocatedDiscountPaise + parseMoneyToPaise(order.shipping_fee);
+    const allocatedOnlineDiscountPaise = orderItems.reduce((sum, item) => sum + item.online_payment_discount_allocated_paise, 0);
+    const expectedTotalPaise = lineSubtotalPaise - allocatedDiscountPaise - allocatedOnlineDiscountPaise + parseMoneyToPaise(order.shipping_fee);
     if (
       lineSubtotalPaise !== parseMoneyToPaise(order.subtotal) ||
       allocatedDiscountPaise !== order.coupon_discount_amount_paise ||
+      allocatedOnlineDiscountPaise !== order.online_payment_discount_amount_paise ||
       expectedTotalPaise !== parseMoneyToPaise(order.total)
     ) {
       throw new ShipmentPackageDataError("Order financial totals do not reconcile; shipment booking was blocked.");
@@ -374,10 +376,11 @@ function createInput(prepared: Prepared, courier: string, serviceType: string): 
       sku: item.variant_sku ?? item.product_sku,
       quantity,
       price: item.unit_price,
-      discount: isOrderShipment ? formatPaiseAsMoney(item.discount_allocated_paise) : "0.00"
+      // Coupon + Pay Online allocations, so the courier's per-line net matches Order.total.
+      discount: isOrderShipment ? formatPaiseAsMoney(item.discount_allocated_paise + item.online_payment_discount_allocated_paise) : "0.00"
     })),
     shippingAmount: isOrderShipment ? formatMoney(order.shipping_fee) : "0.00",
-    totalDiscount: isOrderShipment ? formatPaiseAsMoney(order.coupon_discount_amount_paise) : "0.00",
+    totalDiscount: isOrderShipment ? formatPaiseAsMoney(order.coupon_discount_amount_paise + order.online_payment_discount_amount_paise) : "0.00",
     lengthCm: shipment.length_cm, widthCm: shipment.width_cm, heightCm: shipment.height_cm,
     weightKg: (shipment.weight_grams / 1000).toFixed(3), logistics: courier, serviceType,
     // Derived server-side from the Order's own Payment records (prepared.isCod,

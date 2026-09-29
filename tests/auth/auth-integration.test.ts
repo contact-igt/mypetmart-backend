@@ -259,6 +259,11 @@ describe("Stage 7: Auth integration tests", () => {
       .expect(401);
   });
 
+  it("7b. Refresh without any cookie reports no session instead of 401", async () => {
+    const res = await request(app).post("/api/v1/auth/refresh").expect(200);
+    expect(res.body.data).toEqual({ accessToken: null });
+  });
+
   // --- Privileged Flow ---
 
   it("8. Seeded super admin can sign in", async () => {
@@ -352,6 +357,21 @@ describe("Stage 7: Auth integration tests", () => {
     }
     expect(res2.status).toBe(200);
     expect(res2.body.data.role).toBe("admin");
+  });
+
+  it("12. Admin refresh restores a browser session after a page reload", async () => {
+    const res = await request(app)
+      .post("/api/v1/admin/auth/refresh")
+      .set("Cookie", [adminCookie.split(";")[0] || ""])
+      .expect(200);
+
+    expect(res.body.data.accessToken).toBeDefined();
+    expect((res.headers["set-cookie"] as unknown as string[]).some((cookie) => cookie.startsWith("mypetmart_admin_refresh"))).toBe(true);
+
+    await request(app)
+      .get("/api/v1/admin/auth/me")
+      .set("Authorization", `Bearer ${res.body.data.accessToken as string}`)
+      .expect(200);
   });
 
   it("12. Customer token cannot access admin /me", async () => {

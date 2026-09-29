@@ -5,7 +5,7 @@ import { sequelize } from "../../database/index.js";
 import { OrderDocument } from "../../database/tables/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
 import { buildBusinessReference } from "../../utils/reference-generator.js";
-import type { CustomerOrderPaymentJSON, CustomerOrderRefundSummaryJSON, OrderCouponJSON, OrderItemJSON } from "../OrderModels/order.types.js";
+import type { CustomerOrderPaymentJSON, CustomerOrderRefundSummaryJSON, OrderCouponJSON, OrderItemJSON, OrderOnlinePaymentDiscountJSON } from "../OrderModels/order.types.js";
 import { OrderService } from "../OrderModels/order.service.js";
 import { SettingsService } from "../SettingsModels/settings.service.js";
 import { renderHtmlToPdf } from "./pdf-renderer.js";
@@ -29,6 +29,7 @@ type ReceiptSourceOrder = {
   shippingFee: string;
   total: string;
   coupon: OrderCouponJSON | null;
+  onlinePaymentDiscount: OrderOnlinePaymentDiscountJSON | null;
 };
 
 // Mirrors order-detail-client.tsx's own pickDisplayPayment exactly (a
@@ -108,6 +109,7 @@ function toReceiptData(order: ReceiptSourceOrder, document: OrderDocument): Cust
       subtotal: order.subtotal,
       couponCode: order.coupon?.code ?? null,
       discountAmount: order.coupon?.discountAmount ?? "0.00",
+      onlinePaymentDiscountAmount: order.onlinePaymentDiscount?.discountAmount ?? "0.00",
       shippingFee: order.shippingFee,
       total: order.total
     },

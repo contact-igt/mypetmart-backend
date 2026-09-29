@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { connectDatabase, disconnectDatabase, sequelize } from "../../src/database/index.js";
 import { Category, NotificationLog, Order, OrderItem, Payment, Product, ProductFeature, ProductMediaAssignment, ProductReview, Refund, Replacement, ReturnRequest, Shipment, User } from "../../src/database/tables/index.js";
@@ -7,6 +7,7 @@ import { buildBusinessReference } from "../../src/utils/reference-generator.js";
 import { emailService, type EmailSendOptions } from "../../src/services/email/email.service.js";
 import { CommerceNotifications } from "../../src/services/notification/commerce-notifications.service.js";
 import { NotificationService } from "../../src/services/notification/notification.service.js";
+import { AdminNotificationService } from "../../src/services/notification/admin-notification.service.js";
 
 let counter = 0;
 const createdUserIds: number[] = [];
@@ -123,6 +124,13 @@ async function seedShipment(sourceType: "order" | "replacement", sourceId: numbe
 describe("Commerce transactional email notifications", () => {
   beforeAll(async () => {
     await connectDatabase();
+  });
+
+  // These tests count customer emails only. Admin copies are covered by
+  // admin-commerce-notifications.test.ts; disable them here so a local
+  // ADMIN_NOTIFICATION_EMAILS value can't double the sendEmail call counts.
+  beforeEach(() => {
+    vi.spyOn(AdminNotificationService, "resolveRecipients").mockReturnValue([]);
   });
 
   afterEach(async () => {

@@ -1969,6 +1969,7 @@ describe("Order Backend Integration Tests", () => {
       expect(res.status).toBe(200);
       const guestRow = res.body.data.items.find((item: { customer: unknown }) => item.customer === null);
       expect(guestRow).toBeDefined();
+      expect(guestRow.recipientName).toBe("Jordan Rivera");
     });
 
     it("returns a guest Order's detail with customer: null and the shipping snapshot intact", async () => {

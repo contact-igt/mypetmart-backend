@@ -52,6 +52,7 @@ async function buildWishlistProductSummary(product: Product, transaction?: Trans
     stock: product.stock,
     hasVariants: product.has_variants,
     featured: product.featured,
+    paymentMethodEligibility: product.payment_method_eligibility ?? "both",
     inStock,
     available,
     category: {

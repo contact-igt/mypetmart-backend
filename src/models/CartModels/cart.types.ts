@@ -1,4 +1,4 @@
-import type { CartStatus } from "../../constants/database.constants.js";
+import type { CartStatus, ProductPaymentMethodEligibility } from "../../constants/database.constants.js";
 
 export type CartAvailabilityReason = "OUT_OF_STOCK" | "PRODUCT_UNAVAILABLE" | "VARIANT_UNAVAILABLE";
 
@@ -11,6 +11,9 @@ export type CartItemJSON = {
   cartItemId: number;
   productId: number;
   categoryId: number;
+  // Presentation only (e.g. a "Pay Online only" label). Checkout resolves the
+  // authoritative allowed methods from persisted Product rows.
+  paymentMethodEligibility: ProductPaymentMethodEligibility;
   variantId: number | null;
   productName: string;
   productSlug: string;

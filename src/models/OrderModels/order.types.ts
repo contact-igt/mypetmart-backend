@@ -31,6 +31,18 @@ export type OrderItemJSON = {
   unitPrice: string;
   lineTotal: string;
   discountAllocated: string;
+  // This line's share of the Order's Pay Online discount (separate from the
+  // coupon allocation above).
+  onlinePaymentDiscountAllocated: string;
+};
+
+// null when no Global Pay Online Discount applied to the Order. Immutable
+// snapshot from Order creation. discountValue: percent for "percentage",
+// rupees for "fixed".
+export type OrderOnlinePaymentDiscountJSON = {
+  discountType: "percentage" | "fixed";
+  discountValue: string;
+  discountAmount: string;
 };
 
 // null when the Order was created without a coupon. Everything here is an
@@ -108,11 +120,12 @@ export type OrderDetailJSON = OrderListItemJSON & {
   shipment?: ShipmentJSON;
   payments: CustomerOrderPaymentJSON[];
   refundSummary: CustomerOrderRefundSummaryJSON | null;
-  // subtotal + shippingFee, before any coupon discount — total is always
-  // totalBeforeDiscount minus coupon.discountAmount (or exactly
-  // totalBeforeDiscount when coupon is null).
+  // subtotal + shippingFee, before any discount — total is always
+  // totalBeforeDiscount minus coupon.discountAmount minus
+  // onlinePaymentDiscount.discountAmount (each 0 when null).
   totalBeforeDiscount: string;
   coupon: OrderCouponJSON | null;
+  onlinePaymentDiscount: OrderOnlinePaymentDiscountJSON | null;
 };
 
 // Additive-only wrapper around OrderDetailJSON used solely by Order Creation's
@@ -177,7 +190,6 @@ export type AdminOrderCustomerJSON = {
 export type AdminOrderListItemJSON = OrderListItemJSON & {
   // null for a guest Order — no fabricated placeholder customer row.
   customer: AdminOrderCustomerJSON | null;
-  // Always the immutable shipping snapshot; used to identify guest orders.
   recipientName: string;
   shipState: string;
   shipCity: string;
