@@ -32,10 +32,16 @@ export function isPrepaidPaymentMethod(method: CheckoutPaymentMethod | undefined
   return method === "payu";
 }
 
+// The Pay Online discount never reduces the remaining merchandise below ₹1.00:
+// an online payment needs a real amount to charge (PayU cannot process ₹0),
+// and a discount alone must never make an order free.
+export const MIN_ONLINE_PAYABLE_MERCHANDISE_PAISE = 100;
+
 /**
  * The one place the Global Pay Online Discount is calculated — checkout
  * preview and Order creation both call this, so they can never disagree.
- * Integer paise in, integer paise out; never exceeds the eligible amount.
+ * Integer paise in, integer paise out; always leaves at least
+ * MIN_ONLINE_PAYABLE_MERCHANDISE_PAISE of merchandise to pay.
  */
 export function calculateGlobalOnlinePaymentDiscount(input: {
   eligibleMerchandisePaise: number;
@@ -52,7 +58,8 @@ export function calculateGlobalOnlinePaymentDiscount(input: {
       ? Math.floor((eligibleMerchandisePaise * Math.min(configuration.discountValue, MAX_ONLINE_DISCOUNT_BASIS_POINTS)) / 10_000)
       : configuration.discountValue;
 
-  return { discountAmountPaise: Math.max(0, Math.min(discountPaise, eligibleMerchandisePaise)) };
+  const maxDiscountPaise = Math.max(0, eligibleMerchandisePaise - MIN_ONLINE_PAYABLE_MERCHANDISE_PAISE);
+  return { discountAmountPaise: Math.max(0, Math.min(discountPaise, maxDiscountPaise)) };
 }
 
 /**

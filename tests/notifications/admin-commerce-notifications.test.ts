@@ -238,7 +238,12 @@ describe("Admin commerce email notifications", () => {
   // --- Cancellation (§44) --------------------------------------------
   it("19/20. a customer or guest pending-order cancellation sends an admin 'Order Cancelled' email", async () => {
     const customer = await seedCustomer();
-    const { order: custOrder } = await seedOrder({ userId: customer.id, contactEmail: customer.email, status: "cancelled" });
+    const { order: custOrder } = await seedOrder({
+      userId: customer.id,
+      contactEmail: customer.email,
+      status: "cancelled",
+      cancelledAt: new Date("2026-09-29T11:59:53.000Z")
+    });
     const { order: guestOrder } = await seedOrder({ userId: null, status: "cancelled" });
     spyRecipients();
     const send = spySend();
@@ -252,6 +257,7 @@ describe("Admin commerce email notifications", () => {
     expect(admin[0]!.text).toContain("cancelled by the customer");
     expect(admin[1]!.text).toContain("cancelled by the guest");
     expect(admin[0]!.text).toContain("No payment attempt");
+    expect(admin[0]!.text).toContain("Cancelled at: 29 Sept 2026, 5:29 pm IST");
   });
 
   it("21. an order that is not actually cancelled produces no admin cancellation email", async () => {

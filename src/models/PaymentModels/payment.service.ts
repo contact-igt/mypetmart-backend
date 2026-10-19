@@ -10,13 +10,14 @@ import { Payment } from "../../database/tables/PaymentTable/index.js";
 import { IdSequenceService } from "../../database/sequences/id-sequence.service.js";
 import { TokenService } from "../../services/auth/token.service.js";
 import { logger } from "../../utils/logger.js";
-import { formatMoney } from "../../utils/product-money.js";
+import { formatMoney, parseMoneyToPaise } from "../../utils/product-money.js";
 import { CartService } from "../CartModels/cart.service.js";
 import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import { CouponPricingService } from "../CouponModels/coupon.service.js";
 import { isValidOrderStatusTransition } from "../OrderModels/order.constants.js";
 import { OrderNotFoundError } from "../OrderModels/order.errors.js";
 import { CheckoutCodUnavailableError } from "../CheckoutModels/checkout.errors.js";
+import { isBelowPrepaidMinimum, meetsPrepaidMinimum, PrepaidMinimumPayableError } from "../CheckoutModels/prepaid-minimum.js";
 import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
 import { Coupon } from "../../database/tables/index.js";
 import { methodsAllowedBy, unavailableMethodMessage } from "../ProductModels/product-payment-methods.js";
@@ -230,6 +231,14 @@ export const PaymentService = {
         throw new PaymentOrderNotPayableError(order.id, "the order has already been confirmed for Cash on Delivery.");
       }
 
+      // Defense in depth: every provider here is online/prepaid (PayU, Breeze),
+      // so the ₹1.00 floor applies to the locked Order.total. Rejects rather
+      // than ever charging a different amount than the Order.
+      const orderTotalPaise = parseMoneyToPaise(order.total);
+      if (!meetsPrepaidMinimum(orderTotalPaise)) {
+        throw new PrepaidMinimumPayableError(orderTotalPaise);
+      }
+
       // 3. Inspect existing active pending Payment for THIS provider. Scoped
       // by provider so a long-lived pending COD Payment (see
       // PaymentService.confirmCodOrder) — and, now, a pending attempt for the
@@ -427,6 +436,12 @@ export const PaymentService = {
     await this.assertCouponAllowsPaymentMethod(order, method);
     if (method === "cod" && order.online_payment_discount_amount_paise > 0) {
       throw new OnlinePaymentDiscountMethodMismatchError(order.id);
+    }
+    // Final prepaid safety floor, from the persisted Order.total — runs before
+    // any Payment attempt, provider payload, hash or redirect. Covers legacy
+    // pending Orders created without a paymentMethod. Never rewrites the amount.
+    if (isBelowPrepaidMinimum(method, parseMoneyToPaise(order.total))) {
+      throw new PrepaidMinimumPayableError(parseMoneyToPaise(order.total));
     }
   },
 

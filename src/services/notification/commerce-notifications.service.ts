@@ -711,7 +711,9 @@ export const CommerceNotifications = {
           currency: fresh.currency,
           cancelledBy,
           paymentContext,
-          cancelledAt: fresh.cancelled_at ? fresh.cancelled_at.toISOString() : "—"
+          cancelledAt: fresh.cancelled_at
+            ? `${new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short", hour12: true }).format(fresh.cancelled_at)} IST`
+            : "—"
         });
       }
     });
