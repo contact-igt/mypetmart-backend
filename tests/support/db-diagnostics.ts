@@ -23,10 +23,10 @@ function asDriverError(error: unknown): DriverErrorLike | null {
   const candidates: unknown[] = [error, (error as { parent?: unknown }).parent, (error as { original?: unknown }).original];
   for (const candidate of candidates) {
     if (candidate && typeof candidate === "object" && ("code" in candidate || "errno" in candidate || "sqlState" in candidate)) {
-      return candidate as DriverErrorLike;
+      return candidate;
     }
   }
-  return error as DriverErrorLike;
+  return error;
 }
 
 /** Redacts bound values from duplicate-key style messages before they are logged. */

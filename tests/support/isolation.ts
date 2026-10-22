@@ -83,10 +83,10 @@ afterEach(async (context) => {
 const EXTERNAL_FETCH_TIMEOUT_MS = 20_000;
 const realFetch = globalThis.fetch;
 globalThis.fetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input).url;
   const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/u.test(url);
   if (!isLocal && !init?.signal) {
     return realFetch(input, { ...init, signal: AbortSignal.timeout(EXTERNAL_FETCH_TIMEOUT_MS) });
   }
   return realFetch(input, init);
-}) as typeof fetch;
+});

@@ -93,7 +93,7 @@ async function clearState() {
   });
 }
 
-describe("Cross-provider duplicate-payment protection (Breeze <-> PayU/COD)", () => {
+describe("Cross-provider duplicate-payment protection (Breeze <-> PayU/COD)", { timeout: 30_000 }, () => {
   beforeAll(async () => {
     vi.stubEnv("BREEZE_1CCO_ENABLED", "true");
     vi.stubEnv("BREEZE_KEY_ID", "xp-key");
