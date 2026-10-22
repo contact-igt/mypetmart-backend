@@ -1,5 +1,12 @@
 import {
   AUTH_CHALLENGE_PURPOSE_VALUES,
+  BREEZE_CHECKOUT_SESSION_STATUS_VALUES,
+  BREEZE_SESSION_PROCESSING_STATUS_VALUES,
+  BREEZE_WEBHOOK_EVENT_KIND_VALUES,
+  BREEZE_WEBHOOK_EVENT_STATUS_VALUES,
+  BREEZE_ALERT_KIND_VALUES,
+  BREEZE_ALERT_DELIVERY_VALUES,
+  BREEZE_ADMIN_ACTION_VALUES,
   CART_STATUS_VALUES,
   CONTACT_ENQUIRY_STATUS_VALUES,
   COUPON_DISCOUNT_TYPE_VALUES,
@@ -1267,6 +1274,113 @@ export const INITIAL_SCHEMA_TABLES: readonly SchemaTableDefinition[] = [
         CONSTRAINT \`fk_coupon_redemptions_order_id\` FOREIGN KEY (\`order_id\`) REFERENCES \`orders\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
         CONSTRAINT \`fk_coupon_redemptions_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
         CONSTRAINT \`chk_coupon_redemptions_discount_not_negative\` CHECK (\`discount_amount_paise\` <= \`eligible_merchandise_paise\`)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.breezeCheckoutSessions,
+    migrationName: "085-create-breeze-checkout-sessions",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.breezeCheckoutSessions)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`public_id\` VARCHAR(64) NOT NULL,
+        \`user_id\` INT UNSIGNED NULL,
+        \`guest_identity_hash\` VARCHAR(64) NULL,
+        \`cart_id\` INT UNSIGNED NOT NULL,
+        \`status\` ${enumSql(BREEZE_CHECKOUT_SESSION_STATUS_VALUES)} NOT NULL DEFAULT 'created',
+        \`cart_hash\` CHAR(64) NOT NULL,
+        \`amount_paise\` INT UNSIGNED NOT NULL,
+        \`currency\` CHAR(3) NOT NULL DEFAULT 'INR',
+        \`cart_snapshot\` JSON NOT NULL,
+        \`breeze_checkout_id\` VARCHAR(190) NULL,
+        \`order_id\` INT UNSIGNED NULL,
+        \`order_intent\` JSON NULL,
+        \`breeze_cart_id\` VARCHAR(190) NULL,
+        \`breeze_order_id\` VARCHAR(190) NULL,
+        \`breeze_txn_id\` VARCHAR(190) NULL,
+        \`payment_id\` INT UNSIGNED NULL,
+        \`processing_status\` ${enumSql(BREEZE_SESSION_PROCESSING_STATUS_VALUES)} NOT NULL DEFAULT 'awaiting_webhook',
+        \`last_event_id\` VARCHAR(190) NULL,
+        \`last_error_code\` VARCHAR(80) NULL,
+        \`expires_at\` DATETIME NOT NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`breeze_checkout_sessions_public_id_unique\` (\`public_id\`),
+        UNIQUE KEY \`breeze_checkout_sessions_breeze_order_id_unique\` (\`breeze_order_id\`),
+        UNIQUE KEY \`breeze_checkout_sessions_breeze_txn_id_unique\` (\`breeze_txn_id\`),
+        UNIQUE KEY \`breeze_checkout_sessions_payment_id_unique\` (\`payment_id\`),
+        UNIQUE KEY \`breeze_checkout_sessions_order_id_unique\` (\`order_id\`),
+        KEY \`breeze_checkout_sessions_cart_id_idx\` (\`cart_id\`),
+        KEY \`breeze_checkout_sessions_status_expires_idx\` (\`status\`, \`expires_at\`),
+        CONSTRAINT \`fk_breeze_checkout_sessions_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_breeze_checkout_sessions_cart_id\` FOREIGN KEY (\`cart_id\`) REFERENCES \`carts\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_breeze_checkout_sessions_order_id\` FOREIGN KEY (\`order_id\`) REFERENCES \`orders\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+        CONSTRAINT \`fk_breeze_checkout_sessions_payment_id\` FOREIGN KEY (\`payment_id\`) REFERENCES \`payments\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.breezeWebhookEvents,
+    migrationName: "086-create-breeze-webhook-events",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.breezeWebhookEvents)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`event_id\` VARCHAR(190) NOT NULL,
+        \`event_kind\` ${enumSql(BREEZE_WEBHOOK_EVENT_KIND_VALUES)} NOT NULL,
+        \`event_name\` VARCHAR(80) NULL,
+        \`session_public_id\` VARCHAR(64) NULL,
+        \`status\` ${enumSql(BREEZE_WEBHOOK_EVENT_STATUS_VALUES)} NOT NULL DEFAULT 'received',
+        \`outcome_code\` VARCHAR(80) NULL,
+        \`http_status\` SMALLINT UNSIGNED NULL,
+        \`response_body\` JSON NULL,
+        \`payload\` JSON NOT NULL,
+        \`attempts\` INT UNSIGNED NOT NULL DEFAULT 1,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`breeze_webhook_events_kind_event_id_unique\` (\`event_kind\`, \`event_id\`),
+        KEY \`breeze_webhook_events_session_idx\` (\`session_public_id\`),
+        KEY \`breeze_webhook_events_status_idx\` (\`status\`)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.breezeReconciliationAlerts,
+    migrationName: "089-create-breeze-reconciliation-alerts",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.breezeReconciliationAlerts)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`alert_key\` VARCHAR(190) NOT NULL,
+        \`alert_kind\` ${enumSql(BREEZE_ALERT_KIND_VALUES)} NOT NULL,
+        \`occurrences\` INT UNSIGNED NOT NULL DEFAULT 1,
+        \`first_seen_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`last_seen_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`delivery_status\` ${enumSql(BREEZE_ALERT_DELIVERY_VALUES)} NOT NULL DEFAULT 'pending',
+        \`delivered_at\` DATETIME NULL,
+        \`detail\` JSON NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`breeze_reconciliation_alerts_key_unique\` (\`alert_key\`),
+        KEY \`breeze_reconciliation_alerts_delivery_idx\` (\`delivery_status\`)
+      ) ${engine};
+    `
+  },
+  {
+    tableName: DATABASE_TABLE_NAMES.breezeAdminActions,
+    migrationName: "090-create-breeze-admin-actions",
+    createSql: `
+      CREATE TABLE ${q(DATABASE_TABLE_NAMES.breezeAdminActions)} (
+        \`id\` INT UNSIGNED NOT NULL,
+        \`actor_user_id\` INT UNSIGNED NOT NULL,
+        \`action\` ${enumSql(BREEZE_ADMIN_ACTION_VALUES)} NOT NULL,
+        \`target_type\` VARCHAR(40) NOT NULL,
+        \`target_id\` INT UNSIGNED NOT NULL,
+        \`reason\` VARCHAR(500) NOT NULL,
+        \`outcome_code\` VARCHAR(80) NOT NULL,
+        ${createdUpdated},
+        PRIMARY KEY (\`id\`),
+        KEY \`breeze_admin_actions_target_idx\` (\`target_type\`, \`target_id\`),
+        KEY \`breeze_admin_actions_actor_idx\` (\`actor_user_id\`),
+        CONSTRAINT \`fk_breeze_admin_actions_actor_user_id\` FOREIGN KEY (\`actor_user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE RESTRICT ON UPDATE RESTRICT
       ) ${engine};
     `
   }

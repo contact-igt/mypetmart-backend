@@ -13,6 +13,8 @@ const SECRET_FIELD_NAMES = [
   "PAYMENT_KEY_SECRET",
   "PAYMENT_WEBHOOK_SECRET",
   "BREEZE_WEBHOOK_SECRET",
+  "BREEZE_CART_PRIVATE_KEY",
+  "BREEZE_ORDER_WEBHOOK_API_KEY",
   "SHIPPING_API_KEY",
   "SHIPPING_WEBHOOK_SECRET",
   "ITHINK_ACCESS_TOKEN",
@@ -218,6 +220,23 @@ const environmentSchema = z
     BREEZE_ENVIRONMENT: optionalTrimmedStringSchema,
     BREEZE_WEBHOOK_SECRET: optionalTrimmedStringSchema,
     BREEZE_PUBLIC_KEY: optionalTrimmedStringSchema,
+    // Full 1-Click Checkout (startCheckout). Server-controlled kill switch,
+    // OFF unless explicitly "true". keyId is Breeze-issued after they register
+    // our public key; the PEM private key signs carts on the backend only and
+    // is never sent to the browser or logged.
+    BREEZE_1CCO_ENABLED: booleanFromString("BREEZE_1CCO_ENABLED").default(false),
+    BREEZE_KEY_ID: optionalTrimmedStringSchema,
+    // Unit of monetary values in the Breeze Cart Object and the Order Create
+    // Webhook ("paise" integer minor units, or "rupees" decimal major units).
+    // The Breeze docs do NOT state it, so there is deliberately NO default:
+    // until it is confirmed in sandbox the signed-cart session API and all
+    // money-changing webhook processing stay blocked.
+    BREEZE_AMOUNT_UNIT: z.preprocess(optionalString, z.enum(["paise", "rupees"], { error: "BREEZE_AMOUNT_UNIT must be 'paise' or 'rupees'." }).optional()),
+    // Optional dedicated X-Api-Key for the Order Create Webhook; falls back to
+    // BREEZE_WEBHOOK_SECRET so a single merchant key keeps working.
+    BREEZE_ORDER_WEBHOOK_API_KEY: optionalTrimmedStringSchema,
+    BREEZE_CART_PRIVATE_KEY: optionalTrimmedStringSchema,
+    BREEZE_1CCO_SESSION_TTL_MINUTES: integerFromString("BREEZE_1CCO_SESSION_TTL_MINUTES", 5, 240).default(60),
     // Breeze Web SDK `shopUrl` init parameter (Breeze team confirmed:
     // https://mypetmart.org). Optional at the env layer — payment.config.ts
     // falls back to STOREFRONT_ORIGIN when unset. Not a secret: it is passed

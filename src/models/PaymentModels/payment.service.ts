@@ -37,6 +37,7 @@ import { PaymentFinalizationService, lockAndCheckOrderStock } from "./payment-fi
 import { buildPayuRequestHash } from "./payu-hash.util.js";
 import { normalizeVerifyApiResult } from "./payu-result-normalizer.js";
 import { PayuVerifyClient } from "./payu-verify.client.js";
+import { assertNoUnresolvedBreezeForCart, lockCartForCheckout } from "./breeze-cross-provider.js";
 import type { BreezeStartPaymentParamsJSON } from "./breeze.types.js";
 import type {
   CodConfirmationResultJSON,
@@ -200,6 +201,14 @@ export const PaymentService = {
 
       if (!order) {
         throw new OrderNotFoundError(input.orderId);
+      }
+
+      // Cross-provider guard (PayU only, narrowly scoped): an unresolved Breeze
+      // checkout for this same cart could still capture the purchase. Lock the cart
+      // (after the order lock, the same order used everywhere) and refuse.
+      if (provider === "payu" && order.cart_id !== null) {
+        await lockCartForCheckout(order.cart_id, transaction);
+        await assertNoUnresolvedBreezeForCart(order.cart_id, transaction);
       }
 
       // 2. Treat PAYMENT as already completed based primarily on payment state:
@@ -727,6 +736,13 @@ export const PaymentService = {
 
       if (lockedOrder.payment_status === "paid") {
         throw new OrderAlreadyPaidError(lockedOrder.id);
+      }
+
+      // Cross-provider guard: refuse COD while an unresolved Breeze checkout exists
+      // for this cart. The cart lock serializes concurrent starts.
+      if (lockedOrder.cart_id !== null) {
+        await lockCartForCheckout(lockedOrder.cart_id, t);
+        await assertNoUnresolvedBreezeForCart(lockedOrder.cart_id, t);
       }
 
       const activeAttempt = await Payment.findOne({ where: { order_id: lockedOrder.id, status: "pending" }, transaction: t });

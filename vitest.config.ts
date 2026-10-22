@@ -36,6 +36,8 @@ process.env.SHIPMENT_NUMBER_PREFIX = process.env.SHIPMENT_NUMBER_PREFIX || "TEST
 export default defineConfig({
   test: {
     globalSetup: "./tests/global-setup.ts",
+    // Per-file isolation (empty business tables) and SQL failure diagnostics.
+    setupFiles: ["./tests/support/isolation.ts"],
     pool: "threads",
     fileParallelism: false,
     sequence: {
