@@ -4,6 +4,10 @@ import { Address, initializeAddressTable } from "./AddressTable/index.js";
 import { AnnouncementBarItem, initializeAnnouncementBarItemTable } from "./AnnouncementBarTable/index.js";
 import { AuthChallenge, initializeAuthChallengeTable } from "./AuthChallengeTable/index.js";
 import { AuthSession, initializeAuthSessionTable } from "./AuthSessionTable/index.js";
+import { BreezeCheckoutSession, initializeBreezeCheckoutSessionTable } from "./BreezeCheckoutSessionTable/index.js";
+import { BreezeWebhookEvent, initializeBreezeWebhookEventTable } from "./BreezeWebhookEventTable/index.js";
+import { BreezeReconciliationAlert, initializeBreezeReconciliationAlertTable } from "./BreezeReconciliationAlertTable/index.js";
+import { BreezeAdminActionRecord, initializeBreezeAdminActionTable } from "./BreezeAdminActionTable/index.js";
 import { Cart, initializeCartTable } from "./CartTable/index.js";
 import { CartItem, initializeCartItemTable } from "./CartItemTable/index.js";
 import { Category, initializeCategoryTable } from "./CategoryTable/index.js";
@@ -48,6 +52,10 @@ export {
   AnnouncementBarItem,
   AuthChallenge,
   AuthSession,
+  BreezeCheckoutSession,
+  BreezeWebhookEvent,
+  BreezeReconciliationAlert,
+  BreezeAdminActionRecord,
   Cart,
   CartItem,
   Category,
@@ -130,7 +138,11 @@ export const EXPECTED_DATABASE_MODEL_NAMES = [
   "Wishlist",
   "NewsletterSubscriber",
   "NotificationLog",
-  "WelcomePopup"
+  "WelcomePopup",
+  "BreezeCheckoutSession",
+  "BreezeWebhookEvent",
+  "BreezeReconciliationAlert",
+  "BreezeAdminActionRecord"
 ] as const;
 
 export type DatabaseModelName = (typeof EXPECTED_DATABASE_MODEL_NAMES)[number];
@@ -178,6 +190,10 @@ export type DatabaseModelRegistry = Readonly<{
   NewsletterSubscriber: typeof NewsletterSubscriber;
   NotificationLog: typeof NotificationLog;
   WelcomePopup: typeof WelcomePopup;
+  BreezeCheckoutSession: typeof BreezeCheckoutSession;
+  BreezeWebhookEvent: typeof BreezeWebhookEvent;
+  BreezeReconciliationAlert: typeof BreezeReconciliationAlert;
+  BreezeAdminActionRecord: typeof BreezeAdminActionRecord;
 }>;
 
 let initializedRegistry: DatabaseModelRegistry | undefined;
@@ -229,6 +245,10 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
   initializeNewsletterSubscriberTable(sequelize);
   initializeNotificationLogTable(sequelize);
   initializeWelcomePopupTable(sequelize);
+  initializeBreezeCheckoutSessionTable(sequelize);
+  initializeBreezeWebhookEventTable(sequelize);
+  initializeBreezeReconciliationAlertTable(sequelize);
+  initializeBreezeAdminActionTable(sequelize);
 
   initializedRegistry = Object.freeze({
     User,
@@ -272,7 +292,11 @@ export function initializeDatabaseModels(sequelize: Sequelize): DatabaseModelReg
     Wishlist,
     NewsletterSubscriber,
     NotificationLog,
-    WelcomePopup
+    WelcomePopup,
+    BreezeCheckoutSession,
+    BreezeWebhookEvent,
+    BreezeReconciliationAlert,
+    BreezeAdminActionRecord
   });
 
   return initializedRegistry;

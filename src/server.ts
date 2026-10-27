@@ -7,6 +7,7 @@ import { connectDatabase, disconnectDatabase } from "./database/index.js";
 import { closePdfRenderer } from "./models/DocumentModels/pdf-renderer.js";
 import { startReturnShipmentSyncScheduler, stopReturnShipmentSyncScheduler } from "./models/ReturnShipmentModels/return-shipment-sync.job.js";
 import { startShipmentSyncScheduler, stopShipmentSyncScheduler } from "./models/ShipmentModels/shipment-sync.job.js";
+import { startBreezeReconciliationScheduler, stopBreezeReconciliationScheduler } from "./models/PaymentModels/breeze-reconciliation.job.js";
 import { logger } from "./utils/logger.js";
 
 const server = createServer(app);
@@ -43,6 +44,7 @@ async function shutdown(signal: NodeJS.Signals, exitCode: 0 | 1 = 0): Promise<vo
 
   stopShipmentSyncScheduler();
   stopReturnShipmentSyncScheduler();
+  stopBreezeReconciliationScheduler();
 
   const safetyTimeout = setTimeout(() => {
     logger.error({ signal }, "Graceful shutdown timed out");
@@ -94,6 +96,7 @@ async function bootstrap(): Promise<void> {
       );
       startShipmentSyncScheduler();
       startReturnShipmentSyncScheduler();
+      startBreezeReconciliationScheduler();
     });
   } catch (error) {
     logger.fatal({ err: error, database: databaseConfig.database }, "Application startup failed before HTTP listen");

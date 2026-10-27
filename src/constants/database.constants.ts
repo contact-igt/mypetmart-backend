@@ -9,6 +9,10 @@ export const DATABASE_TABLE_NAMES = Object.freeze({
   couponProducts: "coupon_products",
   couponCategories: "coupon_categories",
   couponRedemptions: "coupon_redemptions",
+  breezeCheckoutSessions: "breeze_checkout_sessions",
+  breezeWebhookEvents: "breeze_webhook_events",
+  breezeReconciliationAlerts: "breeze_reconciliation_alerts",
+  breezeAdminActions: "breeze_admin_actions",
   products: "products",
   productVariants: "product_variants",
   productImages: "product_images",
@@ -100,6 +104,35 @@ export type CouponPaymentMethodEligibility = (typeof COUPON_PAYMENT_METHOD_ELIGI
 //   permanent, financially final.
 // "released": the pending order was safely cancelled before payment —
 //   frees the usage-limit slot this redemption was holding.
+export const BREEZE_CHECKOUT_SESSION_STATUS_VALUES = ["created", "completed", "expired", "failed"] as const;
+export type BreezeCheckoutSessionStatus = (typeof BREEZE_CHECKOUT_SESSION_STATUS_VALUES)[number];
+
+// Where a Breeze 1CCO session is in the webhook -> Order -> finalization bridge.
+// Independent of BREEZE_CHECKOUT_SESSION_STATUS_VALUES (launch/expiry state):
+// an expired or superseded session can still receive a late captured payment.
+// "released": an admin confirmed (audited) that an awaiting_webhook attempt will
+// never be captured, which unblocks the customer's next Breeze checkout.
+export const BREEZE_SESSION_PROCESSING_STATUS_VALUES = ["awaiting_webhook", "order_created", "finalized", "reconciliation_required", "failed", "released"] as const;
+export type BreezeSessionProcessingStatus = (typeof BREEZE_SESSION_PROCESSING_STATUS_VALUES)[number];
+
+export const BREEZE_WEBHOOK_EVENT_KIND_VALUES = ["order_create"] as const;
+export type BreezeWebhookEventKind = (typeof BREEZE_WEBHOOK_EVENT_KIND_VALUES)[number];
+export const BREEZE_WEBHOOK_EVENT_STATUS_VALUES = ["received", "processed", "ignored", "reconciliation_required"] as const;
+export const BREEZE_ALERT_KIND_VALUES = [
+  "retry_budget_exhausted",
+  "captured_with_commerce_exception",
+  "checkout_unresolved_too_long",
+  "provider_reference_conflict",
+  "webhook_auth_failures",
+  "webhook_finalization_failed",
+  "amount_or_currency_mismatch"
+] as const;
+export type BreezeAlertKind = (typeof BREEZE_ALERT_KIND_VALUES)[number];
+export const BREEZE_ALERT_DELIVERY_VALUES = ["pending", "delivered", "failed"] as const;
+export const BREEZE_ADMIN_ACTION_VALUES = ["retry_event", "release_session"] as const;
+export type BreezeAdminAction = (typeof BREEZE_ADMIN_ACTION_VALUES)[number];
+export type BreezeWebhookEventStatus = (typeof BREEZE_WEBHOOK_EVENT_STATUS_VALUES)[number];
+
 export const COUPON_REDEMPTION_STATUS_VALUES = ["reserved", "consumed", "released"] as const;
 export type CouponRedemptionStatus = (typeof COUPON_REDEMPTION_STATUS_VALUES)[number];
 

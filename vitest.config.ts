@@ -20,6 +20,15 @@ process.env.BREEZE_MERCHANT_ID = process.env.BREEZE_MERCHANT_ID || "mypetmart";
 process.env.BREEZE_ENVIRONMENT = process.env.BREEZE_ENVIRONMENT || "smb-release";
 process.env.BREEZE_SHOP_URL = process.env.BREEZE_SHOP_URL || "https://mypetmart.org";
 process.env.BREEZE_WEBHOOK_SECRET = process.env.BREEZE_WEBHOOK_SECRET || "test_breeze_webhook_api_key_do_not_use_in_prod";
+// The developer .env carries its own Breeze values (loaded without overriding existing
+// variables). Pin the test-sensitive ones so no run depends on local credentials: the
+// order webhook key must equal the test secret, and the 1CCO flag/unit/key ids start
+// unset (tests opt in with vi.stubEnv).
+process.env.BREEZE_ORDER_WEBHOOK_API_KEY = process.env.BREEZE_WEBHOOK_SECRET;
+process.env.BREEZE_1CCO_ENABLED = "false";
+process.env.BREEZE_AMOUNT_UNIT = "";
+process.env.BREEZE_KEY_ID = "";
+process.env.BREEZE_CART_PRIVATE_KEY = "";
 // environment.config.ts already defaults SHIPMENT_NUMBER_PREFIX to "TEST-SHP"
 // for any non-production NODE_ENV specifically so test-created shipment
 // numbers can never be confused with a real courier reference — but only
@@ -36,6 +45,8 @@ process.env.SHIPMENT_NUMBER_PREFIX = process.env.SHIPMENT_NUMBER_PREFIX || "TEST
 export default defineConfig({
   test: {
     globalSetup: "./tests/global-setup.ts",
+    // Per-file isolation (empty business tables) and SQL failure diagnostics.
+    setupFiles: ["./tests/support/isolation.ts"],
     pool: "threads",
     fileParallelism: false,
     sequence: {

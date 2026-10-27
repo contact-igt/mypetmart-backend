@@ -155,5 +155,14 @@ export type CheckoutPreviewJSON = {
   // by the Cart's products; null otherwise.
   paymentMethodMessage: string | null;
   serviceability: CheckoutServiceabilityJSON;
+  // Set when the selected method is prepaid (PayU) and the final payable
+  // total is below ₹1.00 — the order can't be placed/paid online, and
+  // readiness.paymentReady/orderReady are false. null otherwise (always for COD).
+  prepaidMinimumPayable: {
+    code: "PREPAID_MINIMUM_PAYABLE_NOT_MET";
+    message: string;
+    minimumPayable: string;
+    actualPayable: string;
+  } | null;
   readiness: CheckoutReadiness;
 };

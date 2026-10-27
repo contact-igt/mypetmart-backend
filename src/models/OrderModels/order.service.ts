@@ -29,6 +29,7 @@ import { formatMoney, formatPaiseAsMoney, parseMoneyToPaise } from "../../utils/
 import type { CartIdentity } from "../CartModels/cart.types.js";
 import type { InlineAddressInput } from "../CheckoutModels/checkout.types.js";
 import { allocateOnlinePaymentDiscountAcrossLines, calculateGlobalOnlinePaymentDiscount } from "../CheckoutModels/online-payment-discount.js";
+import { isBelowPrepaidMinimum, PrepaidMinimumPayableError } from "../CheckoutModels/prepaid-minimum.js";
 import { SettingsService } from "../SettingsModels/settings.service.js";
 import { CouponPricingService } from "../CouponModels/coupon.service.js";
 import { normalizeCouponCode } from "../CouponModels/coupon.validation.js";
@@ -874,7 +875,15 @@ export const OrderService = {
         onlineDiscountPaise
       );
 
-      const total = formatPaiseAsMoney(subtotalPaise + shippingFeePaise - discountAmountPaise - onlineDiscountPaise);
+      const totalPaise = subtotalPaise + shippingFeePaise - discountAmountPaise - onlineDiscountPaise;
+      // Final prepaid safety floor — rejected here, before any Order,
+      // OrderItem or CouponRedemption row is written (the transaction rolls
+      // back cleanly). Legacy clients that omit paymentMethod are not assumed
+      // to be PayU; PayU/Breeze initiation re-checks Order.total for them.
+      if (isBelowPrepaidMinimum(input.paymentMethod, totalPaise)) {
+        throw new PrepaidMinimumPayableError(totalPaise);
+      }
+      const total = formatPaiseAsMoney(totalPaise);
 
       const orderId = await IdSequenceService.allocateNextId(DATABASE_TABLE_NAMES.orders, t);
       const orderNumberId = await IdSequenceService.allocateNextId("order_numbers", t);

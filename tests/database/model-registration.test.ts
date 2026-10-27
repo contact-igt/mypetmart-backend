@@ -53,13 +53,17 @@ const expectedTables = [
   DATABASE_TABLE_NAMES.wishlists,
   DATABASE_TABLE_NAMES.newsletterSubscribers,
   DATABASE_TABLE_NAMES.notificationLog,
-  DATABASE_TABLE_NAMES.welcomePopups
+  DATABASE_TABLE_NAMES.welcomePopups,
+  DATABASE_TABLE_NAMES.breezeCheckoutSessions,
+  DATABASE_TABLE_NAMES.breezeWebhookEvents,
+  DATABASE_TABLE_NAMES.breezeReconciliationAlerts,
+  DATABASE_TABLE_NAMES.breezeAdminActions
 ];
 
 describe("database model registration", () => {
   it("registers all expected models with explicit table names", () => {
     expect(Object.keys(databaseModels)).toEqual([...EXPECTED_DATABASE_MODEL_NAMES]);
-    expect(sequelize.modelManager.models).toHaveLength(42);
+    expect(sequelize.modelManager.models).toHaveLength(46);
 
     const modelNames = getModelList(databaseModels).map((model) => model.name);
     const tableNames = getModelList(databaseModels).map((model) => model.tableName);

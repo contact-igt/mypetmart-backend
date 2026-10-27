@@ -55,7 +55,9 @@ const SCHEMA_ALTER_MIGRATION_NAMES = [
   "081-add-coupon-to-welcome-popups.ts",
   "082-add-payment-method-eligibility-to-coupons.ts",
   "083-add-payment-method-eligibility-to-products.ts",
-  "084-add-online-payment-discount-to-orders.ts"
+  "084-add-online-payment-discount-to-orders.ts",
+  "087-add-bridge-columns-to-breeze-checkout-sessions.ts",
+  "088-add-released-status-to-breeze-checkout-sessions.ts"
 ] as const;
 export const MIGRATION_FILE_NAMES = [
   ...INITIAL_SCHEMA_TABLES.map((table) => `${table.migrationName}.ts`),

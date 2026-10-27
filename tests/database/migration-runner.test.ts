@@ -22,7 +22,7 @@ describe("Stage 5 migration runner", () => {
     // missing here (and the length below already stale at 36) from an
     // earlier change — both are corrected in this edit alongside the new
     // table.
-    expect(INITIAL_SCHEMA_TABLES).toHaveLength(42);
+    expect(INITIAL_SCHEMA_TABLES).toHaveLength(46);
     expect(expectedBusinessTableNames()).toEqual([
       "users",
       "auth_sessions",
@@ -65,7 +65,11 @@ describe("Stage 5 migration runner", () => {
       "coupons",
       "coupon_products",
       "coupon_categories",
-      "coupon_redemptions"
+      "coupon_redemptions",
+      "breeze_checkout_sessions",
+      "breeze_webhook_events",
+      "breeze_reconciliation_alerts",
+      "breeze_admin_actions"
     ]);
     expect(MIGRATION_FILE_NAMES).toEqual([...MIGRATION_FILE_NAMES].sort());
   });

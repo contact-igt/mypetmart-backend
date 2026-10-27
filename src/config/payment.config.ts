@@ -58,6 +58,13 @@ export const paymentConfig = Object.freeze({
   breezeEnvironment: environmentConfig.BREEZE_ENVIRONMENT,
   breezeWebhookSecret: environmentConfig.BREEZE_WEBHOOK_SECRET,
   breezePublicKey: environmentConfig.BREEZE_PUBLIC_KEY,
+  breeze1ccoEnabled: environmentConfig.BREEZE_1CCO_ENABLED,
+  breezeKeyId: environmentConfig.BREEZE_KEY_ID,
+  breezeAmountUnit: environmentConfig.BREEZE_AMOUNT_UNIT,
+  breezeOrderWebhookApiKey: environmentConfig.BREEZE_ORDER_WEBHOOK_API_KEY ?? environmentConfig.BREEZE_WEBHOOK_SECRET,
+  // Accepts PEM with literal "\n" escapes (single-line env vars).
+  breezeCartPrivateKey: environmentConfig.BREEZE_CART_PRIVATE_KEY?.replace(/\\n/gu, "\n"),
+  breeze1ccoSessionTtlMinutes: environmentConfig.BREEZE_1CCO_SESSION_TTL_MINUTES,
   // Breeze Web SDK initiate() `shopUrl`. Non-secret. Falls back to the
   // already-trusted storefront origin when BREEZE_SHOP_URL is unset.
   breezeShopUrl: environmentConfig.BREEZE_SHOP_URL ?? primaryOrigin(environmentConfig.STOREFRONT_ORIGIN),
@@ -89,6 +96,14 @@ export const paymentConfig = Object.freeze({
     Boolean(environmentConfig.PAYMENT_KEY_ID) &&
     Boolean(environmentConfig.PAYMENT_KEY_SECRET) &&
     Boolean(environmentConfig.PAYMENT_WEBHOOK_SECRET),
+  breeze1ccoReady:
+    environmentConfig.BREEZE_1CCO_ENABLED &&
+    Boolean(environmentConfig.BREEZE_MERCHANT_ID) &&
+    Boolean(environmentConfig.BREEZE_ENVIRONMENT) &&
+    Boolean(environmentConfig.BREEZE_WEBHOOK_SECRET) &&
+    Boolean(environmentConfig.BREEZE_KEY_ID) &&
+    Boolean(environmentConfig.BREEZE_AMOUNT_UNIT) &&
+    Boolean(environmentConfig.BREEZE_CART_PRIVATE_KEY),
   breezeReady: Boolean(environmentConfig.BREEZE_MERCHANT_ID) && Boolean(environmentConfig.BREEZE_ENVIRONMENT) && Boolean(environmentConfig.BREEZE_WEBHOOK_SECRET),
   // Refund initiation additionally requires a reachable public callback URL —
   // never silently degrades to "no webhook" for a real-money operation.

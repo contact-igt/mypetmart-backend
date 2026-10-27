@@ -10,6 +10,7 @@ import { loadProductPaymentMethodLines, resolveCartPaymentMethods, unavailableMe
 import { SettingsService } from "../SettingsModels/settings.service.js";
 import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
 import { calculateGlobalOnlinePaymentDiscount, type OnlinePaymentDiscountConfig } from "./online-payment-discount.js";
+import { isBelowPrepaidMinimum, MIN_PREPAID_PAYABLE_PAISE, PREPAID_MINIMUM_PAYABLE_MESSAGE } from "./prepaid-minimum.js";
 import { CheckoutAddressNotFoundError, CheckoutAddressRequiredError, CheckoutCartEmptyError, CheckoutEmailRequiredError } from "./checkout.errors.js";
 import type {
   CheckoutAddressCandidate,
@@ -127,6 +128,9 @@ async function priceCart(
 }
 
 function toPaymentMethodOffer(paymentMethod: CheckoutPaymentMethod, current: CheckoutPricing, alternative: CheckoutPricing): CheckoutPaymentMethodOfferJSON {
+  // Never advertise switching to a method that could not actually be paid
+  // (e.g. "Pay Online & Save" when the PayU total would be below ₹1.00).
+  if (isBelowPrepaidMinimum(paymentMethod, alternative.payableTotalPaise)) return null;
   const savingPaise = current.payableTotalPaise - alternative.payableTotalPaise;
   if (savingPaise <= 0) return null;
   return {
@@ -237,15 +241,6 @@ export const CheckoutService = {
     const serviceable = serviceability?.serviceable === true;
     const paymentAllowed = methodAllowedByProducts && paymentMethods.conflict === null;
 
-    const readiness: CheckoutReadiness = {
-      cartReady,
-      addressReady: true,
-      shippingReady: serviceable,
-      paymentReady: serviceable && paymentAllowed,
-      orderReady: serviceable && paymentAllowed,
-      serviceable
-    };
-
     const identityUserId = identity.type === "customer" ? identity.userId : null;
     const shippingAmountPaise = parseMoneyToPaise(V1_FREE_SHIPPING_FEE);
     const onlineDiscountConfig = await SettingsService.getPayOnlineDiscountConfig();
@@ -253,6 +248,20 @@ export const CheckoutService = {
     // are correctly rejected and an alternativeSaving is returned.
     const pricing = await priceCart(cart, input.couponCode, identityUserId, input.paymentMethod, onlineDiscountConfig, shippingAmountPaise);
     const { evaluated } = pricing;
+
+    // Final prepaid safety floor on the complete total (incl. shipping): a
+    // PayU total below ₹1.00 can't be paid online. Only blocks — never changes
+    // any amount. COD and "no method selected" are unaffected.
+    const prepaidMinimumNotMet = isBelowPrepaidMinimum(input.paymentMethod, pricing.payableTotalPaise);
+
+    const readiness: CheckoutReadiness = {
+      cartReady,
+      addressReady: true,
+      shippingReady: serviceable,
+      paymentReady: serviceable && paymentAllowed && !prepaidMinimumNotMet,
+      orderReady: serviceable && paymentAllowed && !prepaidMinimumNotMet,
+      serviceable
+    };
     const { eligibleMerchandisePaise, discountAmountPaise } = evaluated;
 
     // Single switch offer per direction, from complete totals for both
@@ -317,6 +326,14 @@ export const CheckoutService = {
           ? unavailableMethodMessage(input.paymentMethod)
           : null,
       serviceability: serviceability ? { paymentMode: serviceability.paymentMode, serviceable: serviceability.serviceable } : null,
+      prepaidMinimumPayable: prepaidMinimumNotMet
+        ? {
+            code: "PREPAID_MINIMUM_PAYABLE_NOT_MET",
+            message: PREPAID_MINIMUM_PAYABLE_MESSAGE,
+            minimumPayable: formatPaiseAsMoney(MIN_PREPAID_PAYABLE_PAISE),
+            actualPayable: formatPaiseAsMoney(Math.max(0, pricing.payableTotalPaise))
+          }
+        : null,
       readiness
     };
   }
