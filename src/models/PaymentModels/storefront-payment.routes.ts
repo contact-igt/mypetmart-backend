@@ -1,6 +1,6 @@
 import { Router } from "express";
 
-import { authRateLimiter } from "../../middlewares/auth/rate-limiter.middleware.js";
+import { authRateLimiter, breezeCheckoutStartRateLimiter, breezeCheckoutStatusRateLimiter } from "../../middlewares/auth/rate-limiter.middleware.js";
 import { resolveCartIdentity } from "../../middlewares/cart/resolve-cart-identity.middleware.js";
 import { optionalAuthenticate } from "../../middlewares/auth/optional-authenticate.middleware.js";
 import { handleConfirmCodOrder, handleCreateBreezeCheckoutSession, handleGetBreezeCheckoutConfig, handleGetBreezeCheckoutSessionStatus, handleGetPaymentStatus, handleInitiateBreezeCheckout, handleInitiatePayment } from "./storefront-payment.controller.js";
@@ -29,11 +29,11 @@ storefrontPaymentRouter.get("/breeze/checkout-config", (req, res) => {
 // Breeze full 1CCO (startCheckout): cart-based, runs BEFORE any Order exists.
 // Uses the same guest-or-customer cart identity as the cart routes. 404 unless
 // BREEZE_1CCO_ENABLED and all Breeze 1CCO settings are configured.
-storefrontPaymentRouter.post("/breeze/checkout-session", authRateLimiter, resolveCartIdentity(), (req, res, next) => {
+storefrontPaymentRouter.post("/breeze/checkout-session", breezeCheckoutStartRateLimiter, resolveCartIdentity(), (req, res, next) => {
   void handleCreateBreezeCheckoutSession(req, res, next);
 });
 
-storefrontPaymentRouter.post("/breeze/checkout-session/status", authRateLimiter, resolveCartIdentity(), (req, res, next) => {
+storefrontPaymentRouter.post("/breeze/checkout-session/status", breezeCheckoutStatusRateLimiter, resolveCartIdentity(), (req, res, next) => {
   void handleGetBreezeCheckoutSessionStatus(req, res, next);
 });
 

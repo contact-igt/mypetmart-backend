@@ -4,13 +4,33 @@ import { sendError } from "../../utils/api-response.js";
 
 const isTest = process.env.NODE_ENV === "test";
 
-export const authRateLimiter = rateLimit({
+function createAuthRateLimiter() {
+  return rateLimit({
   windowMs: authConfig.rateLimitWindowMs,
   max: isTest ? 1000 : authConfig.rateLimitMax,
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res, _next) => {
     sendError(res, 429, "AUTH_RATE_LIMITED", "Too many requests. Please try again later.");
+  }
+  });
+}
+
+// Each sensitive workflow gets an independent budget. Sharing one store made
+// normal storefront activity capable of locking an administrator out.
+export const authRateLimiter = createAuthRateLimiter();
+export const adminAuthRateLimiter = createAuthRateLimiter();
+export const breezeCheckoutStartRateLimiter = createAuthRateLimiter();
+
+// Breeze confirms payment asynchronously, so its client polls for a short time.
+// Keep that traffic separate from login and payment-start rate limits.
+export const breezeCheckoutStatusRateLimiter = rateLimit({
+  windowMs: 60_000,
+  max: isTest ? 1000 : 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res, _next) => {
+    sendError(res, 429, "BREEZE_STATUS_RATE_LIMITED", "Too many payment-status checks. Please try again shortly.");
   }
 });
 

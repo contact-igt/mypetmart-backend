@@ -18,7 +18,7 @@ process.env.BACKEND_PUBLIC_ORIGIN = process.env.BACKEND_PUBLIC_ORIGIN || "https:
 // stays "payu" above and PayU tests are unaffected.
 process.env.BREEZE_MERCHANT_ID = process.env.BREEZE_MERCHANT_ID || "mypetmart";
 process.env.BREEZE_ENVIRONMENT = process.env.BREEZE_ENVIRONMENT || "smb-release";
-process.env.BREEZE_SHOP_URL = process.env.BREEZE_SHOP_URL || "https://mypetmart.org";
+process.env.BREEZE_SHOP_URL = process.env.BREEZE_SHOP_URL || "https://mypetmart.in";
 process.env.BREEZE_WEBHOOK_SECRET = process.env.BREEZE_WEBHOOK_SECRET || "test_breeze_webhook_api_key_do_not_use_in_prod";
 // The developer .env carries its own Breeze values (loaded without overriding existing
 // variables). Pin the test-sensitive ones so no run depends on local credentials: the
