@@ -62,6 +62,7 @@ export const paymentConfig = Object.freeze({
   breezeKeyId: environmentConfig.BREEZE_KEY_ID,
   breezeAmountUnit: environmentConfig.BREEZE_AMOUNT_UNIT,
   breezeOrderWebhookApiKey: environmentConfig.BREEZE_ORDER_WEBHOOK_API_KEY ?? environmentConfig.BREEZE_WEBHOOK_SECRET,
+  breezeAbandonedCheckoutApiKey: environmentConfig.BREEZE_ABANDONED_CHECKOUT_API_KEY,
   // Accepts PEM with literal "\n" escapes (single-line env vars).
   breezeCartPrivateKey: environmentConfig.BREEZE_CART_PRIVATE_KEY?.replace(/\\n/gu, "\n"),
   breeze1ccoSessionTtlMinutes: environmentConfig.BREEZE_1CCO_SESSION_TTL_MINUTES,

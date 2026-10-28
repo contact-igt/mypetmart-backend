@@ -1,6 +1,7 @@
 import { Router } from "express";
 
 import { webhookRateLimiter } from "../../middlewares/auth/rate-limiter.middleware.js";
+import { handleBreezeAbandonedCheckoutWebhook } from "./breeze-abandoned-checkout.controller.js";
 import { handleBreezeOrderCreateWebhook } from "./breeze-order-create.controller.js";
 import { handleBreezeWebhook } from "./breeze-webhook.controller.js";
 
@@ -18,4 +19,11 @@ breezeWebhookRouter.post("/webhook", webhookRateLimiter, (req, res, next) => {
 // captured payments can still be reconciled.
 breezeWebhookRouter.post("/order-create-webhook", webhookRateLimiter, (req, res, next) => {
   handleBreezeOrderCreateWebhook(req, res, next).catch(next);
+});
+
+// Breeze's documented abandoned-checkout callback. It is acknowledged after
+// authentication; no checkout attempt is released until Breeze supplies the
+// stable cart/session identifier needed for a safe match.
+breezeWebhookRouter.post("/abandoned-checkout-webhook", webhookRateLimiter, (req, res, next) => {
+  handleBreezeAbandonedCheckoutWebhook(req, res, next).catch(next);
 });

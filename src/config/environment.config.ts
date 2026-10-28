@@ -15,6 +15,7 @@ const SECRET_FIELD_NAMES = [
   "BREEZE_WEBHOOK_SECRET",
   "BREEZE_CART_PRIVATE_KEY",
   "BREEZE_ORDER_WEBHOOK_API_KEY",
+  "BREEZE_ABANDONED_CHECKOUT_API_KEY",
   "SHIPPING_API_KEY",
   "SHIPPING_WEBHOOK_SECRET",
   "ITHINK_ACCESS_TOKEN",
@@ -235,6 +236,9 @@ const environmentSchema = z
     // Optional dedicated X-Api-Key for the Order Create Webhook; falls back to
     // BREEZE_WEBHOOK_SECRET so a single merchant key keeps working.
     BREEZE_ORDER_WEBHOOK_API_KEY: optionalTrimmedStringSchema,
+    // Dedicated credential for Breeze's Abandoned Checkout callback. It is
+    // intentionally separate from the order-create credential.
+    BREEZE_ABANDONED_CHECKOUT_API_KEY: optionalTrimmedStringSchema,
     BREEZE_CART_PRIVATE_KEY: optionalTrimmedStringSchema,
     BREEZE_1CCO_SESSION_TTL_MINUTES: integerFromString("BREEZE_1CCO_SESSION_TTL_MINUTES", 5, 240).default(60),
     // Breeze Web SDK `shopUrl` init parameter (Breeze team confirmed:
