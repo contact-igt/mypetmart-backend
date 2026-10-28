@@ -88,6 +88,7 @@ function mapShippingAddress(payload: BreezeOrderCreatePayload) {
   const address = payload.content.shippingAddress;
   const countryCode = address.countryCode?.trim() ?? "";
   const phone = countryCode ? `${countryCode} ${address.phoneNumber}`.trim() : address.phoneNumber;
+  const country = address.country.trim().toUpperCase();
   const parsed = updateOrderShippingAddressSchema.safeParse({
     recipientName: address.name,
     phone,
@@ -98,7 +99,7 @@ function mapShippingAddress(payload: BreezeOrderCreatePayload) {
     postalCode: address.postalCode
   });
   if (!parsed.success) return null;
-  if (address.country.trim().toUpperCase() !== DEFAULT_COUNTRY_CODE) return null;
+  if (country !== DEFAULT_COUNTRY_CODE && country !== "IND" && country !== "INDIA") return null;
   return { ...parsed.data, country: DEFAULT_COUNTRY_CODE };
 }
 

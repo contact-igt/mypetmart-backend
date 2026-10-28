@@ -462,6 +462,16 @@ describe("Breeze Full 1CCO Order Create Webhook bridge", () => {
       expect(await T.Order.count()).toBe(0);
     });
 
+    it("accepts Breeze's India country label and stores the ISO country code", async () => {
+      const product = await createProduct();
+      const session = await newSession(request.agent(app), product, 2);
+      const body = webhook(session) as any;
+      body.content.shippingAddress = { ...ADDRESS, country: "India" };
+      const res = await post(body);
+      expect(res.status).toBe(200);
+      expect((await T.Order.findOne())?.ship_country).toBe("IN");
+    });
+
     it("a second success with DIFFERENT Breeze ids after the Order exists is a possible double payment: reconciled, not merged", async () => {
       const product = await createProduct({ stock: 20 });
       const session = await newSession(request.agent(app), product, 2);
