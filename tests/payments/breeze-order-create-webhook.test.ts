@@ -424,14 +424,18 @@ describe("Breeze Full 1CCO Order Create Webhook bridge", () => {
       expect((await T.BreezeCheckoutSession.findOne())?.last_error_code).toBe("CURRENCY_MISMATCH");
     });
 
-    it("a COD/cash outcome is never treated as prepaid paid", async () => {
+    it("confirms a COD/cash outcome without treating it as prepaid paid", async () => {
       const product = await createProduct();
       const session = await newSession(request.agent(app), product, 2);
       const body = webhook(session) as any;
       body.content.payment.paymentMethodType = "COD";
-      expect((await post(body)).status).toBe(422);
-      expect(await T.Order.count()).toBe(0);
-      expect((await T.BreezeCheckoutSession.findOne())?.last_error_code).toBe("COD_UNSUPPORTED");
+      expect((await post(body)).status).toBe(200);
+      const order = await T.Order.findOne();
+      const payment = await T.Payment.findOne();
+      expect(order).toMatchObject({ status: "confirmed", payment_status: "pending" });
+      expect(payment).toMatchObject({ provider: "cod", method: "cod", status: "pending" });
+      expect((await T.Product.findByPk(product.id))?.stock).toBe(18);
+      expect((await T.BreezeCheckoutSession.findOne())?.processing_status).toBe("finalized");
     });
 
     it("an invalid shipping address is reconciled without creating an Order; a corrected later event succeeds", async () => {

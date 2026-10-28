@@ -25,6 +25,7 @@ process.env.BREEZE_WEBHOOK_SECRET = process.env.BREEZE_WEBHOOK_SECRET || "test_b
 // order webhook key must equal the test secret, and the 1CCO flag/unit/key ids start
 // unset (tests opt in with vi.stubEnv).
 process.env.BREEZE_ORDER_WEBHOOK_API_KEY = process.env.BREEZE_WEBHOOK_SECRET;
+process.env.BREEZE_ABANDONED_CHECKOUT_API_KEY = "test_breeze_abandoned_checkout_api_key_do_not_use_in_prod";
 process.env.BREEZE_1CCO_ENABLED = "false";
 process.env.BREEZE_AMOUNT_UNIT = "";
 process.env.BREEZE_KEY_ID = "";

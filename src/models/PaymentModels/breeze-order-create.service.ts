@@ -9,13 +9,17 @@ import { BreezeCheckoutSession, BreezeWebhookEvent, Order, OrderItem, Payment, U
 import { logger } from "../../utils/logger.js";
 import { formatPaiseAsMoney } from "../../utils/product-money.js";
 import { buildBusinessReference } from "../../utils/reference-generator.js";
+import { CommerceNotifications } from "../../services/notification/commerce-notifications.service.js";
 import type { CartIdentity } from "../CartModels/cart.types.js";
+import { CartService } from "../CartModels/cart.service.js";
 import { updateOrderShippingAddressSchema } from "../OrderModels/order.validation.js";
+import { isValidOrderStatusTransition } from "../OrderModels/order.constants.js";
+import { resolveCartPaymentMethods } from "../ProductModels/product-payment-methods.js";
 import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
 import { fromProviderAmount } from "./breeze-money.js";
 import type { BreezeOrderIntent } from "./breeze-order-intent.js";
 import { classifyBreezeStatus, BREEZE_ORDER_CREATE_EVENT_NAMES, type BreezeOrderCreatePayload } from "./breeze-order-create.schema.js";
-import { PaymentFinalizationService } from "./payment-finalization.service.js";
+import { PaymentFinalizationService, lockAndCheckOrderStock } from "./payment-finalization.service.js";
 import { raiseBreezeAlert } from "./breeze-alerts.service.js";
 import type { NormalizedPaymentResult } from "./payment.types.js";
 
@@ -192,9 +196,16 @@ async function recordProviderReferences(sessionId: number, payload: BreezeOrderC
 }
 
 type CreatedOrder = { orderId: number; orderNumber: string; paymentId: number; reused: boolean };
+type CheckoutPaymentKind = "breeze" | "cod";
 
 /** PHASE 1 — create-or-reuse the Order, OrderItems and Payment under the session lock. */
-async function ensureOrderAndPayment(sessionId: number, intent: BreezeOrderIntent, shipping: NonNullable<ReturnType<typeof mapShippingAddress>>, guestEmail: string | null): Promise<CreatedOrder> {
+async function ensureOrderAndPayment(
+  sessionId: number,
+  intent: BreezeOrderIntent,
+  shipping: NonNullable<ReturnType<typeof mapShippingAddress>>,
+  guestEmail: string | null,
+  paymentKind: CheckoutPaymentKind
+): Promise<CreatedOrder> {
   return sequelize.transaction(async (t) => {
     const session = await BreezeCheckoutSession.findByPk(sessionId, { transaction: t, lock: t.LOCK.UPDATE });
     if (!session) throw new Error(`Breeze checkout session '${sessionId}' disappeared.`);
@@ -291,12 +302,12 @@ async function ensureOrderAndPayment(sessionId: number, intent: BreezeOrderInten
         order_id: order.id,
         amount: order.total,
         currency: order.currency,
-        provider: "breeze",
+        provider: paymentKind,
         status: "pending",
-        provider_order_id: providerOrderRef(session.public_id),
+        provider_order_id: paymentKind === "breeze" ? providerOrderRef(session.public_id) : null,
         provider_payment_id: null,
-        method: null,
-        raw_payload: { provider: "breeze", flow: "full_1cco", sessionPublicId: session.public_id }
+        method: paymentKind === "cod" ? "cod" : null,
+        raw_payload: { provider: "breeze", flow: "full_1cco", sessionPublicId: session.public_id, paymentKind }
       },
       { transaction: t }
     );
@@ -307,6 +318,35 @@ async function ensureOrderAndPayment(sessionId: number, intent: BreezeOrderInten
     await session.save({ transaction: t });
 
     return { orderId: order.id, orderNumber, paymentId, reused: false };
+  });
+}
+
+/** Confirms a Breeze-originated COD order without ever marking its payment paid. */
+async function finalizeBreezeCodOrder(orderId: number, paymentId: number): Promise<"SUCCESS_CONFIRMED" | "NOOP_ALREADY_TERMINAL" | "STOCK_UNAVAILABLE"> {
+  return sequelize.transaction(async (t) => {
+    const order = await Order.findByPk(orderId, { transaction: t, lock: t.LOCK.UPDATE });
+    const payment = await Payment.findByPk(paymentId, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!order || !payment || payment.order_id !== orderId || payment.provider !== "cod" || payment.status !== "pending") {
+      return "STOCK_UNAVAILABLE";
+    }
+    if (order.status === "confirmed") return "NOOP_ALREADY_TERMINAL";
+    if (!isValidOrderStatusTransition(order.status, "confirmed")) return "STOCK_UNAVAILABLE";
+
+    const lines = await lockAndCheckOrderStock(order.id, t);
+    if (!lines) return "STOCK_UNAVAILABLE";
+    for (const line of lines) {
+      if (line.variant) {
+        line.variant.stock = line.availableStock - line.item.quantity;
+        await line.variant.save({ transaction: t });
+      } else {
+        line.product.stock = line.availableStock - line.item.quantity;
+        await line.product.save({ transaction: t });
+      }
+    }
+    order.status = "confirmed";
+    await order.save({ transaction: t });
+    await CartService.finalizeCartForOrder(order, t);
+    return "SUCCESS_CONFIRMED";
   });
 }
 
@@ -411,11 +451,7 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
     return reconcile(payload, "AMOUNT_MISMATCH", 422, "Amount does not match the authorised checkout.");
   }
 
-  // 8. COD / cash outcomes are not prepaid: never treated as paid here.
-  if (looksLikeCod(payload)) {
-    await markSession(session.public_id, { processing_status: "reconciliation_required", last_error_code: "COD_UNSUPPORTED" });
-    return reconcile(payload, "COD_UNSUPPORTED", 422, "Cash on delivery through this checkout is not supported.");
-  }
+  const isCod = looksLikeCod(payload);
 
   // 9. Immutable intent + address (only needed to create the Order).
   const intent = readJson<BreezeOrderIntent>(session.order_intent);
@@ -429,16 +465,29 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
     return reconcile(payload, "INVALID_SHIPPING_ADDRESS", 422, "Shipping address is not valid for delivery.");
   }
 
+  if (isCod) {
+    const methods = resolveCartPaymentMethods(intent!.lines.map((line) => ({ productId: line.productId, productName: line.productName, eligibility: line.paymentMethodEligibility })));
+    if (!methods.allowedPaymentMethods.includes("cod")) {
+      await markSession(session.public_id, { processing_status: "reconciliation_required", last_error_code: "COD_PAYMENT_METHOD_NOT_ALLOWED" });
+      return reconcile(payload, "COD_PAYMENT_METHOD_NOT_ALLOWED", 422, "Cash on Delivery is not available for one or more items in this checkout.");
+    }
+  }
+
   // 10. Serviceability — a network lookup, deliberately outside any DB
   //     transaction. Captured money is never rejected for it; an explicit "not
   //     serviceable" is flagged on the session for support.
   let unserviceable = false;
   if (session.order_id === null && shipping) {
     try {
-      unserviceable = !(await ServiceabilityService.checkDestination(shipping.postalCode, "prepaid"));
+      unserviceable = !(await ServiceabilityService.checkDestination(shipping.postalCode, isCod ? "cod" : "prepaid"));
     } catch {
       unserviceable = false; // lookup unavailable: unknown, not a rejection
     }
+  }
+
+  if (isCod && unserviceable) {
+    await markSession(session.public_id, { processing_status: "reconciliation_required", last_error_code: "COD_DESTINATION_UNSERVICEABLE" });
+    return reconcile(payload, "COD_DESTINATION_UNSERVICEABLE", 422, "Cash on Delivery is not available for this delivery address.");
   }
 
   const guestEmailCandidate = emailSchema.safeParse(content.customer.emailAddress ?? content.shippingAddress.emailAddress ?? "");
@@ -447,7 +496,26 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
   // PHASE 1
   // (When the session already has an Order, ensureOrderAndPayment returns it
   // before touching intent/shipping, so a replay needs neither.)
-  const created: CreatedOrder = await ensureOrderAndPayment(session.id, intent as BreezeOrderIntent, shipping as NonNullable<typeof shipping>, guestEmail);
+  const created: CreatedOrder = await ensureOrderAndPayment(session.id, intent as BreezeOrderIntent, shipping as NonNullable<typeof shipping>, guestEmail, isCod ? "cod" : "breeze");
+
+  if (isCod) {
+    const codFinalization = await finalizeBreezeCodOrder(created.orderId, created.paymentId);
+    if (codFinalization !== "SUCCESS_CONFIRMED" && codFinalization !== "NOOP_ALREADY_TERMINAL") {
+      await markSession(session.public_id, { processing_status: "reconciliation_required", last_error_code: codFinalization });
+      return reconcile(payload, `COD_${codFinalization}`, 422, "Cash on Delivery order could not be confirmed.");
+    }
+    if (codFinalization === "SUCCESS_CONFIRMED") {
+      await CommerceNotifications.codOrderConfirmed(created.orderId);
+    }
+    await markSession(session.public_id, { processing_status: "finalized", last_error_code: null });
+    await BreezeCheckoutSession.update({ status: "completed" }, { where: { public_id: session.public_id } });
+    return {
+      ack: okAck(payload.id, "SUCCESS", "Cash on Delivery order created successfully", created.orderNumber),
+      eventStatus: "processed",
+      outcomeCode: codFinalization,
+      terminal: true
+    };
+  }
 
   // PHASE 2 — the single shared finalization path.
   const result: NormalizedPaymentResult = {
