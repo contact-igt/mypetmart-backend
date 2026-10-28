@@ -446,6 +446,18 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
   const paidPaise = fromProviderAmount(content.payment.amount, unit);
   const cartPaise = fromProviderAmount(content.cart.totalPrice, unit);
   if (paidPaise === null || cartPaise === null || paidPaise !== session.amount_paise || cartPaise !== session.amount_paise) {
+    logger.warn(
+      {
+        sessionPublicId: session.public_id,
+        configuredAmountUnit: unit,
+        expectedAmountPaise: session.amount_paise,
+        paymentAmount: content.payment.amount,
+        cartTotalPrice: content.cart.totalPrice,
+        paymentAmountPaise: paidPaise,
+        cartTotalPricePaise: cartPaise
+      },
+      "breeze order-create webhook: amount mismatch"
+    );
     await markSession(session.public_id, { processing_status: "reconciliation_required", last_error_code: "AMOUNT_MISMATCH" });
     await raiseBreezeAlert("amount_or_currency_mismatch", payload.id, { eventId: payload.id, outcomeCode: "AMOUNT_MISMATCH", errorCode: "AMOUNT_MISMATCH" });
     return reconcile(payload, "AMOUNT_MISMATCH", 422, "Amount does not match the authorised checkout.");
