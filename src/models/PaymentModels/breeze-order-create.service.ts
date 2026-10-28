@@ -443,9 +443,13 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
     await raiseBreezeAlert("amount_or_currency_mismatch", payload.id, { eventId: payload.id, outcomeCode: "CURRENCY_MISMATCH", errorCode: "CURRENCY_MISMATCH" });
     return reconcile(payload, "CURRENCY_MISMATCH", 422, "Unsupported currency.");
   }
-  const paidPaise = fromProviderAmount(content.payment.amount, unit);
+  const isCod = looksLikeCod(payload);
+  // Breeze's COD callback reports payment.amount in rupees while the signed
+  // cart total remains in the configured cart unit. COD collects no money at
+  // checkout, so authorize its order against the signed cart total only.
+  const paidPaise = fromProviderAmount(content.payment.amount, isCod ? "rupees" : unit);
   const cartPaise = fromProviderAmount(content.cart.totalPrice, unit);
-  if (paidPaise === null || cartPaise === null || paidPaise !== session.amount_paise || cartPaise !== session.amount_paise) {
+  if (cartPaise === null || cartPaise !== session.amount_paise || (!isCod && (paidPaise === null || paidPaise !== session.amount_paise))) {
     logger.warn(
       {
         sessionPublicId: session.public_id,
@@ -462,8 +466,6 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
     await raiseBreezeAlert("amount_or_currency_mismatch", payload.id, { eventId: payload.id, outcomeCode: "AMOUNT_MISMATCH", errorCode: "AMOUNT_MISMATCH" });
     return reconcile(payload, "AMOUNT_MISMATCH", 422, "Amount does not match the authorised checkout.");
   }
-
-  const isCod = looksLikeCod(payload);
 
   // 9. Immutable intent + address (only needed to create the Order).
   const intent = readJson<BreezeOrderIntent>(session.order_intent);
@@ -536,7 +538,7 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
     providerStatus: content.status ?? payload.eventName,
     normalizedOutcome: "SUCCESS",
     // Exact integer-paise formatting (never float division).
-    amount: formatPaiseAsMoney(paidPaise),
+    amount: formatPaiseAsMoney(paidPaise!),
     method: (content.payment.paymentMethodType || content.payment.paymentMethod).slice(0, 80),
     verifiedAt: new Date(),
     verifiedVia: "webhook",
