@@ -16,7 +16,7 @@ import { updateOrderShippingAddressSchema } from "../OrderModels/order.validatio
 import { isValidOrderStatusTransition } from "../OrderModels/order.constants.js";
 import { resolveCartPaymentMethods } from "../ProductModels/product-payment-methods.js";
 import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
-import { fromProviderAmount } from "./breeze-money.js";
+import { fromBreezePaymentAmount, fromProviderAmount } from "./breeze-money.js";
 import type { BreezeOrderIntent } from "./breeze-order-intent.js";
 import { classifyBreezeStatus, BREEZE_ORDER_CREATE_EVENT_NAMES, type BreezeOrderCreatePayload } from "./breeze-order-create.schema.js";
 import { PaymentFinalizationService, lockAndCheckOrderStock } from "./payment-finalization.service.js";
@@ -445,10 +445,10 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
     return reconcile(payload, "CURRENCY_MISMATCH", 422, "Unsupported currency.");
   }
   const isCod = looksLikeCod(payload);
-  // Breeze's COD callback reports payment.amount in rupees while the signed
-  // cart total remains in the configured cart unit. COD collects no money at
-  // checkout, so authorize its order against the signed cart total only.
-  const paidPaise = fromProviderAmount(content.payment.amount, isCod ? "rupees" : unit);
+  // Breeze reports payment.amount in rupees while the signed cart total stays
+  // in the configured cart unit. COD collects no money at checkout, so it is
+  // authorized against the signed cart total only.
+  const paidPaise = fromBreezePaymentAmount(content.payment.amount);
   const cartPaise = fromProviderAmount(content.cart.totalPrice, unit);
   if (cartPaise === null || cartPaise !== session.amount_paise || (!isCod && (paidPaise === null || paidPaise !== session.amount_paise))) {
     logger.warn(

@@ -42,3 +42,9 @@ export function fromProviderAmount(value: unknown, unit: BreezeAmountUnit): numb
   const fraction = Number((match[2] ?? "").padEnd(2, "0") || "0");
   return rupees * 100 + fraction;
 }
+
+// Breeze Order Create callbacks report payment.amount in rupees, even when
+// the signed cart is configured in paise.
+export function fromBreezePaymentAmount(value: unknown): number | null {
+  return fromProviderAmount(value, "rupees");
+}
