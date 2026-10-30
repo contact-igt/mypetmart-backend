@@ -2,10 +2,14 @@
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { fromProviderAmount, toProviderAmount } from "../../src/models/PaymentModels/breeze-money.js";
+import { fromBreezePaymentAmount, fromProviderAmount, toProviderAmount } from "../../src/models/PaymentModels/breeze-money.js";
 import { classifyBreezeStatus } from "../../src/models/PaymentModels/breeze-order-create.schema.js";
 
 describe("Breeze money adapter (integer paise internally, explicit provider unit)", () => {
+  it("parses an Order Create payment amount in rupees when the signed cart uses paise", () => {
+    expect(fromBreezePaymentAmount(1)).toBe(100);
+  });
+
   it("converts to the provider unit", () => {
     expect(toProviderAmount(50000, "paise")).toBe(50000);
     expect(toProviderAmount(50000, "rupees")).toBe(500);
