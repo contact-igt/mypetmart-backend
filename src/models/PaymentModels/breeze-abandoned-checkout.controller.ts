@@ -24,6 +24,8 @@ const abandonedCheckoutSchema = z
  * our opaque checkout-session public_id.
  */
 export async function handleBreezeAbandonedCheckoutWebhook(req: Request, res: Response, _next: NextFunction): Promise<void> {
+  logger.info({ path: req.originalUrl, method: req.method, hasApiKey: Boolean(req.get("x-api-key")) }, "breeze abandoned-checkout webhook: incoming request received");
+
   const expectedKey = paymentConfig.breezeAbandonedCheckoutApiKey;
   if (!expectedKey) {
     logger.error("breeze abandoned-checkout webhook: no API key configured");
@@ -39,6 +41,7 @@ export async function handleBreezeAbandonedCheckoutWebhook(req: Request, res: Re
 
   const parsed = abandonedCheckoutSchema.safeParse(req.body);
   if (!parsed.success) {
+    logger.warn({ issues: parsed.error.issues, payload: req.body }, "breeze abandoned-checkout webhook: payload validation failed");
     res.status(422).json({ status: "FAILED", message: "Invalid payload." });
     return;
   }
