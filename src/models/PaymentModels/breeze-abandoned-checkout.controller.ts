@@ -8,11 +8,14 @@ import { verifyBreezeWebhookApiKey } from "./breeze-signature.util.js";
 
 const abandonedCheckoutSchema = z
   .object({
-    // shortcut: assumes Breeze cartDetails.orderId echoes Cart Object id, replace after verifying a sandbox payload.
-    cartDetails: z.object({ orderId: z.string().regex(/^[0-9a-f]{32}$/u) }).passthrough(),
-    customer: z.object({}).passthrough(),
+    cartDetails: z
+      .object({
+        orderId: z.string().trim().regex(/^[0-9a-f]{32}$/iu)
+      })
+      .passthrough(),
+    customer: z.unknown().optional(),
     comments: z.unknown().optional(),
-    checkoutUrl: z.string().url()
+    checkoutUrl: z.string().optional()
   })
   .passthrough();
 
