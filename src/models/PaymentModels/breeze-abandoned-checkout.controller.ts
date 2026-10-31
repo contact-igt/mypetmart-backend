@@ -2,12 +2,14 @@ import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 
 import { paymentConfig } from "../../config/payment.config.js";
+import { BreezeCheckoutSession } from "../../database/tables/index.js";
 import { logger } from "../../utils/logger.js";
 import { verifyBreezeWebhookApiKey } from "./breeze-signature.util.js";
 
 const abandonedCheckoutSchema = z
   .object({
-    cartDetails: z.object({}).passthrough(),
+    // shortcut: assumes Breeze cartDetails.orderId echoes Cart Object id, replace after verifying a sandbox payload.
+    cartDetails: z.object({ orderId: z.string().regex(/^[0-9a-f]{32}$/u) }).passthrough(),
     customer: z.object({}).passthrough(),
     comments: z.unknown().optional(),
     checkoutUrl: z.string().url()
@@ -18,10 +20,8 @@ const abandonedCheckoutSchema = z
  * Breeze Abandoned Checkout callback, mounted at
  * POST /api/v1/payments/breeze/abandoned-checkout-webhook.
  *
- * The published contract supplies an X-Api-Key but not a stable identifier
- * that we can safely map to a checkout session. Acknowledging authenticated
- * events makes the URL ready for Breeze configuration without risking a
- * duplicate payment by releasing a session based on customer/cart details.
+ * `cartDetails.orderId` is used as the signed Cart Object `id`, which maps to
+ * our opaque checkout-session public_id.
  */
 export async function handleBreezeAbandonedCheckoutWebhook(req: Request, res: Response, _next: NextFunction): Promise<void> {
   const expectedKey = paymentConfig.breezeAbandonedCheckoutApiKey;
@@ -37,11 +37,18 @@ export async function handleBreezeAbandonedCheckoutWebhook(req: Request, res: Re
     return;
   }
 
-  if (!abandonedCheckoutSchema.safeParse(req.body).success) {
+  const parsed = abandonedCheckoutSchema.safeParse(req.body);
+  if (!parsed.success) {
     res.status(422).json({ status: "FAILED", message: "Invalid payload." });
     return;
   }
 
-  logger.info("breeze abandoned-checkout webhook: authenticated event received");
+  // Only a checkout with no provider result or Order is retryable. A late
+  // order-create webhook is still accepted by the bridge after this release.
+  const [released] = await BreezeCheckoutSession.update(
+    { processing_status: "released", status: "expired" },
+    { where: { public_id: parsed.data.cartDetails.orderId, processing_status: "awaiting_webhook", order_id: null } }
+  );
+  logger.info({ sessionPublicId: parsed.data.cartDetails.orderId, released: released === 1 }, "breeze abandoned-checkout webhook: authenticated event received");
   res.status(200).json({ status: "RECEIVED" });
 }
