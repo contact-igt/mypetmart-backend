@@ -44,7 +44,6 @@ const SEVERITY: Record<BreezeBlockingReason, number> = {
 };
 
 const STATUS_TO_REASON: Record<string, BreezeBlockingReason> = {
-  awaiting_webhook: "BREEZE_ATTEMPT_IN_PROGRESS",
   order_created: "BREEZE_PAYMENT_VERIFYING",
   reconciliation_required: "BREEZE_RECONCILIATION_REQUIRED"
 };
@@ -73,12 +72,6 @@ export async function findBlockingAttempt(identity: CartIdentity, transaction?: 
   let worst: BreezeBlockingReason | null = null;
   const now = new Date();
   for (const row of unresolved) {
-    if (row.processing_status === "awaiting_webhook") {
-      // If the session has expired and no order was created, this attempt is no longer in progress
-      if (row.expires_at && new Date(row.expires_at) < now) {
-        continue;
-      }
-    }
     const reason = STATUS_TO_REASON[row.processing_status];
     if (reason && (worst === null || SEVERITY[reason] > SEVERITY[worst])) worst = reason;
   }
