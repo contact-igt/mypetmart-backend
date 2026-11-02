@@ -82,7 +82,9 @@ export function handleGetBreezeCheckoutConfig(_req: Request, res: Response): voi
   sendSuccess(res, 200, { enabled: paymentConfig.breeze1ccoReady });
 }
 
-const breezeSessionStatusSchema = z.object({ sessionId: z.string().regex(/^[0-9a-f]{32}$/u, "Invalid session.") });
+const breezeSessionIdSchema = z.object({ sessionId: z.string().regex(/^[0-9a-f]{32}$/u, "Invalid session.") });
+// Alias kept for symmetry — both endpoints use the same shape.
+const breezeSessionStatusSchema = breezeSessionIdSchema;
 
 // Server-confirmed state of a Breeze checkout for the browser. Ownership is
 // enforced against the cart identity that created the session; the browser SDK
@@ -99,6 +101,25 @@ export async function handleGetBreezeCheckoutSessionStatus(req: Request, res: Re
       return;
     }
     sendSuccess(res, 200, status);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Re-fetches the signed cart payload for a pending session so the browser can
+// reopen the Breeze drawer after a page refresh without creating a new session.
+export async function handleResumeBreezeCheckoutSession(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.cartIdentity) {
+      throw new Error("Cart identity was not resolved before reaching the controller.");
+    }
+    const { sessionId } = breezeSessionIdSchema.parse(req.body);
+    const session = await BreezeCheckoutSessionService.resumeSession(req.cartIdentity, sessionId);
+    if (!session) {
+      res.status(404).json({ success: false, error: { code: "BREEZE_SESSION_NOT_FOUND", message: "No resumable session found." } });
+      return;
+    }
+    sendSuccess(res, 200, session);
   } catch (error) {
     next(error);
   }

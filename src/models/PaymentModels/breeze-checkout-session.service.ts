@@ -211,5 +211,53 @@ export const BreezeCheckoutSessionService = {
   async expireStaleSessions(now: Date = new Date()): Promise<number> {
     const [count] = await BreezeCheckoutSession.update({ status: "expired" }, { where: { status: "created", expires_at: { [Op.lt]: now } } });
     return count;
+  },
+
+  /**
+   * Fetches the signed cart payload for an existing active session so the
+   * browser can re-open the Breeze drawer after a page refresh.
+   * Ownership is enforced: only the identity that created the session may
+   * retrieve it. Returns null when not found, expired, or already resolved.
+   */
+  async resumeSession(identity: CartIdentity, sessionId: string): Promise<BreezeCheckoutSessionJSON | null> {
+    const privateKey = paymentConfig.breezeCartPrivateKey;
+    if (!paymentConfig.breeze1ccoReady || !privateKey || !paymentConfig.breezeKeyId || !paymentConfig.breezeMerchantId || !paymentConfig.breezeEnvironment) {
+      return null;
+    }
+
+    const identityWhere =
+      identity.type === "customer"
+        ? { user_id: identity.userId }
+        : { user_id: null, guest_identity_hash: identity.tokenHash };
+
+    const session = await BreezeCheckoutSession.findOne({
+      where: {
+        public_id: sessionId,
+        status: "created",
+        processing_status: "awaiting_webhook",
+        order_id: null,
+        ...identityWhere
+      }
+    });
+
+    if (!session) return null;
+
+    // Re-sign the original cart snapshot — same payload Breeze received the
+    // first time, so Breeze correlates the session by the same cart.id/orderId.
+    const stringifiedCart = JSON.stringify(session.cart_snapshot);
+    const signature = signBreezeCart(stringifiedCart, privateKey);
+
+    return {
+      sessionId: session.public_id,
+      merchantId: paymentConfig.breezeMerchantId,
+      environment: paymentConfig.breezeEnvironment,
+      shopUrl: paymentConfig.breezeShopUrl,
+      cart: stringifiedCart,
+      signature,
+      keyId: paymentConfig.breezeKeyId,
+      amountPaise: session.amount_paise,
+      currency: (session.currency as string) ?? "INR",
+      expiresAt: session.expires_at.toISOString()
+    };
   }
 };
