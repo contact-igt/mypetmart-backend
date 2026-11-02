@@ -264,12 +264,9 @@ export const BreezeCheckoutSessionService = {
         ? { user_id: identity.userId }
         : { user_id: null, guest_identity_hash: identity.tokenHash };
 
-    const session = await BreezeCheckoutSession.findOne({
+        const session = await BreezeCheckoutSession.findOne({
       where: {
         public_id: sessionId,
-        status: "created",
-        processing_status: "awaiting_webhook",
-        order_id: null,
         ...identityWhere
       }
     });
