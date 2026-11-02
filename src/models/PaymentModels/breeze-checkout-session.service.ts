@@ -120,13 +120,12 @@ export const BreezeCheckoutSessionService = {
     const existingSession = await BreezeCheckoutSession.findOne({
       where: {
         cart_id: cart.id,
-        amount_paise: totalPaise,
-        status: "created",
         processing_status: "awaiting_webhook",
         order_id: null,
         expires_at: { [Op.gt]: new Date() },
         ...identityWhere
-      }
+      },
+      order: [["id", "DESC"]]
     });
 
     if (existingSession) {
