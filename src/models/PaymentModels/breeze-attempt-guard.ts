@@ -64,14 +64,21 @@ function identityWhere(identity: CartIdentity) {
 export async function findBlockingAttempt(identity: CartIdentity, transaction?: Transaction): Promise<BreezeBlockingReason | null> {
   const unresolved = await BreezeCheckoutSession.findAll({
     ...(transaction ? { transaction } : {}),
-    attributes: ["processing_status"],
+    attributes: ["processing_status", "expires_at"],
     where: {
       ...identityWhere(identity),
       processing_status: { [Op.in]: Object.keys(STATUS_TO_REASON) }
     }
   });
   let worst: BreezeBlockingReason | null = null;
+  const now = new Date();
   for (const row of unresolved) {
+    if (row.processing_status === "awaiting_webhook") {
+      // If the session has expired and no order was created, this attempt is no longer in progress
+      if (row.expires_at && new Date(row.expires_at) < now) {
+        continue;
+      }
+    }
     const reason = STATUS_TO_REASON[row.processing_status];
     if (reason && (worst === null || SEVERITY[reason] > SEVERITY[worst])) worst = reason;
   }
