@@ -44,6 +44,7 @@ const SEVERITY: Record<BreezeBlockingReason, number> = {
 };
 
 const STATUS_TO_REASON: Record<string, BreezeBlockingReason> = {
+  awaiting_webhook: "BREEZE_ATTEMPT_IN_PROGRESS",
   order_created: "BREEZE_PAYMENT_VERIFYING",
   reconciliation_required: "BREEZE_RECONCILIATION_REQUIRED"
 };
