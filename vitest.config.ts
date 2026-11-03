@@ -1,26 +1,7 @@
 import { defineConfig } from "vitest/config";
-import { existsSync } from "node:fs";
-import { loadEnvFile } from "node:process";
-
-// Test credentials are deliberately separate from .env, which may be a
-// developer's production-like local configuration. Never fall back to it.
-if (existsSync(".env.test.local")) loadEnvFile(".env.test.local");
-
-const requiredTestDbVariables = ["TEST_DB_HOST", "TEST_DB_PORT", "TEST_DB_USER", "TEST_DB_PASSWORD"] as const;
-const missingTestDbVariables = requiredTestDbVariables.filter((name) => !process.env[name]?.trim());
-if (missingTestDbVariables.length > 0) {
-  throw new Error(`Missing ${missingTestDbVariables.join(", ")}. Configure dedicated credentials in ignored .env.test.local; tests will only target mypetmart_test.`);
-}
-if (process.env.TEST_DB_NAME && process.env.TEST_DB_NAME !== "mypetmart_test") {
-  throw new Error("TEST_DB_NAME must be exactly mypetmart_test.");
-}
 
 process.env.NODE_ENV = "test";
-process.env.DB_HOST = process.env.TEST_DB_HOST;
-process.env.DB_PORT = process.env.TEST_DB_PORT;
 process.env.DB_NAME = "mypetmart_test";
-process.env.DB_USER = process.env.TEST_DB_USER;
-process.env.DB_PASSWORD = process.env.TEST_DB_PASSWORD;
 // Deterministic PayU test credentials so Payment Initiation tests can build
 // real Hosted Checkout fields/hashes without a live PayU account. Never
 // falls back over a real local .env value if one is ever set.

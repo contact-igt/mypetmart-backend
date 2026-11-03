@@ -53,7 +53,7 @@ describe("Breeze abandoned-checkout webhook", () => {
     await db.disconnectDatabase();
   });
 
-  it("does not release an unresolved checkout from an abandonment event alone", async () => {
+  it("releases the matching unresolved checkout for a retry", async () => {
     const response = await request(app)
       .post(URL)
       .set("X-Api-Key", API_KEY)
@@ -62,8 +62,8 @@ describe("Breeze abandoned-checkout webhook", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ status: "RECEIVED" });
     const session = await T.BreezeCheckoutSession.findOne({ where: { public_id: SESSION_ID } });
-    expect(session?.processing_status).toBe("awaiting_webhook");
-    expect(session?.status).toBe("created");
+    expect(session?.processing_status).toBe("released");
+    expect(session?.status).toBe("expired");
   });
 
   it("rejects a missing or invalid API key", async () => {
