@@ -221,7 +221,8 @@ export const BreezeCheckoutSessionService = {
    */
   async resumeSession(identity: CartIdentity, sessionId: string): Promise<BreezeCheckoutSessionJSON | null> {
     const privateKey = paymentConfig.breezeCartPrivateKey;
-    if (!paymentConfig.breeze1ccoReady || !privateKey || !paymentConfig.breezeKeyId || !paymentConfig.breezeMerchantId || !paymentConfig.breezeEnvironment) {
+    const unit = paymentConfig.breezeAmountUnit;
+    if (!paymentConfig.breeze1ccoReady || !privateKey || !unit || !paymentConfig.breezeKeyId || !paymentConfig.breezeMerchantId || !paymentConfig.breezeEnvironment) {
       return null;
     }
 
@@ -242,6 +243,14 @@ export const BreezeCheckoutSessionService = {
     });
 
     if (!session) return null;
+
+    // Resume only the same cart snapshot. Reopening a drawer after its cart
+    // changed would show an old signed amount/items and is never safe.
+    const cart = await CartService.getCart(identity);
+    if (cart.id !== session.cart_id) return null;
+    const currentCart = JSON.stringify(buildBreezeCartObject(cart, session.public_id, unit));
+    const currentCartHash = crypto.createHash("sha256").update(currentCart, "utf8").digest("hex");
+    if (currentCartHash !== session.cart_hash) return null;
 
     // Re-sign the original cart snapshot — same payload Breeze received the
     // first time, so Breeze correlates the session by the same cart.id/orderId.
