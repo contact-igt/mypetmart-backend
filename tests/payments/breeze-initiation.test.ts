@@ -187,7 +187,7 @@ describe("Breeze payment initiation (sendOTP -> verifyOTP -> startPayment)", () 
     expect(res.body.data.provider).toBe("breeze");
     expect(res.body.data.merchantId).toBe("mypetmart");
     expect(res.body.data.environment).toBe("smb-release");
-    expect(res.body.data.shopUrl).toBe("https://mypetmart.org");
+    expect(res.body.data.shopUrl).toBe("https://mypetmart.in");
     expect(res.body.data.orderRef).toMatch(/^BRZ-\d{6,}-[0-9a-f]{10}$/);
     // Amount authority: 737.50 rupees -> 73750 paise, NOT any client value.
     expect(res.body.data.amountPaise).toBe(73750);

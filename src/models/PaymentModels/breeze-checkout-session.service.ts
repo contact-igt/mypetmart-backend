@@ -110,43 +110,9 @@ export const BreezeCheckoutSessionService = {
       throw new PrepaidMinimumPayableError(totalPaise);
     }
 
-    // Check if an existing open session for this exact cart can be reused for
-    // retry (as recommended by Breeze: reopen the drawer with the same orderId).
-    const identityWhere =
-      identity.type === "customer"
-        ? { user_id: identity.userId }
-        : { user_id: null, guest_identity_hash: identity.tokenHash };
-
-    const existingSession = await BreezeCheckoutSession.findOne({
-      where: {
-        cart_id: cart.id,
-        processing_status: "awaiting_webhook",
-        order_id: null,
-        expires_at: { [Op.gt]: new Date() },
-        ...identityWhere
-      },
-      order: [["id", "DESC"]]
-    });
-
-    if (existingSession) {
-      const stringifiedCart = JSON.stringify(existingSession.cart_snapshot);
-      const signature = signBreezeCart(stringifiedCart, privateKey);
-      return {
-        sessionId: existingSession.public_id,
-        merchantId: paymentConfig.breezeMerchantId,
-        environment: paymentConfig.breezeEnvironment,
-        shopUrl: paymentConfig.breezeShopUrl,
-        cart: stringifiedCart,
-        signature,
-        keyId: paymentConfig.breezeKeyId,
-        amountPaise: existingSession.amount_paise,
-        currency: (existingSession.currency as string) ?? "INR",
-        expiresAt: existingSession.expires_at.toISOString()
-      };
-    }
-
-    // No reusable active session for this cart: ensure no unresolved attempt
-    // blocks a completely new checkout attempt.
+    // Resume is an explicit, ownership-protected operation. A second create
+    // request must pass the attempt guard rather than silently reusing a
+    // session that could already have captured funds.
     await assertNoBlockingAttempt(identity);
 
     // Immutable order intent — SKUs and category come from the persisted rows
@@ -267,6 +233,10 @@ export const BreezeCheckoutSessionService = {
         const session = await BreezeCheckoutSession.findOne({
       where: {
         public_id: sessionId,
+        processing_status: "awaiting_webhook",
+        order_id: null,
+        status: "created",
+        expires_at: { [Op.gt]: new Date() },
         ...identityWhere
       }
     });
