@@ -1,10 +1,11 @@
 import crypto from "node:crypto";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { app } from "../../src/app.js";
 import type * as Database from "../../src/database/index.js";
 import type * as Tables from "../../src/database/tables/index.js";
+import { logger } from "../../src/utils/logger.js";
 
 const URL = "/api/v1/payments/breeze/abandoned-checkout-webhook";
 const API_KEY = "test_breeze_abandoned_checkout_api_key_do_not_use_in_prod";
@@ -54,6 +55,7 @@ describe("Breeze abandoned-checkout webhook", () => {
   });
 
   it("does not release an unresolved checkout from an abandonment event alone", async () => {
+    const info = vi.spyOn(logger, "info");
     const response = await request(app)
       .post(URL)
       .set("X-Api-Key", API_KEY)
@@ -64,6 +66,11 @@ describe("Breeze abandoned-checkout webhook", () => {
     const session = await T.BreezeCheckoutSession.findOne({ where: { public_id: SESSION_ID } });
     expect(session?.processing_status).toBe("awaiting_webhook");
     expect(session?.status).toBe("created");
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionPublicId: SESSION_ID, sessionFound: true, delayMs: expect.any(Number) }),
+      "breeze abandoned-checkout webhook: authenticated event received"
+    );
+    info.mockRestore();
   });
 
   it("rejects a missing or invalid API key", async () => {

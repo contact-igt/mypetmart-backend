@@ -53,9 +53,16 @@ export async function handleBreezeAbandonedCheckoutWebhook(req: Request, res: Re
   // Keep the attempt guard in place until an authoritative order/payment event
   // or an audited admin release resolves the session.
   const session = await BreezeCheckoutSession.findOne({
-    attributes: ["id"],
+    attributes: ["id", "created_at"],
     where: { public_id: parsed.data.cartDetails.orderId }
   });
-  logger.info({ sessionPublicId: parsed.data.cartDetails.orderId, sessionFound: Boolean(session) }, "breeze abandoned-checkout webhook: authenticated event received");
+  logger.info(
+    {
+      sessionPublicId: parsed.data.cartDetails.orderId,
+      sessionFound: Boolean(session),
+      ...(session ? { delayMs: Math.max(0, Date.now() - session.created_at.getTime()) } : {})
+    },
+    "breeze abandoned-checkout webhook: authenticated event received"
+  );
   res.status(200).json({ status: "RECEIVED" });
 }
