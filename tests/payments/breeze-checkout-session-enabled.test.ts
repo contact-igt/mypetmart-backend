@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 const CART_URL = "/api/v1/storefront/cart";
 const SESSION_URL = "/api/v1/storefront/payments/breeze/checkout-session";
 const RESUME_URL = "/api/v1/storefront/payments/breeze/checkout-session/resume";
+const RELEASE_URL = "/api/v1/storefront/payments/breeze/checkout-session/release";
 
 // Throwaway key generated per run — never a real Breeze/merchant key.
 const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", {
@@ -147,6 +148,23 @@ describe("Breeze checkout-session route — feature flag ON", () => {
     expect(a?.status).toBe("created");
     expect(a?.processing_status).toBe("awaiting_webhook");
     expect(await tables.BreezeCheckoutSession.count()).toBe(1);
+  });
+
+  it("releases the customer's closed drawer session so a new cart checkout can start", async () => {
+    const product = await createProduct();
+    const guest = request.agent(app);
+    await guest.post(`${CART_URL}/items`).send({ productId: product.id, quantity: 1 });
+    const first = await guest.post(SESSION_URL).send({});
+    expect(first.status).toBe(200);
+
+    const released = await guest.post(RELEASE_URL).send({ sessionId: first.body.data.sessionId });
+    expect(released.status).toBe(200);
+    expect(released.body.data).toEqual({ released: true });
+
+    const second = await guest.post(SESSION_URL).send({});
+    expect(second.status).toBe(200);
+    const firstRow = await tables.BreezeCheckoutSession.findOne({ where: { public_id: first.body.data.sessionId } });
+    expect(firstRow).toMatchObject({ processing_status: "released", status: "expired" });
   });
 
   it("resumes only an unchanged cart snapshot", async () => {

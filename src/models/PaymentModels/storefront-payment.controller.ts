@@ -124,3 +124,18 @@ export async function handleResumeBreezeCheckoutSession(req: Request, res: Respo
     next(error);
   }
 }
+
+// The customer closed the Breeze drawer before proceeding. This is scoped to
+// the resolved cart identity and can never release an order-bearing session.
+export async function handleReleaseBreezeCheckoutSession(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.cartIdentity) {
+      throw new Error("Cart identity was not resolved before reaching the controller.");
+    }
+    const { sessionId } = breezeSessionIdSchema.parse(req.body);
+    const result = await BreezeCheckoutSessionService.releaseSession(req.cartIdentity, sessionId);
+    sendSuccess(res, 200, result);
+  } catch (error) {
+    next(error);
+  }
+}

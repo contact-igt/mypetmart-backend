@@ -3,7 +3,7 @@ import { Router } from "express";
 import { authRateLimiter, breezeCheckoutStartRateLimiter, breezeCheckoutStatusRateLimiter } from "../../middlewares/auth/rate-limiter.middleware.js";
 import { resolveCartIdentity } from "../../middlewares/cart/resolve-cart-identity.middleware.js";
 import { optionalAuthenticate } from "../../middlewares/auth/optional-authenticate.middleware.js";
-import { handleConfirmCodOrder, handleCreateBreezeCheckoutSession, handleGetBreezeCheckoutConfig, handleGetBreezeCheckoutSessionStatus, handleGetPaymentStatus, handleInitiateBreezeCheckout, handleInitiatePayment, handleResumeBreezeCheckoutSession } from "./storefront-payment.controller.js";
+import { handleConfirmCodOrder, handleCreateBreezeCheckoutSession, handleGetBreezeCheckoutConfig, handleGetBreezeCheckoutSessionStatus, handleGetPaymentStatus, handleInitiateBreezeCheckout, handleInitiatePayment, handleReleaseBreezeCheckoutSession, handleResumeBreezeCheckoutSession } from "./storefront-payment.controller.js";
 
 export const storefrontPaymentRouter = Router();
 
@@ -41,6 +41,10 @@ storefrontPaymentRouter.post("/breeze/checkout-session/status", breezeCheckoutSt
 // existing unresolved session. Same rate-limit bucket as the status endpoint.
 storefrontPaymentRouter.post("/breeze/checkout-session/resume", breezeCheckoutStatusRateLimiter, resolveCartIdentity(), (req, res, next) => {
   void handleResumeBreezeCheckoutSession(req, res, next);
+});
+
+storefrontPaymentRouter.post("/breeze/checkout-session/release", breezeCheckoutStatusRateLimiter, resolveCartIdentity(), (req, res, next) => {
+  void handleReleaseBreezeCheckoutSession(req, res, next);
 });
 
 // Browser-return reconciliation surface — same auth shape/precedent as

@@ -36,6 +36,8 @@ export type BreezeCheckoutSessionJSON = {
   expiresAt: string;
 };
 
+export type BreezeCheckoutSessionReleaseJSON = { released: boolean };
+
 export class BreezeCheckoutDisabledError extends PaymentError {
   public constructor() {
     super("BREEZE_CHECKOUT_UNAVAILABLE", "Breeze checkout is not available.", 404);
@@ -51,6 +53,16 @@ class BreezeCheckoutRejectedError extends PaymentError {
 }
 
 export const BreezeCheckoutSessionService = {
+  /** Customer-requested drawer close: release only the caller's untouched session. */
+  async releaseSession(identity: CartIdentity, sessionId: string): Promise<BreezeCheckoutSessionReleaseJSON> {
+    const identityWhere = identity.type === "customer" ? { user_id: identity.userId } : { user_id: null, guest_identity_hash: identity.tokenHash };
+    const [released] = await BreezeCheckoutSession.update(
+      { processing_status: "released", status: "expired" },
+      { where: { public_id: sessionId, processing_status: "awaiting_webhook", order_id: null, ...identityWhere } }
+    );
+    return { released: released === 1 };
+  },
+
   /**
    * Validates the live server Cart, builds + signs the Breeze cart on the
    * backend, and persists a durable session carrying an immutable order-intent
