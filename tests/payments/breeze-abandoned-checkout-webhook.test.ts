@@ -54,7 +54,7 @@ describe("Breeze abandoned-checkout webhook", () => {
     await db.disconnectDatabase();
   });
 
-  it("does not release an unresolved checkout from an abandonment event alone", async () => {
+  it("releases the matching unresolved checkout from Breeze's abandonment event", async () => {
     const info = vi.spyOn(logger, "info");
     const response = await request(app)
       .post(URL)
@@ -64,13 +64,26 @@ describe("Breeze abandoned-checkout webhook", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ status: "RECEIVED" });
     const session = await T.BreezeCheckoutSession.findOne({ where: { public_id: SESSION_ID } });
-    expect(session?.processing_status).toBe("awaiting_webhook");
-    expect(session?.status).toBe("created");
+    expect(session?.processing_status).toBe("released");
+    expect(session?.status).toBe("expired");
     expect(info).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionPublicId: SESSION_ID, sessionFound: true, delayMs: expect.any(Number) }),
+      expect.objectContaining({ sessionPublicId: SESSION_ID, sessionFound: true, released: true, delayMs: expect.any(Number) }),
       "breeze abandoned-checkout webhook: authenticated event received"
     );
     info.mockRestore();
+  });
+
+  it("does not release a checkout that has already moved beyond awaiting the webhook", async () => {
+    await T.BreezeCheckoutSession.update({ processing_status: "order_created" }, { where: { public_id: SESSION_ID } });
+
+    const response = await request(app)
+      .post(URL)
+      .set("X-Api-Key", API_KEY)
+      .send({ cartDetails: { orderId: SESSION_ID } });
+
+    expect(response.status).toBe(200);
+    const session = await T.BreezeCheckoutSession.findOne({ where: { public_id: SESSION_ID } });
+    expect(session).toMatchObject({ processing_status: "order_created", status: "created" });
   });
 
   it("rejects a missing or invalid API key", async () => {
