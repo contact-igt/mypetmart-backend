@@ -49,18 +49,26 @@ export async function handleBreezeAbandonedCheckoutWebhook(req: Request, res: Re
     return;
   }
 
-  // Abandonment is not evidence that a payment could not have been captured.
-  // Keep the attempt guard in place until an authoritative order/payment event
-  // or an audited admin release resolves the session.
   const session = await BreezeCheckoutSession.findOne({
     attributes: ["id", "created_at"],
     where: { public_id: parsed.data.cartDetails.orderId }
   });
+  const [released] = await BreezeCheckoutSession.update(
+    { processing_status: "released", status: "expired" },
+    {
+      where: {
+        public_id: parsed.data.cartDetails.orderId,
+        processing_status: "awaiting_webhook",
+        order_id: null
+      }
+    }
+  );
   logger.info(
     
     {
       sessionPublicId: parsed.data.cartDetails.orderId,
       sessionFound: Boolean(session),
+      released: released === 1,
       ...(session ? { delayMs: Math.max(0, Date.now() - session.created_at.getTime()) } : {})
     },
     "breeze abandoned-checkout webhook: authenticated event received"

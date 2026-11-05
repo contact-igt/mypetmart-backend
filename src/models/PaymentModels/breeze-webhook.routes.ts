@@ -21,9 +21,8 @@ breezeWebhookRouter.post("/order-create-webhook", webhookRateLimiter, (req, res,
   handleBreezeOrderCreateWebhook(req, res, next).catch(next);
 });
 
-// Breeze's documented abandoned-checkout callback. It is acknowledged after
-// authentication; no checkout attempt is released until Breeze supplies the
-// stable cart/session identifier needed for a safe match.
+// Breeze's documented abandoned-checkout callback releases only the matching
+// unresolved session that has no order, so the customer can start a new cart.
 breezeWebhookRouter.post("/abandoned-checkout-webhook", webhookRateLimiter, (req, res, next) => {
   handleBreezeAbandonedCheckoutWebhook(req, res, next).catch(next);
 });
