@@ -57,6 +57,7 @@ export async function handleBreezeAbandonedCheckoutWebhook(req: Request, res: Re
     where: { public_id: parsed.data.cartDetails.orderId }
   });
   logger.info(
+    
     {
       sessionPublicId: parsed.data.cartDetails.orderId,
       sessionFound: Boolean(session),
