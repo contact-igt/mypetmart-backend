@@ -76,7 +76,8 @@ const ADDRESS = {
 
 function webhook(session: Session, overrides: { id?: string; eventName?: string; status?: string | null; content?: Record<string, unknown>; amountPaise?: number } = {}) {
   eventCounter += 1;
-  const rupees = (overrides.amountPaise ?? session.amountPaise) / 100;
+  const amountPaise = overrides.amountPaise ?? session.amountPaise;
+  const rupees = amountPaise / 100;
   const content: Record<string, unknown> = {
     orderId: `bz-order-${eventCounter}`,
     txnId: `bz-txn-${eventCounter}`,
@@ -85,7 +86,7 @@ function webhook(session: Session, overrides: { id?: string; eventName?: string;
     billingAddress: ADDRESS,
     shippingAddress: ADDRESS,
     customer: { customerId: "cust-1", phoneNumber: "9876543210", countryCode: "+91", name: "Jordan Rivera", emailAddress: "guest-bridge@example.com" },
-    cart: { id: session.sessionId, breezeCartId: `bz-cart-${eventCounter}`, initialPrice: rupees, totalPrice: rupees, totalDiscount: 0, itemCount: 2, items: [{ id: "1", title: "x", quantity: 2 }], currency: "INR" },
+    cart: { id: session.sessionId, breezeCartId: `bz-cart-${eventCounter}`, initialPrice: session.amountPaise, totalPrice: amountPaise, totalDiscount: 0, itemCount: 2, items: [{ id: "1", title: "x", quantity: 2 }], currency: "INR" },
     ...(overrides.status === null ? {} : { status: overrides.status ?? "SUCCESS" }),
     ...(overrides.content ?? {})
   };
@@ -114,8 +115,7 @@ describe("Breeze Full 1CCO Order Create Webhook bridge", () => {
   beforeAll(async () => {
     vi.stubEnv("BREEZE_1CCO_ENABLED", "true");
     vi.stubEnv("BREEZE_KEY_ID", "test-key-id");
-    // Cart signing uses paise; the documented Order Create webhook returns
-    // decimal rupees, which this suite's webhook helper supplies.
+    // Cart signing and echoed cart values use paise; payment.amount is rupees.
     vi.stubEnv("BREEZE_AMOUNT_UNIT", "paise");
     vi.stubEnv("BREEZE_CART_PRIVATE_KEY", privateKey.replace(/\n/gu, "\\n"));
     // The per-file setup already loaded the environment config; reset so the stubs apply.
@@ -233,9 +233,11 @@ describe("Breeze Full 1CCO Order Create Webhook bridge", () => {
       const session = await newSession(request.agent(app), product, 2);
       const body = webhook(session, { amountPaise: 10_000 }) as any;
       body.content.offers = [{ id: "offer-petmart100", code: "PETMART100", discount: 100 }];
-      body.content.cart.initialPrice = 200;
-      body.content.cart.totalPrice = 200;
-      body.content.cart.totalDiscount = 100;
+      body.content.cart.initialPrice = 20_000;
+      body.content.cart.totalPrice = 20_000;
+      // Production callback observed this as zero; Breeze puts the discount
+      // in offers[].discount instead.
+      body.content.cart.totalDiscount = 0;
 
       expect((await post(body)).status).toBe(200);
 
@@ -254,8 +256,8 @@ describe("Breeze Full 1CCO Order Create Webhook bridge", () => {
       const session = await newSession(request.agent(app), product, 2);
       const body = webhook(session, { amountPaise: 10_000 }) as any;
       body.content.offers = [{ code: "PETMART100", discount: 100 }];
-      body.content.cart.totalPrice = 100;
-      body.content.cart.totalDiscount = 100;
+      body.content.cart.totalPrice = 10_000;
+      body.content.cart.totalDiscount = 10_000;
 
       expect((await post(body)).status).toBe(200);
       expect((await T.Payment.findOne())?.amount).toBe("100.00");
@@ -266,8 +268,18 @@ describe("Breeze Full 1CCO Order Create Webhook bridge", () => {
       const session = await newSession(request.agent(app), product, 2);
       const body = webhook(session, { amountPaise: 10_000 }) as any;
       body.content.offers = [{ code: "PETMART100", discount: 100 }];
-      body.content.cart.totalPrice = 100;
-      body.content.cart.totalDiscount = 50;
+      body.content.cart.totalPrice = 10_000;
+      body.content.cart.totalDiscount = 5_000;
+
+      expect((await post(body)).status).toBe(422);
+      expect(await T.Order.count()).toBe(0);
+    });
+
+    it("rejects a cart-only discount: only a verified Breeze offer may reduce the order", async () => {
+      const product = await createProduct({ price: "100.00" });
+      const session = await newSession(request.agent(app), product, 2);
+      const body = webhook(session, { amountPaise: 10_000 }) as any;
+      body.content.cart.totalDiscount = 10_000;
 
       expect((await post(body)).status).toBe(422);
       expect(await T.Order.count()).toBe(0);
