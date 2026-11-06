@@ -16,6 +16,7 @@ import { updateOrderShippingAddressSchema } from "../OrderModels/order.validatio
 import { isValidOrderStatusTransition } from "../OrderModels/order.constants.js";
 import { resolveCartPaymentMethods } from "../ProductModels/product-payment-methods.js";
 import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
+import { allocateOnlinePaymentDiscountAcrossLines } from "../CheckoutModels/online-payment-discount.js";
 import { fromBreezePaymentAmount, fromProviderAmount } from "./breeze-money.js";
 import type { BreezeOrderIntent } from "./breeze-order-intent.js";
 import { classifyBreezeStatus, BREEZE_ORDER_CREATE_EVENT_NAMES, type BreezeOrderCreatePayload } from "./breeze-order-create.schema.js";
@@ -198,6 +199,7 @@ async function recordProviderReferences(sessionId: number, payload: BreezeOrderC
 
 type CreatedOrder = { orderId: number; orderNumber: string; paymentId: number; reused: boolean };
 type CheckoutPaymentKind = "breeze" | "cod";
+type BreezeOfferDiscount = { amountPaise: number; offers: Array<{ id?: string | undefined; code?: string | undefined; discount?: number | undefined }> };
 
 /** PHASE 1 — create-or-reuse the Order, OrderItems and Payment under the session lock. */
 async function ensureOrderAndPayment(
@@ -205,7 +207,8 @@ async function ensureOrderAndPayment(
   intent: BreezeOrderIntent,
   shipping: NonNullable<ReturnType<typeof mapShippingAddress>>,
   guestEmail: string | null,
-  paymentKind: CheckoutPaymentKind
+  paymentKind: CheckoutPaymentKind,
+  offerDiscount: BreezeOfferDiscount
 ): Promise<CreatedOrder> {
   return sequelize.transaction(async (t) => {
     const session = await BreezeCheckoutSession.findByPk(sessionId, { transaction: t, lock: t.LOCK.UPDATE });
@@ -243,18 +246,18 @@ async function ensureOrderAndPayment(
         fulfilment_status: "unfulfilled",
         subtotal: formatPaiseAsMoney(intent.subtotalPaise),
         shipping_fee: formatPaiseAsMoney(intent.shippingFeePaise),
-        total: formatPaiseAsMoney(intent.totalPaise),
-        // The Breeze cart carries no coupon and no Pay Online discount (the
-        // session API rejects coupon carts) — snapshots are explicitly empty.
+        total: formatPaiseAsMoney(intent.totalPaise - offerDiscount.amountPaise),
+        // MyPetMart cart coupons never enter Breeze; a verified Breeze offer
+        // is persisted separately as the net prepaid discount.
         coupon_id: null,
         coupon_code_snapshot: null,
         coupon_discount_type_snapshot: null,
         coupon_discount_value_snapshot: null,
         coupon_eligible_merchandise_paise: null,
         coupon_discount_amount_paise: 0,
-        online_payment_discount_type_snapshot: null,
-        online_payment_discount_value_snapshot: null,
-        online_payment_discount_amount_paise: 0,
+        online_payment_discount_type_snapshot: offerDiscount.amountPaise > 0 ? "fixed" : null,
+        online_payment_discount_value_snapshot: offerDiscount.amountPaise || null,
+        online_payment_discount_amount_paise: offerDiscount.amountPaise,
         currency: DEFAULT_CURRENCY_CODE,
         contact_email: contactEmail,
         ship_recipient_name: shipping.recipientName,
@@ -272,6 +275,7 @@ async function ensureOrderAndPayment(
     );
 
     const itemIds = await IdSequenceService.allocateIdRange(DATABASE_TABLE_NAMES.orderItems, intent.lines.length, t);
+    const offerAllocations = allocateOnlinePaymentDiscountAcrossLines(intent.lines.map((line) => line.unitPricePaise * line.quantity), offerDiscount.amountPaise);
     for (let index = 0; index < intent.lines.length; index++) {
       const line = intent.lines[index]!;
       await OrderItem.create(
@@ -289,7 +293,7 @@ async function ensureOrderAndPayment(
           unit_price: formatPaiseAsMoney(line.unitPricePaise),
           line_total: formatPaiseAsMoney(line.unitPricePaise * line.quantity),
           discount_allocated_paise: 0,
-          online_payment_discount_allocated_paise: 0,
+          online_payment_discount_allocated_paise: offerAllocations[index]!,
           product_payment_method_eligibility_snapshot: line.paymentMethodEligibility
         },
         { transaction: t }
@@ -308,7 +312,7 @@ async function ensureOrderAndPayment(
         provider_order_id: paymentKind === "breeze" ? providerOrderRef(session.public_id) : null,
         provider_payment_id: null,
         method: paymentKind === "cod" ? "cod" : null,
-        raw_payload: { provider: "breeze", flow: "full_1cco", sessionPublicId: session.public_id, paymentKind }
+        raw_payload: { provider: "breeze", flow: "full_1cco", sessionPublicId: session.public_id, paymentKind, offers: offerDiscount.offers }
       },
       { transaction: t }
     );
@@ -449,13 +453,19 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
   // in the configured cart unit. COD collects no money at checkout, so it is
   // authorized against the signed cart total only.
   const paidPaise = fromBreezePaymentAmount(content.payment.amount);
+  const initialPaise = fromProviderAmount(content.cart.initialPrice, unit);
   const cartPaise = fromProviderAmount(content.cart.totalPrice, unit);
-  if (cartPaise === null || cartPaise !== session.amount_paise || (!isCod && (paidPaise === null || paidPaise !== session.amount_paise))) {
+  const offerDiscountPaise = fromProviderAmount(content.cart.totalDiscount, unit);
+  const hasVerifiedOffer = content.offers.length > 0 || offerDiscountPaise !== 0;
+  const discountIsConsistent = offerDiscountPaise !== null && cartPaise !== null && initialPaise === session.amount_paise && cartPaise + offerDiscountPaise === session.amount_paise;
+  if (initialPaise === null || cartPaise === null || offerDiscountPaise === null || !discountIsConsistent || offerDiscountPaise >= session.amount_paise || (!isCod && (paidPaise === null || paidPaise !== cartPaise))) {
     logger.warn(
       {
         sessionPublicId: session.public_id,
         configuredAmountUnit: unit,
         expectedAmountPaise: session.amount_paise,
+        initialPrice: content.cart.initialPrice,
+        totalDiscount: content.cart.totalDiscount,
         paymentAmount: content.payment.amount,
         cartTotalPrice: content.cart.totalPrice,
         paymentAmountPaise: paidPaise,
@@ -473,6 +483,10 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
   if (session.order_id === null && (!intent || intent.version !== 1 || intent.lines.length === 0 || intent.totalPaise !== session.amount_paise)) {
     await markSession(session.public_id, { processing_status: "reconciliation_required", last_error_code: "MISSING_ORDER_INTENT" });
     return reconcile(payload, "MISSING_ORDER_INTENT", 422, "Checkout snapshot unavailable.");
+  }
+  if (!isCod && offerDiscountPaise > intent!.subtotalPaise) {
+    await markSession(session.public_id, { processing_status: "reconciliation_required", last_error_code: "OFFER_DISCOUNT_EXCEEDS_MERCHANDISE" });
+    return reconcile(payload, "OFFER_DISCOUNT_EXCEEDS_MERCHANDISE", 422, "Offer discount is not valid for this checkout.");
   }
   const shipping = mapShippingAddress(payload);
   if (session.order_id === null && !shipping) {
@@ -511,7 +525,7 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
   // PHASE 1
   // (When the session already has an Order, ensureOrderAndPayment returns it
   // before touching intent/shipping, so a replay needs neither.)
-  const created: CreatedOrder = await ensureOrderAndPayment(session.id, intent as BreezeOrderIntent, shipping as NonNullable<typeof shipping>, guestEmail, isCod ? "cod" : "breeze");
+  const created: CreatedOrder = await ensureOrderAndPayment(session.id, intent as BreezeOrderIntent, shipping as NonNullable<typeof shipping>, guestEmail, isCod ? "cod" : "breeze", { amountPaise: isCod ? 0 : offerDiscountPaise, offers: hasVerifiedOffer ? content.offers : [] });
 
   if (isCod) {
     const codFinalization = await finalizeBreezeCodOrder(created.orderId, created.paymentId);
@@ -550,6 +564,7 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
       breezeOrderId: content.orderId,
       breezeTxnId: content.txnId ?? null,
       breezeCartId: content.cart.breezeCartId,
+      breezeOffers: hasVerifiedOffer ? JSON.stringify(content.offers) : "[]",
       paymentMethod: content.payment.paymentMethod,
       currency: content.payment.currency
     }

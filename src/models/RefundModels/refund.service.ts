@@ -22,7 +22,8 @@ import {
   RefundPaymentMissingProviderIdError,
   RefundProviderNotConfiguredError,
   RefundResolutionMismatchError,
-  RefundReturnNotApprovedError
+  RefundReturnNotApprovedError,
+  RefundUnsupportedProviderError
 } from "./refund.errors.js";
 import type { InitiateRefundResultJSON, RefundFinalizationOutcome } from "./refund.types.js";
 
@@ -36,6 +37,9 @@ const ACTIVE_REFUND_STATUSES = ["pending", "processing", "succeeded"] as const;
 function assertOnlineRefundPayment(payment: Payment): void {
   if (payment.provider.toLowerCase() === "cod" || payment.method?.toLowerCase() === "cod") {
     throw new RefundCodManualProcessingRequiredError(payment.id);
+  }
+  if (payment.provider.toLowerCase() !== "payu") {
+    throw new RefundUnsupportedProviderError(payment.provider);
   }
   if (!payment.provider_payment_id) {
     throw new RefundPaymentMissingProviderIdError(payment.id);
