@@ -9,7 +9,6 @@ import {
   Address,
   Cart,
   CartItem,
-  Coupon,
   Order,
   OrderItem,
   OrderNote,
@@ -32,7 +31,6 @@ import { allocateOnlinePaymentDiscountAcrossLines, calculateGlobalOnlinePaymentD
 import { isBelowPrepaidMinimum, PrepaidMinimumPayableError } from "../CheckoutModels/prepaid-minimum.js";
 import { SettingsService } from "../SettingsModels/settings.service.js";
 import { CouponPricingService } from "../CouponModels/coupon.service.js";
-import { normalizeCouponCode } from "../CouponModels/coupon.validation.js";
 import type { CouponPricingLine } from "../CouponModels/coupon.types.js";
 import { PaymentService } from "../PaymentModels/payment.service.js";
 import { RefundService } from "../RefundModels/refund.service.js";
@@ -830,11 +828,9 @@ export const OrderService = {
         quantity: line.quantity
       }));
 
-      let effectiveCouponCode: string | null = input.couponCode ? normalizeCouponCode(input.couponCode) : null;
-      if (!effectiveCouponCode && cart.coupon_id !== null) {
-        const appliedCoupon = await Coupon.findByPk(cart.coupon_id, { transaction: t });
-        effectiveCouponCode = appliedCoupon ? appliedCoupon.code : null;
-      }
+      // MyPetMart coupons are retired. Historic order snapshots remain intact,
+      // but neither a legacy cart reference nor a direct API value discounts a new order.
+      const effectiveCouponCode: string | null = null;
 
       let couponEvaluation: Extract<Awaited<ReturnType<typeof CouponPricingService.evaluateCoupon>>, { ok: true }> | null = null;
       if (effectiveCouponCode) {

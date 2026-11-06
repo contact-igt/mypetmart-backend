@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/require-await, @typescript-eslint/consistent-type-imports */
 import { DEFAULT_COUNTRY_CODE, V1_FREE_SHIPPING_FEE } from "../../constants/database.constants.js";
 import { Address } from "../../database/tables/index.js";
 import { formatPaiseAsMoney, parseMoneyToPaise } from "../../utils/product-money.js";
@@ -55,6 +56,10 @@ async function evaluateCheckoutCoupon(
   identityUserId: number | null,
   paymentMethod?: import("./checkout.types.js").CheckoutPaymentMethod
 ): Promise<{ coupon: CheckoutCouponJSON; eligibleMerchandisePaise: number; discountAmountPaise: number }> {
+  // MyPetMart coupons are retired. Breeze now owns offer entry and pricing.
+  return { coupon: null, eligibleMerchandisePaise: 0, discountAmountPaise: 0 };
+
+  /*
   const effectiveCode = couponCodeOverride ?? cart.coupon?.code;
   if (!effectiveCode) {
     return { coupon: null, eligibleMerchandisePaise: 0, discountAmountPaise: 0 };
@@ -89,7 +94,7 @@ async function evaluateCheckoutCoupon(
     },
     eligibleMerchandisePaise: 0,
     discountAmountPaise: 0
-  };
+  }; */
 }
 
 type CheckoutPricing = {

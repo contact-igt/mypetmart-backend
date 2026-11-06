@@ -84,3 +84,10 @@ export class CartCouponEmptyCartError extends CartError {
     this.name = "CartCouponEmptyCartError";
   }
 }
+
+export class CartCouponsDisabledError extends CartError {
+  public constructor() {
+    super("CART_COUPONS_DISABLED", "MyPetMart coupon codes are no longer available. Check offers in Breeze checkout.", 410);
+    this.name = "CartCouponsDisabledError";
+  }
+}

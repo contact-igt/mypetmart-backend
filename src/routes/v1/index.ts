@@ -47,7 +47,6 @@ import adminAnnouncementBarRouter from "../../models/AnnouncementBarModels/admin
 import storefrontAnnouncementBarRouter from "../../models/AnnouncementBarModels/storefront-announcement-bar.routes.js";
 import adminWelcomePopupRouter from "../../models/WelcomePopupModels/admin-welcome-popup.routes.js";
 import storefrontWelcomePopupRouter from "../../models/WelcomePopupModels/storefront-welcome-popup.routes.js";
-import { adminCouponRouter } from "../../models/CouponModels/admin-coupon.routes.js";
 
 export const v1Router = Router();
 
@@ -110,7 +109,6 @@ v1Router.use("/storefront/contact-enquiries", storefrontContactRouter);
 // Same reasoning as /admin/newsletter above — registered ahead of the broad
 // adminRefundRouter mount so /admin/contact-enquiries/* is matched here first.
 v1Router.use("/admin/contact-enquiries", adminContactRouter);
-v1Router.use("/admin/coupons", adminCouponRouter);
 v1Router.use("/admin", adminRefundRouter);
 v1Router.use("/admin/shipments", adminShipmentRouter);
 v1Router.use("/payments/payu", payuRefundWebhookRouter);

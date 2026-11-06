@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/require-await */
 import { UniqueConstraintError, type Transaction } from "sequelize";
 
 import { DATABASE_TABLE_NAMES } from "../../constants/database.constants.js";
@@ -13,6 +14,7 @@ import { ProductNotFoundError, ProductVariantNotFoundError } from "../ProductMod
 import { MAX_CART_ITEM_QUANTITY } from "./cart.constants.js";
 import {
   CartCouponEmptyCartError,
+  CartCouponsDisabledError,
   CartItemNotFoundError,
   CartInsufficientStockError,
   CartProductNotAvailableError,
@@ -281,7 +283,9 @@ async function buildCartDTO(cart: Cart | null, identityUserId: number | null, tr
 
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
   const subtotalPaise = items.reduce((sum, item) => sum + moneyToPaise(item.subtotal), 0);
-  const coupon = cart.coupon_id !== null ? await buildCartCouponJSON(cart.coupon_id, pricingLines, identityUserId, transaction) : null;
+  // Retain legacy references for history/restoration, but never price or expose
+  // a MyPetMart coupon on an active cart.
+  const coupon = null;
 
   return {
     id: cart.id,
@@ -496,6 +500,9 @@ export const CartService = {
   },
 
   async applyCoupon(identity: CartIdentity, input: ApplyCartCouponInput): Promise<CartJSON> {
+    throw new CartCouponsDisabledError();
+
+    /*
     return sequelize.transaction(async (t) => {
       const cart = await findOrCreateCart(identity, t);
       const code = normalizeCouponCode(input.code);
@@ -533,7 +540,7 @@ export const CartService = {
       await cart.save({ transaction: t });
 
       return buildCartDTO(cart, identityUserId(identity), t);
-    });
+    }); */
   },
 
   async removeCoupon(identity: CartIdentity): Promise<CartJSON> {
