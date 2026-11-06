@@ -467,11 +467,18 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
   const cartPaise = fromProviderAmount(content.cart.totalPrice, unit);
   const cartDiscountPaise = fromProviderAmount(content.cart.totalDiscount, unit);
   const offersDiscountPaise = sumOfferDiscountsPaise(content.offers);
-  // Only Breeze offers can discount this flow. cart.totalDiscount is evidence
-  // only: Breeze may leave it zero, but a nonzero value must match the offers.
-  const offerDiscountPaise = cartDiscountPaise === null || offersDiscountPaise === null || cartDiscountPaise > 0 && cartDiscountPaise !== offersDiscountPaise
+  // Only Breeze can reduce this flow. cart.totalDiscount is evidence only:
+  // a nonzero value must match offers[].discount when it is present.
+  const reportedOfferDiscountPaise = cartDiscountPaise === null || offersDiscountPaise === null || cartDiscountPaise > 0 && cartDiscountPaise !== offersDiscountPaise
     ? null
     : offersDiscountPaise;
+  // Breeze can omit both offer fields even after applying its promotion. For
+  // its authenticated SUCCESS callback, the captured amount is then evidence.
+  const offerDiscountPaise = reportedOfferDiscountPaise === null
+    ? null
+    : reportedOfferDiscountPaise > 0 || isCod || paidPaise === null || paidPaise >= session.amount_paise
+      ? reportedOfferDiscountPaise
+      : session.amount_paise - paidPaise;
   const hasVerifiedOffer = content.offers.length > 0 || offerDiscountPaise !== 0;
   const expectedPaidPaise = offerDiscountPaise === null ? null : session.amount_paise - offerDiscountPaise;
   // Breeze's confirmation UI displays the gross cart total even after an
