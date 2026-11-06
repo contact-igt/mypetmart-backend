@@ -251,6 +251,19 @@ describe("Breeze Full 1CCO Order Create Webhook bridge", () => {
       expect(payment.raw_payload).toMatchObject({ breezeOffers: JSON.stringify([{ id: "offer-petmart100", code: "PETMART100", discount: 100 }]) });
     });
 
+    it("accepts a Breeze-applied discount when its success callback omits offer fields", async () => {
+      const product = await createProduct({ price: "100.00", stock: 20 });
+      const session = await newSession(request.agent(app), product, 2);
+      const body = webhook(session, { amountPaise: 10_000 }) as any;
+      // This is the production shape: cart remains gross and offers is empty.
+      body.content.cart.initialPrice = 20_000;
+      body.content.cart.totalPrice = 20_000;
+
+      expect((await post(body)).status).toBe(200);
+      expect(await T.Order.findOne({ attributes: ["total", "online_payment_discount_amount_paise"] })).toMatchObject({ total: "100.00", online_payment_discount_amount_paise: 10_000 });
+      expect(await T.Payment.findOne({ attributes: ["amount", "status"] })).toMatchObject({ amount: "100.00", status: "paid" });
+    });
+
     it("also accepts the documented net-cart representation of the same offer", async () => {
       const product = await createProduct({ price: "100.00" });
       const session = await newSession(request.agent(app), product, 2);
