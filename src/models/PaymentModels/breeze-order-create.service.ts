@@ -17,7 +17,7 @@ import { isValidOrderStatusTransition } from "../OrderModels/order.constants.js"
 import { resolveCartPaymentMethods } from "../ProductModels/product-payment-methods.js";
 import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
 import { allocateOnlinePaymentDiscountAcrossLines } from "../CheckoutModels/online-payment-discount.js";
-import { fromBreezePaymentAmount, fromProviderAmount } from "./breeze-money.js";
+import { fromBreezePaymentAmount } from "./breeze-money.js";
 import type { BreezeOrderIntent } from "./breeze-order-intent.js";
 import { classifyBreezeStatus, BREEZE_ORDER_CREATE_EVENT_NAMES, type BreezeOrderCreatePayload } from "./breeze-order-create.schema.js";
 import { PaymentFinalizationService, lockAndCheckOrderStock } from "./payment-finalization.service.js";
@@ -449,16 +449,21 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
     return reconcile(payload, "CURRENCY_MISMATCH", 422, "Unsupported currency.");
   }
   const isCod = looksLikeCod(payload);
-  // Breeze reports payment.amount in rupees while the signed cart total stays
-  // in the configured cart unit. COD collects no money at checkout, so it is
-  // authorized against the signed cart total only.
+  // Breeze reports all Order Create webhook money in decimal rupees while the
+  // signed cart may use a configured unit. COD collects no money at checkout.
   const paidPaise = fromBreezePaymentAmount(content.payment.amount);
-  const initialPaise = fromProviderAmount(content.cart.initialPrice, unit);
-  const cartPaise = fromProviderAmount(content.cart.totalPrice, unit);
-  const offerDiscountPaise = fromProviderAmount(content.cart.totalDiscount, unit);
+  // Order Create Webhook amounts are decimal rupees per Breeze's documented
+  // payload, independent of the amount unit used when signing the cart.
+  const initialPaise = fromBreezePaymentAmount(content.cart.initialPrice);
+  const cartPaise = fromBreezePaymentAmount(content.cart.totalPrice);
+  const offerDiscountPaise = fromBreezePaymentAmount(content.cart.totalDiscount);
   const hasVerifiedOffer = content.offers.length > 0 || offerDiscountPaise !== 0;
-  const discountIsConsistent = offerDiscountPaise !== null && cartPaise !== null && initialPaise === session.amount_paise && cartPaise + offerDiscountPaise === session.amount_paise;
-  if (initialPaise === null || cartPaise === null || offerDiscountPaise === null || !discountIsConsistent || offerDiscountPaise >= session.amount_paise || (!isCod && (paidPaise === null || paidPaise !== cartPaise))) {
+  const expectedPaidPaise = offerDiscountPaise === null ? null : session.amount_paise - offerDiscountPaise;
+  // Breeze's confirmation UI displays the gross cart total even after an
+  // offer. Its webhook may therefore report totalPrice as either the gross
+  // cart price or the net payable price; payment.amount is authoritative.
+  const cartPriceIsConsistent = cartPaise === session.amount_paise || cartPaise === expectedPaidPaise;
+  if (initialPaise === null || cartPaise === null || offerDiscountPaise === null || expectedPaidPaise === null || initialPaise !== session.amount_paise || !cartPriceIsConsistent || offerDiscountPaise >= session.amount_paise || (!isCod && (paidPaise === null || paidPaise !== expectedPaidPaise))) {
     logger.warn(
       {
         sessionPublicId: session.public_id,
