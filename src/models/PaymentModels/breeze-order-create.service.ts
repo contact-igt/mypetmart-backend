@@ -17,7 +17,7 @@ import { isValidOrderStatusTransition } from "../OrderModels/order.constants.js"
 import { resolveCartPaymentMethods } from "../ProductModels/product-payment-methods.js";
 import { ServiceabilityService } from "../ShipmentModels/serviceability.service.js";
 import { allocateOnlinePaymentDiscountAcrossLines } from "../CheckoutModels/online-payment-discount.js";
-import { fromBreezePaymentAmount } from "./breeze-money.js";
+import { fromBreezePaymentAmount, fromProviderAmount } from "./breeze-money.js";
 import type { BreezeOrderIntent } from "./breeze-order-intent.js";
 import { classifyBreezeStatus, BREEZE_ORDER_CREATE_EVENT_NAMES, type BreezeOrderCreatePayload } from "./breeze-order-create.schema.js";
 import { PaymentFinalizationService, lockAndCheckOrderStock } from "./payment-finalization.service.js";
@@ -200,6 +200,17 @@ async function recordProviderReferences(sessionId: number, payload: BreezeOrderC
 type CreatedOrder = { orderId: number; orderNumber: string; paymentId: number; reused: boolean };
 type CheckoutPaymentKind = "breeze" | "cod";
 type BreezeOfferDiscount = { amountPaise: number; offers: Array<{ id?: string | undefined; code?: string | undefined; discount?: number | undefined }> };
+
+function sumOfferDiscountsPaise(offers: BreezeOrderCreatePayload["content"]["offers"]): number | null {
+  let total = 0;
+  for (const offer of offers) {
+    if (offer.discount === undefined) continue;
+    const discount = fromBreezePaymentAmount(offer.discount);
+    if (discount === null) return null;
+    total += discount;
+  }
+  return total;
+}
 
 /** PHASE 1 — create-or-reuse the Order, OrderItems and Payment under the session lock. */
 async function ensureOrderAndPayment(
@@ -449,14 +460,18 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
     return reconcile(payload, "CURRENCY_MISMATCH", 422, "Unsupported currency.");
   }
   const isCod = looksLikeCod(payload);
-  // Breeze reports all Order Create webhook money in decimal rupees while the
-  // signed cart may use a configured unit. COD collects no money at checkout.
+  // Breeze returns payment.amount in decimal rupees, but echoes cart values in
+  // the unit used for the signed cart. COD collects no money at checkout.
   const paidPaise = fromBreezePaymentAmount(content.payment.amount);
-  // Order Create Webhook amounts are decimal rupees per Breeze's documented
-  // payload, independent of the amount unit used when signing the cart.
-  const initialPaise = fromBreezePaymentAmount(content.cart.initialPrice);
-  const cartPaise = fromBreezePaymentAmount(content.cart.totalPrice);
-  const offerDiscountPaise = fromBreezePaymentAmount(content.cart.totalDiscount);
+  const initialPaise = fromProviderAmount(content.cart.initialPrice, unit);
+  const cartPaise = fromProviderAmount(content.cart.totalPrice, unit);
+  const cartDiscountPaise = fromProviderAmount(content.cart.totalDiscount, unit);
+  const offersDiscountPaise = sumOfferDiscountsPaise(content.offers);
+  // Only Breeze offers can discount this flow. cart.totalDiscount is evidence
+  // only: Breeze may leave it zero, but a nonzero value must match the offers.
+  const offerDiscountPaise = cartDiscountPaise === null || offersDiscountPaise === null || cartDiscountPaise > 0 && cartDiscountPaise !== offersDiscountPaise
+    ? null
+    : offersDiscountPaise;
   const hasVerifiedOffer = content.offers.length > 0 || offerDiscountPaise !== 0;
   const expectedPaidPaise = offerDiscountPaise === null ? null : session.amount_paise - offerDiscountPaise;
   // Breeze's confirmation UI displays the gross cart total even after an
@@ -471,10 +486,13 @@ async function processEvent(payload: BreezeOrderCreatePayload): Promise<ProcessO
         expectedAmountPaise: session.amount_paise,
         initialPrice: content.cart.initialPrice,
         totalDiscount: content.cart.totalDiscount,
+        offersDiscount: content.offers.map((offer) => offer.discount),
         paymentAmount: content.payment.amount,
         cartTotalPrice: content.cart.totalPrice,
         paymentAmountPaise: paidPaise,
-        cartTotalPricePaise: cartPaise
+        cartTotalPricePaise: cartPaise,
+        cartDiscountPaise,
+        offersDiscountPaise
       },
       "breeze order-create webhook: amount mismatch"
     );
