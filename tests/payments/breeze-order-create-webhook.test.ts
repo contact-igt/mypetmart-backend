@@ -114,7 +114,9 @@ describe("Breeze Full 1CCO Order Create Webhook bridge", () => {
   beforeAll(async () => {
     vi.stubEnv("BREEZE_1CCO_ENABLED", "true");
     vi.stubEnv("BREEZE_KEY_ID", "test-key-id");
-    vi.stubEnv("BREEZE_AMOUNT_UNIT", "rupees");
+    // Cart signing uses paise; the documented Order Create webhook returns
+    // decimal rupees, which this suite's webhook helper supplies.
+    vi.stubEnv("BREEZE_AMOUNT_UNIT", "paise");
     vi.stubEnv("BREEZE_CART_PRIVATE_KEY", privateKey.replace(/\n/gu, "\\n"));
     // The per-file setup already loaded the environment config; reset so the stubs apply.
     vi.resetModules();
@@ -226,13 +228,13 @@ describe("Breeze Full 1CCO Order Create Webhook bridge", () => {
 
   // ------------------------------------------------------------- happy path
   describe("guest checkout success", () => {
-    it("accepts a documented Breeze offer, records the net paid amount, and allocates it for refunds", async () => {
+    it("accepts a Breeze offer when its confirmation keeps the gross cart total, then records the net paid amount", async () => {
       const product = await createProduct({ price: "100.00", stock: 20 });
       const session = await newSession(request.agent(app), product, 2);
       const body = webhook(session, { amountPaise: 10_000 }) as any;
       body.content.offers = [{ id: "offer-petmart100", code: "PETMART100", discount: 100 }];
       body.content.cart.initialPrice = 200;
-      body.content.cart.totalPrice = 100;
+      body.content.cart.totalPrice = 200;
       body.content.cart.totalDiscount = 100;
 
       expect((await post(body)).status).toBe(200);
@@ -245,6 +247,18 @@ describe("Breeze Full 1CCO Order Create Webhook bridge", () => {
       expect(payment).toMatchObject({ provider: "breeze", status: "paid", amount: "100.00" });
       expect(item.online_payment_discount_allocated_paise).toBe(10_000);
       expect(payment.raw_payload).toMatchObject({ breezeOffers: JSON.stringify([{ id: "offer-petmart100", code: "PETMART100", discount: 100 }]) });
+    });
+
+    it("also accepts the documented net-cart representation of the same offer", async () => {
+      const product = await createProduct({ price: "100.00" });
+      const session = await newSession(request.agent(app), product, 2);
+      const body = webhook(session, { amountPaise: 10_000 }) as any;
+      body.content.offers = [{ code: "PETMART100", discount: 100 }];
+      body.content.cart.totalPrice = 100;
+      body.content.cart.totalDiscount = 100;
+
+      expect((await post(body)).status).toBe(200);
+      expect((await T.Payment.findOne())?.amount).toBe("100.00");
     });
 
     it("rejects a Breeze offer whose cart totals do not reconcile to the signed cart", async () => {
