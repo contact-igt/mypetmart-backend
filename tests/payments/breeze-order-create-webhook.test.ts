@@ -226,6 +226,39 @@ describe("Breeze Full 1CCO Order Create Webhook bridge", () => {
 
   // ------------------------------------------------------------- happy path
   describe("guest checkout success", () => {
+    it("accepts a documented Breeze offer, records the net paid amount, and allocates it for refunds", async () => {
+      const product = await createProduct({ price: "100.00", stock: 20 });
+      const session = await newSession(request.agent(app), product, 2);
+      const body = webhook(session, { amountPaise: 10_000 }) as any;
+      body.content.offers = [{ id: "offer-petmart100", code: "PETMART100", discount: 100 }];
+      body.content.cart.initialPrice = 200;
+      body.content.cart.totalPrice = 100;
+      body.content.cart.totalDiscount = 100;
+
+      expect((await post(body)).status).toBe(200);
+
+      const order = await T.Order.findOne();
+      const payment = await T.Payment.findOne();
+      const item = await T.OrderItem.findOne();
+      if (!order || !payment || !item) throw new Error("Expected the discounted Breeze order and payment.");
+      expect(order).toMatchObject({ total: "100.00", online_payment_discount_type_snapshot: "fixed", online_payment_discount_value_snapshot: 10_000, online_payment_discount_amount_paise: 10_000 });
+      expect(payment).toMatchObject({ provider: "breeze", status: "paid", amount: "100.00" });
+      expect(item.online_payment_discount_allocated_paise).toBe(10_000);
+      expect(payment.raw_payload).toMatchObject({ breezeOffers: JSON.stringify([{ id: "offer-petmart100", code: "PETMART100", discount: 100 }]) });
+    });
+
+    it("rejects a Breeze offer whose cart totals do not reconcile to the signed cart", async () => {
+      const product = await createProduct({ price: "100.00" });
+      const session = await newSession(request.agent(app), product, 2);
+      const body = webhook(session, { amountPaise: 10_000 }) as any;
+      body.content.offers = [{ code: "PETMART100", discount: 100 }];
+      body.content.cart.totalPrice = 100;
+      body.content.cart.totalDiscount = 50;
+
+      expect((await post(body)).status).toBe(422);
+      expect(await T.Order.count()).toBe(0);
+    });
+
     it("creates exactly one Order+Payment from the IMMUTABLE snapshot and finalizes once", async () => {
       const product = await createProduct({ price: "250.00", stock: 20 });
       const guest = request.agent(app);

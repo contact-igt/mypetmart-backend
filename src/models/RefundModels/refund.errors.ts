@@ -60,6 +60,13 @@ export class RefundCodManualProcessingRequiredError extends RefundError {
   }
 }
 
+export class RefundUnsupportedProviderError extends RefundError {
+  public constructor(provider: string) {
+    super("REFUND_UNSUPPORTED_PROVIDER", `Refunds for '${provider}' payments cannot be initiated through the PayU refund flow.`, 422, { provider });
+    this.name = "RefundUnsupportedProviderError";
+  }
+}
+
 export class RefundExceedsRefundableBalanceError extends RefundError {
   public constructor(requested: string, refundable: string) {
     super(
